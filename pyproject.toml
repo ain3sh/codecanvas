@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codecanvas"
+version = "0.1.0"
+description = "Static Impact Analysis for LLM Side-Effect Blindness"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Ainesh Chatterjee"}
+]
+requires-python = ">=3.9"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Quality Assurance",
+]
+keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis", "developer-tools"]
+
+dependencies = [
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+viz = [
+    "networkx>=3.0",
+    "matplotlib>=3.7",
+]
+mcp = [
+    "mcp>=1.0.0",
+    "httpx>=0.25.0",
+]
+all = [
+    "codecanvas[dev,viz,mcp]",
+]
+
+[project.scripts]
+codecanvas = "codecanvas.cli:main"
+
+[project.urls]
+"Homepage" = "https://github.com/ainesh/codecanvas"
+"Bug Tracker" = "https://github.com/ainesh/codecanvas/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["codecanvas*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
