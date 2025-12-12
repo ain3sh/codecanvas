@@ -1,12 +1,12 @@
 # TerminalBench Runner
 
-Run Terminal-Bench tasks with different agent configurations for benchmarking.
+Run Terminal-Bench 2.0 tasks via Harbor framework with different agent configurations.
 
 ## Quick Start
 
 ```bash
-# Prerequisites
-pip install terminal-bench pyyaml rich
+# Prerequisites (harbor auto-installed via uvx on first run)
+uv pip install -e ".[terminalbench]"
 
 # Run single task with text-only agent (uses terminalbench/.env by default)
 python -m terminalbench.cli --agent text --tasks processing-pipeline
@@ -32,9 +32,12 @@ python -m terminalbench.cli
 ```bash
 --env-file .env          # load ANTHROPIC_API_KEY from file
 --output-dir ./runs      # output directory (default: ./runs)
---attempts 3             # retry attempts per task (-k flag to tb)
+--attempts 3             # retry attempts per task (--n-attempts to harbor)
 --retries 2              # retry on failure
---parallel 4             # run N tasks concurrently
+--parallel 4             # parallel workers (passed to harbor -n)
+--container-env docker   # container runtime (docker|daytona|modal|e2b)
+--harbor-bin /path/to/harbor  # custom harbor binary (default: uses uvx)
+--extra-flag --verbose   # extra flags passed to harbor run (repeatable)
 --dry-run                # print commands without executing
 --quiet                  # suppress summary output
 ```
@@ -64,7 +67,7 @@ Saves to `~/.terminalbench/config.yaml`. CLI args override saved config.
 ### Environment Variables
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | Required for tb runs |
+| `ANTHROPIC_API_KEY` | Required for Harbor runs |
 | `LOCAGENT_MCP` | Default LocAgent MCP URL |
 | `CODECANVAS_MCP` | Default CodeCanvas MCP URL |
 | `CLAUDE_CODE_HOOKS` | Default hooks file path |
@@ -76,13 +79,17 @@ env_file: terminalbench/.env     # optional: path to .env file (default: termina
 
 tasks:
   - id: processing-pipeline      # required: task identifier
-    dataset: terminal-bench-core==head  # optional: dataset (default shown)
+    dataset: terminal-bench@2.0  # optional: dataset (default shown)
     order: 1                     # optional: execution order (lower = first)
+    tb_url: https://tbench.ai/tasks/processing-pipeline  # ignored (human reference)
+    gh_url: https://github.com/...                       # ignored (human reference)
 
   - id: custom-task
     dataset: my-dataset@1.0
     order: 10
 ```
+
+**Note:** Extra fields like `tb_url` and `gh_url` are ignored during parsing - use them for human reference.
 
 **env_file resolution order:** CLI `--env-file` > manifest `env_file` > `terminalbench/.env` (if exists)
 
@@ -93,15 +100,13 @@ tasks:
 ```
 runs/
 ├── index.json                              # auto-maintained run index
-└── 2025-12-11__22-25-21/                   # tb-created timestamp dir
-    ├── results.json                        # aggregate results
-    ├── run.log                             # orchestrator log
-    └── processing-pipeline/
-        └── processing-pipeline.1-of-1.../
-            └── sessions/
-                ├── agent.log               # agent reasoning trace
-                ├── agent.cast              # terminal replay
-                └── tests.log               # verifier output
+└── {timestamp}/                            # Harbor job directory
+    ├── config.json                         # job configuration
+    ├── result.json                         # aggregate results with metrics
+    └── {task_id}__{hash}/                  # trial directory
+        └── agent/
+            ├── trajectory.json             # agent trace
+            └── sessions/                   # claude code session logs
 ```
 
 ### index.json
@@ -109,13 +114,15 @@ runs/
 {
   "runs": [
     {
-      "task_id": "processing-pipeline",
+      "task_id": "build-cython-ext",
       "agent_key": "text",
       "success": true,
-      "accuracy": 1.0,
-      "elapsed_sec": 68.5,
-      "timestamp_dir": "runs/2025-12-11__22-25-21",
-      "agent_log": "runs/.../sessions/agent.log"
+      "accuracy": 0.0,
+      "resolved": false,
+      "elapsed_sec": 485.7,
+      "job_dir": "runs/2025-12-12__02-23-38",
+      "results_json": "runs/.../result.json",
+      "trajectory_json": "runs/.../agent/trajectory.json"
     }
   ]
 }
@@ -150,5 +157,7 @@ python -m terminalbench.cli --dry-run
 |-------|-----|
 | `ANTHROPIC_API_KEY is required` | Use `--env-file` or export the key |
 | CRLF errors in .env | Run `dos2unix .env` |
-| `tb` not found | `pip install terminal-bench` or use full path |
+| `uvx` not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Modal Python 3.14+ error | Expected - harbor runs in isolated Python 3.13 via uvx |
 | Docker errors | Ensure Docker daemon is running with sufficient resources |
+| Container env issues | Try `--container-env daytona` or `--container-env modal` |

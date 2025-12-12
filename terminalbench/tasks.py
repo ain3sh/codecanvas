@@ -21,7 +21,7 @@ class Task:
     """Represents a single Terminal-Bench task entry."""
 
     id: str
-    dataset: str = "terminal-bench-core==head"
+    dataset: str = "terminal-bench@2.0"
     order: int | None = None
 
 
@@ -41,7 +41,7 @@ def load_manifest(path: Path | str | None = None) -> Tuple[List[Task], ManifestC
     
     # Parse tasks
     raw_tasks: list[dict] = data.get("tasks", [])
-    tasks = [Task(**item) for item in raw_tasks]
+    tasks = [Task(**{k: v for k, v in item.items() if k in Task.__dataclass_fields__}) for item in raw_tasks]
     tasks.sort(key=lambda t: (t.order if t.order is not None else 10_000, t.id))
     
     # Parse config

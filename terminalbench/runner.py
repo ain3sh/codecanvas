@@ -41,48 +41,61 @@ class RunResult:
     success: bool
     command: List[str]
     elapsed_sec: float
-    timestamp_dir: Optional[Path] = None
+    job_dir: Optional[Path] = None
     results_json: Optional[Path] = None
-    agent_log: Optional[Path] = None
+    trajectory_json: Optional[Path] = None
     accuracy: Optional[float] = None
     resolved: Optional[bool] = None
 
     def to_dict(self) -> Dict:
         data = asdict(self)
-        for key in ["timestamp_dir", "results_json", "agent_log"]:
+        for key in ["job_dir", "results_json", "trajectory_json"]:
             if data.get(key):
                 data[key] = str(data[key])
         return data
 
 
-class TBRunner:
-    """Lightweight orchestrator for running Terminal-Bench via tb CLI."""
+class HarborRunner:
+    """Lightweight orchestrator for running Terminal-Bench via Harbor CLI."""
 
     def __init__(
         self,
-        tb_bin: str = "tb",
+        harbor_bin: str | None = None,
         output_root: Path | str | None = None,
         attempts: int = 1,
         retries: int = 0,
+        parallel: int = 0,
+        container_env: str = "docker",
         dry_run: bool = False,
         extra_flags: Optional[Sequence[str]] = None,
         env_file: Path | str | None = None,
     ) -> None:
-        self.tb_bin = tb_bin
+        self.harbor_bin = harbor_bin  # None = use uvx (default)
         self.output_root = Path(output_root).resolve() if output_root else None
         self.attempts = attempts
         self.retries = retries
+        self.parallel = parallel
+        self.container_env = container_env
         self.dry_run = dry_run
         self.extra_flags = list(extra_flags) if extra_flags else []
         self.env_from_file = load_env_file(env_file)
 
     def _build_command(self, task: Task, profile: AgentProfile, output_dir: Optional[Path]) -> List[str]:
-        cmd = [self.tb_bin, "run", "--dataset", task.dataset, "--task-id", task.id]
-        cmd.extend(profile.tb_args())
-        if self.attempts and self.attempts > 1:
-            cmd.extend(["-k", str(self.attempts)])
+        if self.harbor_bin:
+            cmd = [self.harbor_bin, "run"]
+        else:
+            # --python 3.13: modal has hardcoded runtime check blocking 3.14+
+            cmd = ["uvx", "--python", "3.13", "harbor", "run"]
+        cmd.extend(["-d", task.dataset, "-t", task.id])
+        cmd.extend(profile.harbor_args())
+        if self.attempts > 1:
+            cmd.extend(["--n-attempts", str(self.attempts)])
         if output_dir:
-            cmd.extend(["--output-path", str(output_dir)])
+            cmd.extend(["--jobs-dir", str(output_dir)])
+        if self.parallel > 0:
+            cmd.extend(["-n", str(self.parallel)])
+        if self.container_env:
+            cmd.extend(["--env", self.container_env])
         if self.extra_flags:
             cmd.extend(self.extra_flags)
         return cmd
@@ -93,45 +106,49 @@ class TBRunner:
         env.update(profile.env())
         return env
 
-    def _find_latest_timestamp_dir(self, output_dir: Optional[Path]) -> Optional[Path]:
-        """Find the most recent timestamp directory created by tb."""
+    def _find_latest_job_dir(self, output_dir: Optional[Path]) -> Optional[Path]:
+        """Find the most recent job directory created by Harbor."""
         if not output_dir or not output_dir.exists():
             return None
-        for timestamp_dir in sorted(output_dir.iterdir(), reverse=True):
-            if timestamp_dir.is_dir() and "__" in timestamp_dir.name:
-                return timestamp_dir
+        for job_dir in sorted(output_dir.iterdir(), reverse=True):
+            if job_dir.is_dir():
+                return job_dir
         return None
 
-    def _find_results_json(self, output_dir: Optional[Path]) -> Optional[Path]:
-        """Find results.json in tb's nested output structure."""
-        timestamp_dir = self._find_latest_timestamp_dir(output_dir)
-        if timestamp_dir:
-            results_file = timestamp_dir / "results.json"
-            if results_file.exists():
-                return results_file
+    def _find_result_json(self, job_dir: Optional[Path]) -> Optional[Path]:
+        """Find result.json in Harbor's output structure."""
+        if job_dir:
+            result_file = job_dir / "result.json"
+            if result_file.exists():
+                return result_file
         return None
 
-    def _find_agent_log(self, output_dir: Optional[Path], task_id: str) -> Optional[Path]:
-        """Find agent.log in tb's nested output structure."""
-        timestamp_dir = self._find_latest_timestamp_dir(output_dir)
-        if not timestamp_dir:
+    def _find_trajectory(self, job_dir: Optional[Path], task_id: str) -> Optional[Path]:
+        """Find trajectory.json in Harbor's output structure."""
+        if not job_dir:
             return None
-        for task_dir in timestamp_dir.iterdir():
-            if task_dir.is_dir() and task_dir.name == task_id:
-                for trial_dir in task_dir.iterdir():
-                    if trial_dir.is_dir():
-                        agent_log = trial_dir / "sessions" / "agent.log"
-                        if agent_log.exists():
-                            return agent_log
+        # Harbor structure: {job_dir}/{task_id}__*/agent/trajectory.json
+        for trial_dir in job_dir.iterdir():
+            if trial_dir.is_dir() and trial_dir.name.startswith(f"{task_id}__"):
+                trajectory = trial_dir / "agent" / "trajectory.json"
+                if trajectory.exists():
+                    return trajectory
         return None
 
-    def _parse_results(self, output_dir: Optional[Path]) -> dict:
-        """Parse results.json from tb's nested output structure."""
-        results_file = self._find_results_json(output_dir)
-        if not results_file:
+    def _parse_results(self, job_dir: Optional[Path], task_id: str) -> dict:
+        """Parse result.json and extract metrics for task."""
+        result_file = self._find_result_json(job_dir)
+        if not result_file:
             return {}
         try:
-            return json.loads(results_file.read_text())
+            data = json.loads(result_file.read_text())
+            stats = data.get("stats", {}).get("evals", {})
+            # Find mean reward from any eval that has this task
+            for eval_name, eval_data in stats.items():
+                metrics = eval_data.get("metrics", [])
+                if metrics:
+                    return {"mean_reward": metrics[0].get("mean")}
+            return {}
         except (json.JSONDecodeError, OSError):
             return {}
 
@@ -172,7 +189,7 @@ class TBRunner:
             )
 
         if "ANTHROPIC_API_KEY" not in env:
-            raise RuntimeError("ANTHROPIC_API_KEY is required for tb runs.")
+            raise RuntimeError("ANTHROPIC_API_KEY is required for Harbor runs.")
 
         last_result = None
         for attempt in range(1, self.retries + 2):
@@ -180,13 +197,12 @@ class TBRunner:
             proc = subprocess.run(cmd, env=env)
             elapsed = time.time() - start
 
-            timestamp_dir = self._find_latest_timestamp_dir(self.output_root)
-            results_json = self._find_results_json(self.output_root)
-            agent_log = self._find_agent_log(self.output_root, task.id)
+            job_dir = self._find_latest_job_dir(self.output_root)
+            result_json = self._find_result_json(job_dir)
+            trajectory_json = self._find_trajectory(job_dir, task.id)
 
-            parsed = self._parse_results(self.output_root)
-            accuracy = parsed.get("accuracy")
-            resolved = parsed.get("n_resolved", 0) > 0
+            parsed = self._parse_results(job_dir, task.id)
+            mean_reward = parsed.get("mean_reward")
 
             last_result = RunResult(
                 task_id=task.id,
@@ -195,11 +211,11 @@ class TBRunner:
                 success=proc.returncode == 0,
                 command=cmd,
                 elapsed_sec=elapsed,
-                timestamp_dir=timestamp_dir,
-                results_json=results_json,
-                agent_log=agent_log,
-                accuracy=accuracy,
-                resolved=resolved if parsed else None,
+                job_dir=job_dir,
+                results_json=result_json,
+                trajectory_json=trajectory_json,
+                accuracy=mean_reward,
+                resolved=mean_reward == 1.0 if mean_reward is not None else None,
             )
 
             if last_result.success:
@@ -213,33 +229,9 @@ class TBRunner:
         return last_result
 
     def run_tasks(self, tasks: Iterable[Task], profile: AgentProfile) -> List[RunResult]:
-        """Run tasks sequentially."""
+        """Run tasks sequentially (Harbor handles parallelization internally via -n flag)."""
         results: List[RunResult] = []
         for task in tasks:
             result = self._run_single(task, profile)
             results.append(result)
-        return results
-
-    def run_tasks_parallel(
-        self, tasks: Iterable[Task], profile: AgentProfile, max_workers: int = 4
-    ) -> List[RunResult]:
-        """Run tasks in parallel using ThreadPoolExecutor."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
-
-        task_list = list(tasks)
-        results: List[RunResult] = []
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            future_to_task = {
-                executor.submit(self._run_single, task, profile): task
-                for task in task_list
-            }
-
-            for future in as_completed(future_to_task):
-                result = future.result()
-                results.append(result)
-
-        # Sort results to match original task order
-        task_order = {t.id: i for i, t in enumerate(task_list)}
-        results.sort(key=lambda r: task_order.get(r.task_id, 0))
         return results

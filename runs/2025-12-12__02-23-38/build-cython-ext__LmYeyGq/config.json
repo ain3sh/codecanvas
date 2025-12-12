@@ -1,0 +1,36 @@
+{
+    "task": {
+        "path": "build-cython-ext",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "overwrite": false,
+        "download_dir": null,
+        "source": "terminal-bench"
+    },
+    "trial_name": "build-cython-ext__LmYeyGq",
+    "trials_dir": "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs/2025-12-12__02-23-38",
+    "timeout_multiplier": 1.0,
+    "agent": {
+        "name": "claude-code",
+        "import_path": null,
+        "model_name": "anthropic/claude-haiku-4-5",
+        "override_timeout_sec": null,
+        "max_timeout_sec": null,
+        "kwargs": {}
+    },
+    "environment": {
+        "type": "docker",
+        "force_build": false,
+        "delete": true,
+        "override_cpus": null,
+        "override_memory_mb": null,
+        "override_storage_mb": null,
+        "kwargs": {}
+    },
+    "verifier": {
+        "override_timeout_sec": null,
+        "max_timeout_sec": null,
+        "disable": false
+    },
+    "job_id": "73cf023f-e7a0-47b8-baff-660e6e89fd0b"
+}

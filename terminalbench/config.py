@@ -27,7 +27,8 @@ class TBConfig:
     canvas_mcp: Optional[str] = None
     hooks_path: Optional[str] = None
     output_dir: str = "./runs"
-    tb_bin: str = "tb"
+    harbor_bin: Optional[str] = None  # None = use uvx (auto-installs)
+    container_env: str = "docker"
     env_file: Optional[str] = None
 
     def to_dict(self) -> dict:
@@ -73,7 +74,8 @@ def run_setup() -> None:
     canvas_mcp = prompt("CodeCanvas MCP server URL (optional)", current.canvas_mcp or "")
     hooks_path = prompt("Hooks file path (optional)", current.hooks_path or "")
     output_dir = prompt("Output directory", current.output_dir)
-    tb_bin = prompt("tb binary path", current.tb_bin)
+    harbor_bin = prompt("harbor binary path (empty=use uvx)", current.harbor_bin or "")
+    container_env = prompt("Container runtime (docker/daytona/modal/e2b)", current.container_env)
     env_file = prompt("Env file path (optional)", current.env_file or "")
 
     new_config = TBConfig(
@@ -83,7 +85,8 @@ def run_setup() -> None:
         canvas_mcp=canvas_mcp or None,
         hooks_path=hooks_path or None,
         output_dir=output_dir,
-        tb_bin=tb_bin,
+        harbor_bin=harbor_bin or None,
+        container_env=container_env,
         env_file=env_file or None,
     )
 

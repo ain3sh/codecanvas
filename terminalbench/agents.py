@@ -31,8 +31,8 @@ class AgentProfile:
             env.setdefault("CLAUDE_CODE_HOOKS", self.hooks_path)
         return env
 
-    def tb_args(self) -> List[str]:
-        """Return CLI arguments for tb run command."""
+    def harbor_args(self) -> List[str]:
+        """Return CLI arguments for harbor run command."""
         args: List[str] = ["-a", self.agent, "-m", self.model]
         return args
 

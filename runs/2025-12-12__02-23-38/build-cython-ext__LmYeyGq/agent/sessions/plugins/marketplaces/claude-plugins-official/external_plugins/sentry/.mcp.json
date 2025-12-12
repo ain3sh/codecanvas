@@ -1,0 +1,6 @@
+{
+  "sentry": {
+    "type": "sse",
+    "url": "https://mcp.sentry.dev/sse"
+  }
+}
