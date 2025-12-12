@@ -4,63 +4,61 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codecanvas"
-version = "0.1.0"
-description = "Static Impact Analysis for LLM Side-Effect Blindness"
+version = "0.3.0"
+description = "Impact analysis for LLM agents - track code dependencies and side-effects"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
     {name = "Ainesh Chatterjee"}
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Software Development :: Quality Assurance",
 ]
-keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis", "developer-tools"]
+keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis"]
 
 dependencies = [
-    "tree-sitter>=0.21.0",
-    "tree-sitter-python>=0.21.0",
+    "tree-sitter>=0.24.0",
+    "tree-sitter-python>=0.24.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-]
-viz = [
-    "networkx>=3.0",
-    "matplotlib>=3.7",
-]
-mcp = [
-    "mcp>=1.0.0",
-    "httpx>=0.25.0",
-]
-all = [
-    "codecanvas[dev,viz,mcp]",
+    "pytest>=8.0",
 ]
 
-[project.scripts]
-codecanvas = "codecanvas.cli:main"
+# Optional deps for running LocAgent MCP in the top-level venv.
+locagent = [
+    "mcp>=0.1.0",
+    "networkx==3.4.2",
+    "tree-sitter>=0.24.0",
+    "tree-sitter-languages>=1.10.2",
+    "bm25s==0.2.3",
+    "libcst==1.5.0",
+    "pydantic==2.9.2",
+    "click==8.1.7",
+    "python-dotenv==1.0.1",
+    "PyYAML==6.0.2",
+    "tqdm==4.67.0",
+    "llama-index-core==0.11.22",
+    "llama-index-retrievers-bm25==0.4.0",
+    "rapidfuzz>=3.0.0",
+    "matplotlib>=3.10.7",
+    "pydot>=4.0.1",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/ainesh/codecanvas"
-"Bug Tracker" = "https://github.com/ainesh/codecanvas/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["codecanvas*"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
+testpaths = ["codecanvas"]
+python_files = ["test.py", "test_*.py"]
 python_functions = ["test_*"]

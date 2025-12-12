@@ -1,8 +1,12 @@
 """
-CodeCanvas: Static Impact Analysis for LLM Side-Effect Blindness
+CodeCanvas: Impact analysis for LLM agents.
 
-A tool that provides pre-computed reverse dependency tracking to help
-LLM agents understand the ripple effects of code changes.
+Main interface: canvas()
 """
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
+
+from .canvas import canvas
+from .state import load_state, save_state
+
+__all__ = ["canvas", "load_state", "save_state"]

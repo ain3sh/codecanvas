@@ -1,0 +1,24 @@
+env_file: terminalbench/.env
+
+tasks:
+  - id: processing-pipeline
+    dataset: terminal-bench-core==head
+    order: 1
+  - id: sanitize-git-repo
+    dataset: terminal-bench-core==head
+    order: 2
+  - id: swe-bench-fsspec
+    dataset: terminal-bench-core==head
+    order: 3
+  - id: deterministic-tarball
+    dataset: terminal-bench-core==head
+    order: 4
+  - id: tree-directory-parser
+    dataset: terminal-bench-core==head
+    order: 5
+  - id: c-to-safe-rust
+    dataset: terminal-bench-core==head
+    order: 6
+  - id: reverse-engineering
+    dataset: terminal-bench-core==head
+    order: 7

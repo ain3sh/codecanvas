@@ -1,0 +1,30 @@
+{
+  "runs": [
+    {
+      "task_id": "processing-pipeline",
+      "agent_key": "text",
+      "exit_code": 0,
+      "success": true,
+      "command": [
+        "tb",
+        "run",
+        "--dataset",
+        "terminal-bench-core==head",
+        "--task-id",
+        "processing-pipeline",
+        "-a",
+        "claude-code",
+        "-m",
+        "anthropic/claude-haiku-4-5",
+        "--output-path",
+        "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs"
+      ],
+      "elapsed_sec": 125.33294343948364,
+      "timestamp_dir": "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs/2025-12-11__22-48-49",
+      "results_json": "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs/2025-12-11__22-48-49/results.json",
+      "agent_log": "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs/2025-12-11__22-48-49/processing-pipeline/processing-pipeline.1-of-1.2025-12-11__22-48-49/sessions/agent.log",
+      "accuracy": 1.0,
+      "resolved": true
+    }
+  ]
+}

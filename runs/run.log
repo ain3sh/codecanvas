@@ -1,0 +1,26 @@
+Starting harness run
+Run ID: 2025-12-11__22-48-49
+  Running tasks (1/1, Accuracy: 100.00%) - Last: processing-pipeline ✓ ━ 100% 0…
+
+Results Summary:
++-------------------+---------+
+| Metric            | Value   |
++===================+=========+
+| Resolved Trials   | 1       |
++-------------------+---------+
+| Unresolved Trials | 0       |
++-------------------+---------+
+| Accuracy          | 100.00% |
++-------------------+---------+
+
+Results written to 
+/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs/2025-12-11__22-48-49/result
+s.json
+[OK] text processing-pipeline exit=0 time=125.3s dir=2025-12-11__22-48-49
+
+                     Results Summary                     
+┏━━━━━━━┳━━━━━━━━┳━━━━━━━━┳━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━┓
+┃ Agent ┃ Passed ┃ Failed ┃ Total ┃ Accuracy ┃ Avg Time ┃
+┡━━━━━━━╇━━━━━━━━╇━━━━━━━━╇━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━┩
+│ text  │      1 │      0 │     1 │   100.0% │   125.3s │
+└───────┴────────┴────────┴───────┴──────────┴──────────┘

@@ -1,0 +1,7 @@
+*.egg-info/
+.pytest_cache/
+__pycache__/
+.venv/
+.canvas_*.png
+.canvas_state.json
+*.envnode_modules/

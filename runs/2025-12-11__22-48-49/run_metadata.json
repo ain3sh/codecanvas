@@ -1,0 +1,30 @@
+{
+    "run_id": "2025-12-11__22-48-49",
+    "uuid": "d2e54e16-3aca-4723-baec-37af96616035",
+    "dataset_path": null,
+    "dataset_name": "terminal-bench-core",
+    "dataset_version": "head",
+    "output_path": "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs",
+    "agent_name": "claude-code",
+    "no_rebuild": false,
+    "cleanup": true,
+    "log_level": 20,
+    "task_ids": [
+        "processing-pipeline"
+    ],
+    "exclude_task_ids": null,
+    "n_tasks": null,
+    "n_concurrent_trials": 4,
+    "n_attempts": 1,
+    "dataset_size": 1,
+    "accuracy": 1.0,
+    "model_name": "anthropic/claude-haiku-4-5",
+    "start_time": "2025-12-12T03:49:09.312492+00:00",
+    "end_time": "2025-12-12T03:50:49.735468+00:00",
+    "commit_hash": "50cf3d04aa4ae4a798f5a0b925e6e89cbfc42f3b",
+    "username": "ain3sh",
+    "s3_bucket": null,
+    "agent_kwargs": null,
+    "pass_at_k": {},
+    "resumed_at": null
+}
