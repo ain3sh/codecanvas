@@ -94,14 +94,15 @@ def adapt_mcp_config_for_harbor(config: Dict[str, Any]) -> Dict[str, Any]:
     """Adapt MCP config for Harbor container environment.
     
     Local .mcp.json may use 'uv run python -m ...' but Harbor containers
-    have packages pip-installed system-wide, so we convert to 'python -m ...'.
+    have packages pip-installed system-wide, so we convert to 'python3 -m ...'.
+    Using python3 as 'python' may not exist in some containers.
     """
     adapted = {"mcpServers": {}}
     for name, server_cfg in config.get("mcpServers", {}).items():
         new_cfg = dict(server_cfg)
-        # Convert 'uv run python -m X' to 'python -m X'
+        # Convert 'uv run python -m X' to 'python3 -m X'
         if new_cfg.get("command") == "uv" and new_cfg.get("args", [])[:2] == ["run", "python"]:
-            new_cfg["command"] = "python"
+            new_cfg["command"] = "python3"
             new_cfg["args"] = new_cfg["args"][2:]  # Remove 'run', 'python'
         adapted["mcpServers"][name] = new_cfg
     return adapted
