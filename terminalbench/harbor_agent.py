@@ -143,17 +143,10 @@ class ClaudeCodeMCP(ClaudeCode):
             )
             cmd_parts.extend(["--settings", hooks_file])
 
-        # Add system prompt if provided
+        # Add system prompt if provided (pass content directly, not file path)
         if self.system_prompt:
-            prompt_file = "/tmp/system-prompt.txt"
             escaped_prompt = shlex.quote(self.system_prompt)
-            setup_cmds.append(
-                ExecInput(
-                    command=f"echo {escaped_prompt} > {prompt_file}",
-                    env=env,
-                )
-            )
-            cmd_parts.extend(["--append-system-prompt", prompt_file])
+            cmd_parts.extend(["--append-system-prompt", escaped_prompt])
 
         # Build final command string
         cmd = " ".join(cmd_parts) + " 2>&1 </dev/null | tee /logs/agent/claude-code.txt"
