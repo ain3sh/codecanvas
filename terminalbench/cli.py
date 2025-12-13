@@ -166,6 +166,10 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     if env_file is None and DEFAULT_ENV_FILE.exists():
         env_file = DEFAULT_ENV_FILE
 
+    # Load env file for reading config values (also used by HarborRunner)
+    from .runner import load_env_file
+    env_from_file = load_env_file(env_file)
+
     # Resolve hooks path: CLI > manifest
     hooks_path = args.hooks
     if hooks_path is None and manifest_config.hooks:
@@ -175,9 +179,13 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     enabled_servers = None if args.no_mcp else args.mcp_servers
     mcp_path = None if args.no_mcp else mcp_config_path
 
-    # Resolve GitHub token: CLI > env var
+    # Resolve GitHub token: CLI > env file > env var
     import os
-    github_token = getattr(args, 'github_token', None) or os.environ.get('GITHUB_TOKEN')
+    github_token = (
+        getattr(args, 'github_token', None) 
+        or env_from_file.get('GITHUB_TOKEN') 
+        or os.environ.get('GITHUB_TOKEN')
+    )
 
     # Build agent profile
     profile = build_profile(
