@@ -22,8 +22,8 @@ classifiers = [
 keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis"]
 
 dependencies = [
-    "tree-sitter>=0.24.0",
-    "tree-sitter-python>=0.24.0",
+    "tree-sitter>=0.21.0",
+    "tree-sitter-python>=0.21.0",
 ]
 
 [project.optional-dependencies]
@@ -41,22 +41,24 @@ terminalbench = [
 
 # Optional deps for running LocAgent MCP in the top-level venv.
 locagent = [
-    "mcp>=0.1.0",
-    "networkx==3.4.2",
+    "mcp>=1.0.0",
+    "networkx>=3.0.0",
     "tree-sitter>=0.24.0",
-    "tree-sitter-language-pack>=0.8.0",
-    "bm25s==0.2.3",
-    "libcst==1.5.0",
-    "pydantic==2.12.5",
-    "click==8.1.7",
-    "python-dotenv==1.0.1",
-    "PyYAML==6.0.2",
-    "tqdm==4.67.0",
-    "llama-index-core==0.11.22",
-    "llama-index-retrievers-bm25==0.4.0",
+    "tree-sitter-language-pack>=0.13.0",
+    "bm25s>=0.2.0",
+    "libcst>=1.0.0",
+    "pydantic>=2.0.0",
+    "click>=8.0.0",
+    "python-dotenv>=1.0.0",
+    "PyYAML>=6.0.0",
+    "tqdm>=4.60.0",
+    "llama-index-core>=0.11.0",
+    "llama-index-readers-file>=0.4.0",
+    "llama-index-retrievers-bm25>=0.4.0",
     "rapidfuzz>=3.0.0",
-    "matplotlib>=3.10.7",
-    "pydot>=4.0.1",
+    "matplotlib>=3.0.0",
+    "pydot>=2.0.0",
+    "PyStemmer>=2.0.0",
 ]
 
 [project.urls]
@@ -64,7 +66,7 @@ locagent = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["codecanvas*"]
+include = ["codecanvas*", "locagent*"]
 
 [tool.pytest.ini_options]
 testpaths = ["codecanvas"]

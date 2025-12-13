@@ -29,6 +29,8 @@ class Task:
 class ManifestConfig:
     """Top-level configuration from the manifest."""
     env_file: Optional[Path] = None
+    mcp_config: Optional[str] = None  # Path to .mcp.json
+    hooks: Optional[str] = None  # Path to hooks settings
 
 
 def load_manifest(path: Path | str | None = None) -> Tuple[List[Task], ManifestConfig]:
@@ -47,6 +49,10 @@ def load_manifest(path: Path | str | None = None) -> Tuple[List[Task], ManifestC
     # Parse config
     env_file_str = data.get("env_file")
     env_file = Path(env_file_str) if env_file_str else None
-    config = ManifestConfig(env_file=env_file)
+    config = ManifestConfig(
+        env_file=env_file,
+        mcp_config=data.get("mcp_config"),
+        hooks=data.get("hooks"),
+    )
     
     return tasks, config

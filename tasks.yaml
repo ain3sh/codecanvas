@@ -1,26 +1,39 @@
 env_file: terminalbench/.env
+mcp_config: .mcp.json
 
 tasks:
-  - id: build-cython-ext
-    dataset: terminal-bench@2.0
-    order: 1
-    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/build-cython-ext
-    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/build-cython-ext
   - id: sanitize-git-repo
     dataset: terminal-bench@2.0
+    order: 1
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/sanitize-git-repo
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/sanitize-git-repo
+  - id: build-cython-ext
+    dataset: terminal-bench@2.0
     order: 2
-  - id: swe-bench-fsspec
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/build-cython-ext
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/build-cython-ext
+  - id: custom-memory-heap-crash
     dataset: terminal-bench@2.0
     order: 3
-  - id: deterministic-tarball
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/custom-memory-heap-crash
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/custom-memory-heap-crash
+  - id: db-wal-recovery
     dataset: terminal-bench@2.0
     order: 4
-  - id: tree-directory-parser
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/db-wal-recovery
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/db-wal-recovery
+  - id: modernize-scientific-stack
     dataset: terminal-bench@2.0
     order: 5
-  - id: c-to-safe-rust
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/modernize-scientific-stack
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/modernize-scientific-stack
+  - id: rstan-to-pystan
     dataset: terminal-bench@2.0
     order: 6
-  - id: reverse-engineering
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/rstan-to-pystan
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/rstan-to-pystan
+  - id: fix-code-vulnerability
     dataset: terminal-bench@2.0
     order: 7
+    tb_url: https://www.tbench.ai/registry/terminal-bench/2.0/fix-code-vulnerability
+    gh_url: https://github.com/laude-institute/terminal-bench-2/tree/main/fix-code-vulnerability

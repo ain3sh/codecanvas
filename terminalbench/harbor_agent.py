@@ -1,0 +1,137 @@
+"""Custom Claude Code agent with MCP and hooks support for Harbor."""
+from __future__ import annotations
+
+import os
+import shlex
+from pathlib import Path
+from typing import Any
+
+from harbor.agents.installed.base import ExecInput
+from harbor.agents.installed.claude_code import ClaudeCode
+from harbor.models.trial.paths import EnvironmentPaths
+
+
+class ClaudeCodeMCP(ClaudeCode):
+    """Claude Code agent with MCP server and hooks support.
+    
+    This agent extends ClaudeCode to:
+    1. Install locagent MCP server in the container
+    2. Pass MCP config and hooks to the Claude CLI
+    
+    Installation options for locagent (via kwargs):
+    - locagent_git_url: Git URL to clone (e.g., "https://github.com/user/codecanvas")
+    - locagent_git_ref: Git ref to checkout (branch, tag, commit)
+    - locagent_pip_package: Pip package spec (e.g., "locagent" or "locagent==1.0.0")
+    - If none provided, only dependencies are installed (code must be mounted)
+    """
+
+    def __init__(
+        self,
+        mcp_config: str | None = None,
+        hooks_config: str | None = None,
+        reasoning: str = "medium",
+        claude_version: str | None = None,
+        locagent_git_url: str | None = None,
+        locagent_git_ref: str | None = None,
+        locagent_pip_package: str | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(**kwargs)
+        self.mcp_config = mcp_config  # JSON string
+        self.hooks_config = hooks_config  # JSON string
+        self.reasoning = reasoning
+        self.claude_version = claude_version
+        self.locagent_git_url = locagent_git_url
+        self.locagent_git_ref = locagent_git_ref
+        self.locagent_pip_package = locagent_pip_package
+
+    @staticmethod
+    def name() -> str:
+        return "claude-code-mcp"
+
+    @property
+    def _install_agent_template_path(self) -> Path:
+        """Path to the custom install template with MCP support."""
+        return Path(__file__).parent / "install-claude-code-mcp.sh.j2"
+
+    @property
+    def _template_variables(self) -> dict[str, str | None]:
+        """Variables to pass to the install template."""
+        return {
+            "claude_version": self.claude_version or self._version,
+            "locagent_git_url": self.locagent_git_url,
+            "locagent_git_ref": self.locagent_git_ref,
+            "locagent_pip_package": self.locagent_pip_package,
+        }
+
+    def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
+        escaped_instruction = shlex.quote(instruction)
+
+        env = {
+            "ANTHROPIC_API_KEY": os.environ.get("ANTHROPIC_API_KEY", ""),
+            "CLAUDE_CODE_OAUTH_TOKEN": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
+            "FORCE_AUTO_BACKGROUND_TASKS": "1",
+            "ENABLE_BACKGROUND_TASKS": "1",
+        }
+        env = {k: v for k, v in env.items() if v}
+
+        if self.model_name:
+            env["ANTHROPIC_MODEL"] = self.model_name.split("/")[-1]
+        elif "ANTHROPIC_MODEL" in os.environ:
+            env["ANTHROPIC_MODEL"] = os.environ["ANTHROPIC_MODEL"]
+
+        if "MAX_THINKING_TOKENS" in os.environ:
+            env["MAX_THINKING_TOKENS"] = os.environ["MAX_THINKING_TOKENS"]
+
+        env["CLAUDE_CONFIG_DIR"] = (EnvironmentPaths.agent_dir / "sessions").as_posix()
+
+        # Setup commands to run before main command
+        setup_cmds = [
+            ExecInput(
+                command=(
+                    "mkdir -p $CLAUDE_CONFIG_DIR/debug $CLAUDE_CONFIG_DIR/projects/-app "
+                    "$CLAUDE_CONFIG_DIR/shell-snapshots $CLAUDE_CONFIG_DIR/statsig "
+                    "$CLAUDE_CONFIG_DIR/todos"
+                ),
+                env=env,
+            ),
+        ]
+
+        # Build the claude command parts
+        cmd_parts = [
+            "claude",
+            "--verbose",
+            "--output-format", "stream-json",
+            "-p", escaped_instruction,
+            "--allowedTools",
+        ]
+        cmd_parts.extend(self.ALLOWED_TOOLS)
+
+        # Write MCP config to file if provided
+        if self.mcp_config:
+            mcp_file = "/tmp/mcp-config.json"
+            escaped_mcp = shlex.quote(self.mcp_config)
+            setup_cmds.append(
+                ExecInput(
+                    command=f"echo {escaped_mcp} > {mcp_file}",
+                    env=env,
+                )
+            )
+            cmd_parts.extend(["--mcp-config", mcp_file])
+
+        # Write hooks config to file if provided
+        if self.hooks_config:
+            hooks_file = "/tmp/hooks-settings.json"
+            escaped_hooks = shlex.quote(self.hooks_config)
+            setup_cmds.append(
+                ExecInput(
+                    command=f"echo {escaped_hooks} > {hooks_file}",
+                    env=env,
+                )
+            )
+            cmd_parts.extend(["--settings", hooks_file])
+
+        # Build final command string
+        cmd = " ".join(cmd_parts) + " 2>&1 </dev/null | tee /logs/agent/claude-code.txt"
+
+        return setup_cmds + [ExecInput(command=cmd, env=env)]

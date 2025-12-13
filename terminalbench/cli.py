@@ -8,9 +8,9 @@ import sys
 from pathlib import Path
 from typing import Iterable, List
 
-from .agents import make_profiles, resolve_mcp_env, resolve_hooks_path
+from .agents import build_profile, get_available_servers
 from .runner import HarborRunner, RunResult
-from .tasks import load_manifest, DEFAULT_ENV_FILE
+from .tasks import load_manifest, Task, DEFAULT_ENV_FILE
 from .display import print_summary
 
 
@@ -22,24 +22,80 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     subparsers = parser.add_subparsers(dest="command")
     subparsers.add_parser("setup", help="Interactive configuration wizard")
 
-    parser.add_argument("--agent", choices=["text", "locagent", "codecanvas", "all"], default="all")
+    # Task selection
     parser.add_argument("--tasks", nargs="*", help="task ids to run; default=all from manifest")
     parser.add_argument("--manifest", type=Path, help="path to tasks manifest (yaml)")
+
+    # Output and execution
     parser.add_argument("--output-dir", type=Path, default=Path(cfg.output_dir))
     parser.add_argument("--attempts", type=int, default=1, help="number of attempts per task (-k)")
     parser.add_argument("--retries", type=int, default=0, help="number of retries on failure")
-    parser.add_argument("--harbor-bin", default=cfg.harbor_bin, help="harbor executable (default: use uvx)")
-    parser.add_argument("--container-env", default=cfg.container_env, help="container runtime (docker|daytona|modal|e2b)")
-    parser.add_argument("--extra-flag", action="append", default=[], help="extra flag to pass to harbor run")
-    parser.add_argument("--locagent-mcp", default=cfg.locagent_mcp, help="MCP server URL for locagent")
-    parser.add_argument("--canvas-mcp", default=cfg.canvas_mcp, help="MCP server URL for codecanvas")
-    parser.add_argument("--hooks", default=cfg.hooks_path, help="Path to Claude Code hooks file")
-    parser.add_argument("--env-file", type=Path, default=Path(cfg.env_file) if cfg.env_file else None)
     parser.add_argument("--dry-run", action="store_true", help="do not execute harbor, just emit commands")
     parser.add_argument("--quiet", action="store_true", help="suppress live output (for CI)")
     parser.add_argument("--parallel", "-n", type=int, default=0, help="parallel workers (passed to harbor -n)")
+
+    # Harbor configuration
+    parser.add_argument("--harbor-bin", default=cfg.harbor_bin, help="harbor executable (default: use uvx)")
+    parser.add_argument("--container-env", default=cfg.container_env, help="container runtime (docker|daytona|modal|e2b)")
+    parser.add_argument("--extra-flag", action="append", default=[], help="extra flag to pass to harbor run")
+    parser.add_argument("--env-file", type=Path, default=Path(cfg.env_file) if cfg.env_file else None)
+
+    # Model configuration
+    parser.add_argument("--model", "-m", default=cfg.model, help="model to use for evaluation")
+    parser.add_argument("--reasoning", default=cfg.reasoning, help="reasoning level (low/medium/high)")
+
+    # MCP configuration
+    parser.add_argument(
+        "--mcp-config",
+        type=Path,
+        default=Path(cfg.mcp_config) if cfg.mcp_config else None,
+        help="MCP config file path (default: from manifest or config)"
+    )
+    parser.add_argument(
+        "--mcp-server",
+        action="append",
+        dest="mcp_servers",
+        help="Enable specific MCP server(s) by name (can be repeated). "
+             "If not specified, all servers in config are enabled."
+    )
+    parser.add_argument(
+        "--no-mcp",
+        action="store_true",
+        help="Disable all MCP servers for this run"
+    )
+    parser.add_argument(
+        "--list-mcp-servers",
+        action="store_true",
+        help="List available MCP servers from config and exit"
+    )
+
+    # Hooks configuration
+    parser.add_argument(
+        "--hooks",
+        type=Path,
+        default=Path(cfg.hooks) if cfg.hooks else None,
+        help="Hooks settings file path (.claude/settings.json format)"
+    )
+
+    # Locagent installation (for Harbor container)
+    parser.add_argument(
+        "--locagent-git-url",
+        help="Git URL to install locagent from (e.g., https://github.com/user/codecanvas)"
+    )
+    parser.add_argument(
+        "--locagent-git-ref",
+        help="Git ref to checkout (branch, tag, or commit hash)"
+    )
+    parser.add_argument(
+        "--locagent-pip",
+        dest="locagent_pip_package",
+        help="Pip package spec for locagent (e.g., 'locagent==1.0.0')"
+    )
+
+    # Output format
     parser.add_argument("--json", action="store_true", help="emit results as JSON")
     parser.add_argument("--csv", type=Path, help="export results to CSV file")
+
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -80,6 +136,23 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         return 0
 
     tasks, manifest_config = load_manifest(args.manifest)
+
+    # Resolve MCP config: CLI > manifest > config
+    mcp_config_path = args.mcp_config
+    if mcp_config_path is None and manifest_config.mcp_config:
+        mcp_config_path = Path(manifest_config.mcp_config)
+
+    # Handle --list-mcp-servers
+    if args.list_mcp_servers:
+        if mcp_config_path and mcp_config_path.exists():
+            servers = get_available_servers(mcp_config_path)
+            print("Available MCP servers:")
+            for s in servers:
+                print(f"  - {s}")
+        else:
+            print("No MCP config found")
+        return 0
+
     tasks = select_tasks(tasks, args.tasks)
 
     # Resolve env_file: CLI flag > manifest > default
@@ -89,10 +162,27 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     if env_file is None and DEFAULT_ENV_FILE.exists():
         env_file = DEFAULT_ENV_FILE
 
-    locagent_mcp = resolve_mcp_env(args.locagent_mcp, "LOCAGENT_MCP")
-    canvas_mcp = resolve_mcp_env(args.canvas_mcp, "CODECANVAS_MCP")
-    hooks_path = resolve_hooks_path(args.hooks)
-    profiles = make_profiles(locagent_mcp, canvas_mcp, hooks_path, requested=args.agent)
+    # Resolve hooks path: CLI > manifest
+    hooks_path = args.hooks
+    if hooks_path is None and manifest_config.hooks:
+        hooks_path = Path(manifest_config.hooks)
+
+    # Determine MCP settings
+    enabled_servers = None if args.no_mcp else args.mcp_servers
+    mcp_path = None if args.no_mcp else mcp_config_path
+
+    # Build agent profile
+    profile = build_profile(
+        key="claude-code",
+        model=args.model,
+        reasoning=args.reasoning,
+        mcp_config_path=mcp_path,
+        enabled_mcp_servers=enabled_servers,
+        hooks_path=hooks_path,
+        locagent_git_url=getattr(args, 'locagent_git_url', None),
+        locagent_git_ref=getattr(args, 'locagent_git_ref', None),
+        locagent_pip_package=getattr(args, 'locagent_pip_package', None),
+    )
 
     runner = HarborRunner(
         harbor_bin=args.harbor_bin,
@@ -106,9 +196,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         env_file=env_file,
     )
 
-    all_results = []
-    for profile in profiles.values():
-        all_results.extend(runner.run_tasks(tasks, profile))
+    all_results = runner.run_tasks(tasks, profile)
 
     if args.json:
         print(json.dumps([r.to_dict() for r in all_results], indent=2))

@@ -21,11 +21,10 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 class TBConfig:
     """Terminal-Bench configuration."""
 
-    model: str = "anthropic/claude-haiku-4-5"
+    model: str = "anthropic/claude-sonnet-4-20250514"
     reasoning: str = "medium"
-    locagent_mcp: Optional[str] = None
-    canvas_mcp: Optional[str] = None
-    hooks_path: Optional[str] = None
+    mcp_config: Optional[str] = None  # Path to .mcp.json
+    hooks: Optional[str] = None  # Path to hooks settings
     output_dir: str = "./runs"
     harbor_bin: Optional[str] = None  # None = use uvx (auto-installs)
     container_env: str = "docker"
@@ -70,9 +69,8 @@ def run_setup() -> None:
 
     model = prompt("Model", current.model)
     reasoning = prompt("Reasoning level (low/medium/high)", current.reasoning)
-    locagent_mcp = prompt("LocAgent MCP server URL (optional)", current.locagent_mcp or "")
-    canvas_mcp = prompt("CodeCanvas MCP server URL (optional)", current.canvas_mcp or "")
-    hooks_path = prompt("Hooks file path (optional)", current.hooks_path or "")
+    mcp_config = prompt("MCP config file path (optional, e.g., .mcp.json)", current.mcp_config or "")
+    hooks = prompt("Hooks settings file path (optional)", current.hooks or "")
     output_dir = prompt("Output directory", current.output_dir)
     harbor_bin = prompt("harbor binary path (empty=use uvx)", current.harbor_bin or "")
     container_env = prompt("Container runtime (docker/daytona/modal/e2b)", current.container_env)
@@ -81,9 +79,8 @@ def run_setup() -> None:
     new_config = TBConfig(
         model=model,
         reasoning=reasoning,
-        locagent_mcp=locagent_mcp or None,
-        canvas_mcp=canvas_mcp or None,
-        hooks_path=hooks_path or None,
+        mcp_config=mcp_config or None,
+        hooks=hooks or None,
         output_dir=output_dir,
         harbor_bin=harbor_bin or None,
         container_env=container_env,
