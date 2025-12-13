@@ -90,6 +90,23 @@ class AgentProfile:
         return dict(self.extra_env)
 
 
+def adapt_mcp_config_for_harbor(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Adapt MCP config for Harbor container environment.
+    
+    Local .mcp.json may use 'uv run python -m ...' but Harbor containers
+    have packages pip-installed system-wide, so we convert to 'python -m ...'.
+    """
+    adapted = {"mcpServers": {}}
+    for name, server_cfg in config.get("mcpServers", {}).items():
+        new_cfg = dict(server_cfg)
+        # Convert 'uv run python -m X' to 'python -m X'
+        if new_cfg.get("command") == "uv" and new_cfg.get("args", [])[:2] == ["run", "python"]:
+            new_cfg["command"] = "python"
+            new_cfg["args"] = new_cfg["args"][2:]  # Remove 'run', 'python'
+        adapted["mcpServers"][name] = new_cfg
+    return adapted
+
+
 def build_profile(
     key: str,
     model: str = DEFAULT_MODEL,
@@ -105,13 +122,14 @@ def build_profile(
 ) -> AgentProfile:
     """Build an agent profile with MCP and hooks configuration."""
 
-    # Load and filter MCP config
+    # Load and filter MCP config, adapting for Harbor environment
     mcp_config_json = None
     if mcp_config_path and mcp_config_path.exists():
         config = load_mcp_config(mcp_config_path)
         filtered = filter_mcp_servers(config, enabled_mcp_servers)
-        if filtered.get("mcpServers"):
-            mcp_config_json = json.dumps(filtered)
+        adapted = adapt_mcp_config_for_harbor(filtered)
+        if adapted.get("mcpServers"):
+            mcp_config_json = json.dumps(adapted)
 
     # Load hooks config
     hooks_config_json = None
