@@ -1,0 +1,1 @@
+"""LocAgent index utilities."""
