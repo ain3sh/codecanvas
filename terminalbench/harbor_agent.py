@@ -25,14 +25,13 @@ class ClaudeCodeMCP(ClaudeCode):
     """Claude Code agent with MCP server and hooks support.
     
     This agent extends ClaudeCode to:
-    1. Install locagent MCP server in the container
+    1. Install MCP servers in the container from a git source
     2. Pass MCP config and hooks to the Claude CLI
+    3. Optionally append a system prompt to guide tool usage
     
-    Installation options for locagent (via kwargs):
-    - locagent_git_url: Git URL to clone (e.g., "https://github.com/user/codecanvas")
-    - locagent_git_ref: Git ref to checkout (branch, tag, commit)
-    - locagent_pip_package: Pip package spec (e.g., "locagent" or "locagent==1.0.0")
-    - If none provided, only dependencies are installed (code must be mounted)
+    Installation options (via kwargs):
+    - mcp_git_source: Git URL to clone (e.g., "https://github.com/user/codecanvas")
+                      Assumes 'main' branch.
     
     Note: Harbor's kwarg parser converts JSON strings to dicts, so we handle both.
     """
@@ -43,10 +42,9 @@ class ClaudeCodeMCP(ClaudeCode):
         hooks_config: str | dict | None = None,
         reasoning: str = "medium",
         claude_version: str | None = None,
-        locagent_git_url: str | None = None,
-        locagent_git_ref: str | None = None,
-        locagent_pip_package: str | None = None,
+        mcp_git_source: str | None = None,
         github_token: str | None = None,
+        system_prompt: str | None = None,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -55,11 +53,10 @@ class ClaudeCodeMCP(ClaudeCode):
         self.hooks_config = _ensure_json_string(hooks_config)
         self.reasoning = reasoning
         self.claude_version = claude_version
-        self.locagent_git_url = locagent_git_url
-        self.locagent_git_ref = locagent_git_ref
-        self.locagent_pip_package = locagent_pip_package
+        self.mcp_git_source = mcp_git_source
         # GitHub token for private repos - from kwarg or env var
         self.github_token = github_token or os.environ.get("GITHUB_TOKEN")
+        self.system_prompt = system_prompt
 
     @staticmethod
     def name() -> str:
@@ -75,9 +72,7 @@ class ClaudeCodeMCP(ClaudeCode):
         """Variables to pass to the install template."""
         return {
             "claude_version": self.claude_version or self._version,
-            "locagent_git_url": self.locagent_git_url,
-            "locagent_git_ref": self.locagent_git_ref,
-            "locagent_pip_package": self.locagent_pip_package,
+            "mcp_git_source": self.mcp_git_source,
             "github_token": self.github_token,
         }
 
@@ -147,6 +142,18 @@ class ClaudeCodeMCP(ClaudeCode):
                 )
             )
             cmd_parts.extend(["--settings", hooks_file])
+
+        # Add system prompt if provided
+        if self.system_prompt:
+            prompt_file = "/tmp/system-prompt.txt"
+            escaped_prompt = shlex.quote(self.system_prompt)
+            setup_cmds.append(
+                ExecInput(
+                    command=f"echo {escaped_prompt} > {prompt_file}",
+                    env=env,
+                )
+            )
+            cmd_parts.extend(["--append-system-prompt", prompt_file])
 
         # Build final command string
         cmd = " ".join(cmd_parts) + " 2>&1 </dev/null | tee /logs/agent/claude-code.txt"

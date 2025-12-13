@@ -41,6 +41,24 @@ def get_available_servers(config_path: Path) -> List[str]:
     return list(config.get("mcpServers", {}).keys())
 
 
+def discover_mcp_usage_prompts(server_names: List[str], search_dir: Path = None) -> Optional[str]:
+    """Discover and combine USAGE.md files for enabled MCP servers.
+    
+    Looks for <server_name>/USAGE.md in the search directory (defaults to cwd).
+    Returns combined content of all found USAGE.md files, or None if none found.
+    """
+    if search_dir is None:
+        search_dir = Path.cwd()
+    
+    prompts = []
+    for name in server_names:
+        usage_file = search_dir / name / "USAGE.md"
+        if usage_file.exists():
+            prompts.append(usage_file.read_text().strip())
+    
+    return "\n\n".join(prompts) if prompts else None
+
+
 @dataclass(frozen=True)
 class AgentProfile:
     """Configuration for a Terminal-Bench agent run."""
@@ -51,9 +69,8 @@ class AgentProfile:
     reasoning: str = DEFAULT_REASONING
     mcp_config_json: Optional[str] = None  # JSON string of MCP config
     hooks_config_json: Optional[str] = None  # JSON string of hooks config
-    locagent_git_url: Optional[str] = None  # Git URL for locagent installation
-    locagent_git_ref: Optional[str] = None  # Git ref (branch/tag/commit)
-    locagent_pip_package: Optional[str] = None  # Pip package spec
+    mcp_git_source: Optional[str] = None  # Git URL for MCP server installation
+    system_prompt: Optional[str] = None  # System prompt (e.g., from USAGE.md)
     extra_env: Dict[str, str] = field(default_factory=dict)
 
     def harbor_args(self) -> List[str]:
@@ -75,13 +92,13 @@ class AgentProfile:
         if self.reasoning:
             args.extend(["--ak", f"reasoning={self.reasoning}"])
 
-        # Pass locagent installation options
-        if self.locagent_git_url:
-            args.extend(["--ak", f"locagent_git_url={self.locagent_git_url}"])
-        if self.locagent_git_ref:
-            args.extend(["--ak", f"locagent_git_ref={self.locagent_git_ref}"])
-        if self.locagent_pip_package:
-            args.extend(["--ak", f"locagent_pip_package={self.locagent_pip_package}"])
+        # Pass MCP git source for installation in container
+        if self.mcp_git_source:
+            args.extend(["--ak", f"mcp_git_source={self.mcp_git_source}"])
+
+        # Pass system prompt
+        if self.system_prompt:
+            args.extend(["--ak", f"system_prompt={self.system_prompt}"])
 
         return args
 
@@ -115,10 +132,9 @@ def build_profile(
     mcp_config_path: Optional[Path] = None,
     enabled_mcp_servers: Optional[List[str]] = None,
     hooks_path: Optional[Path] = None,
-    locagent_git_url: Optional[str] = None,
-    locagent_git_ref: Optional[str] = None,
-    locagent_pip_package: Optional[str] = None,
+    mcp_git_source: Optional[str] = None,
     github_token: Optional[str] = None,
+    system_prompt: Optional[str] = None,
     extra_env: Optional[Dict[str, str]] = None,
 ) -> AgentProfile:
     """Build an agent profile with MCP and hooks configuration."""
@@ -148,8 +164,7 @@ def build_profile(
         reasoning=reasoning,
         mcp_config_json=mcp_config_json,
         hooks_config_json=hooks_config_json,
-        locagent_git_url=locagent_git_url,
-        locagent_git_ref=locagent_git_ref,
-        locagent_pip_package=locagent_pip_package,
+        mcp_git_source=mcp_git_source,
+        system_prompt=system_prompt,
         extra_env=env,
     )

@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Iterable, List
 
-from .agents import build_profile, get_available_servers
+from .agents import build_profile, get_available_servers, discover_mcp_usage_prompts
 from .runner import HarborRunner, RunResult
 from .tasks import load_manifest, Task, DEFAULT_ENV_FILE
 from .display import print_summary
@@ -77,19 +77,11 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         help="Hooks settings file path (.claude/settings.json format)"
     )
 
-    # Locagent installation (for Harbor container)
+    # MCP installation from git (for Harbor container)
     parser.add_argument(
-        "--locagent-git-url",
-        help="Git URL to install locagent from (e.g., https://github.com/user/codecanvas)"
-    )
-    parser.add_argument(
-        "--locagent-git-ref",
-        help="Git ref to checkout (branch, tag, or commit hash)"
-    )
-    parser.add_argument(
-        "--locagent-pip",
-        dest="locagent_pip_package",
-        help="Pip package spec for locagent (e.g., 'locagent==1.0.0')"
+        "--mcp-git-source",
+        help="Git URL to install MCP servers from (assumes 'main' branch). "
+             "E.g., https://github.com/user/codecanvas"
     )
     parser.add_argument(
         "--github-token",
@@ -187,6 +179,11 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         or os.environ.get('GITHUB_TOKEN')
     )
 
+    # Auto-discover USAGE.md system prompts for enabled MCP servers
+    system_prompt = None
+    if enabled_servers:
+        system_prompt = discover_mcp_usage_prompts(enabled_servers)
+
     # Build agent profile
     profile = build_profile(
         key="claude-code",
@@ -195,10 +192,9 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         mcp_config_path=mcp_path,
         enabled_mcp_servers=enabled_servers,
         hooks_path=hooks_path,
-        locagent_git_url=getattr(args, 'locagent_git_url', None),
-        locagent_git_ref=getattr(args, 'locagent_git_ref', None),
-        locagent_pip_package=getattr(args, 'locagent_pip_package', None),
+        mcp_git_source=getattr(args, 'mcp_git_source', None),
         github_token=github_token,
+        system_prompt=system_prompt,
     )
 
     runner = HarborRunner(

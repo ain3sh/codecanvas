@@ -2,7 +2,7 @@
 set -e
 
 # =============================================================================
-# Install Claude Code with MCP support (locagent)
+# Install Claude Code with MCP support
 # =============================================================================
 
 echo "=== Installing system dependencies ==="
@@ -36,52 +36,25 @@ echo "=== Setting up Python environment ==="
 uv python install 3.13
 
 # =============================================================================
-# Install locagent MCP server
+# Install MCP servers from git source
 # =============================================================================
-echo "=== Installing locagent MCP server ==="
-
-{% if locagent_git_url %}
-# Install from git repository
+{% if mcp_git_source %}
+echo "=== Installing MCP servers from git ==="
 cd /tmp
 {% if github_token %}
 # Use authenticated URL for private repos
-git clone https://{{ github_token }}@{{ locagent_git_url | replace('https://', '') }} codecanvas-repo
+git clone https://{{ github_token }}@{{ mcp_git_source | replace('https://', '') }} mcp-repo
 {% else %}
-git clone {{ locagent_git_url }} codecanvas-repo
+git clone {{ mcp_git_source }} mcp-repo
 {% endif %}
-cd codecanvas-repo
-{% if locagent_git_ref %}
-git checkout {{ locagent_git_ref }}
-{% endif %}
+cd mcp-repo
 
-# Install locagent with dependencies using uv (non-editable, as we delete source after)
+# Install with all MCP extras (locagent, codecanvas, etc.)
 uv pip install --system ".[locagent]"
 cd /
-rm -rf /tmp/codecanvas-repo
-
-{% elif locagent_pip_package %}
-# Install from PyPI or pip-compatible source
-uv pip install --system {{ locagent_pip_package }}
-
+rm -rf /tmp/mcp-repo
 {% else %}
-# Install locagent dependencies only (code will be mounted/provided separately)
-uv pip install --system \
-    "mcp>=1.0.0" \
-    "networkx>=3.0.0" \
-    "tree-sitter>=0.24.0" \
-    "tree-sitter-language-pack>=0.13.0" \
-    "bm25s>=0.2.0" \
-    "libcst>=1.0.0" \
-    "pydantic>=2.0.0" \
-    "click>=8.0.0" \
-    "python-dotenv>=1.0.0" \
-    "PyYAML>=6.0.0" \
-    "tqdm>=4.60.0" \
-    "llama-index-core>=0.11.0" \
-    "llama-index-readers-file>=0.4.0" \
-    "llama-index-retrievers-bm25>=0.4.0" \
-    "rapidfuzz>=3.0.0" \
-    "PyStemmer>=2.0.0"
+echo "=== No MCP git source specified, skipping MCP installation ==="
 {% endif %}
 
 echo "=== Installation complete ==="
