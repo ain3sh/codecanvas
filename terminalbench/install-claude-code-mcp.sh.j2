@@ -54,8 +54,8 @@ cd codecanvas-repo
 git checkout {{ locagent_git_ref }}
 {% endif %}
 
-# Install locagent with dependencies using uv
-uv pip install --system -e ".[locagent]"
+# Install locagent with dependencies using uv (non-editable, as we delete source after)
+uv pip install --system ".[locagent]"
 cd /
 rm -rf /tmp/codecanvas-repo
 
