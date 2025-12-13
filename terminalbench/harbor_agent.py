@@ -1,6 +1,7 @@
 """Custom Claude Code agent with MCP and hooks support for Harbor."""
 from __future__ import annotations
 
+import json
 import os
 import shlex
 from pathlib import Path
@@ -9,6 +10,15 @@ from typing import Any
 from harbor.agents.installed.base import ExecInput
 from harbor.agents.installed.claude_code import ClaudeCode
 from harbor.models.trial.paths import EnvironmentPaths
+
+
+def _ensure_json_string(value: Any) -> str | None:
+    """Convert value to JSON string if it's a dict/list, or return as-is if string."""
+    if value is None:
+        return None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value)
+    return str(value)
 
 
 class ClaudeCodeMCP(ClaudeCode):
@@ -23,12 +33,14 @@ class ClaudeCodeMCP(ClaudeCode):
     - locagent_git_ref: Git ref to checkout (branch, tag, commit)
     - locagent_pip_package: Pip package spec (e.g., "locagent" or "locagent==1.0.0")
     - If none provided, only dependencies are installed (code must be mounted)
+    
+    Note: Harbor's kwarg parser converts JSON strings to dicts, so we handle both.
     """
 
     def __init__(
         self,
-        mcp_config: str | None = None,
-        hooks_config: str | None = None,
+        mcp_config: str | dict | None = None,
+        hooks_config: str | dict | None = None,
         reasoning: str = "medium",
         claude_version: str | None = None,
         locagent_git_url: str | None = None,
@@ -37,8 +49,9 @@ class ClaudeCodeMCP(ClaudeCode):
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
-        self.mcp_config = mcp_config  # JSON string
-        self.hooks_config = hooks_config  # JSON string
+        # Harbor's kwarg parser converts JSON to dicts, so convert back to string
+        self.mcp_config = _ensure_json_string(mcp_config)
+        self.hooks_config = _ensure_json_string(hooks_config)
         self.reasoning = reasoning
         self.claude_version = claude_version
         self.locagent_git_url = locagent_git_url
