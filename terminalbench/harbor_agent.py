@@ -46,6 +46,7 @@ class ClaudeCodeMCP(ClaudeCode):
         locagent_git_url: str | None = None,
         locagent_git_ref: str | None = None,
         locagent_pip_package: str | None = None,
+        github_token: str | None = None,
         **kwargs: Any,
     ):
         super().__init__(**kwargs)
@@ -57,6 +58,8 @@ class ClaudeCodeMCP(ClaudeCode):
         self.locagent_git_url = locagent_git_url
         self.locagent_git_ref = locagent_git_ref
         self.locagent_pip_package = locagent_pip_package
+        # GitHub token for private repos - from kwarg or env var
+        self.github_token = github_token or os.environ.get("GITHUB_TOKEN")
 
     @staticmethod
     def name() -> str:
@@ -75,6 +78,7 @@ class ClaudeCodeMCP(ClaudeCode):
             "locagent_git_url": self.locagent_git_url,
             "locagent_git_ref": self.locagent_git_ref,
             "locagent_pip_package": self.locagent_pip_package,
+            "github_token": self.github_token,
         }
 
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:

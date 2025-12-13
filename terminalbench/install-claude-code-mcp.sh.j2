@@ -43,7 +43,12 @@ echo "=== Installing locagent MCP server ==="
 {% if locagent_git_url %}
 # Install from git repository
 cd /tmp
+{% if github_token %}
+# Use authenticated URL for private repos
+git clone https://{{ github_token }}@{{ locagent_git_url | replace('https://', '') }} codecanvas-repo
+{% else %}
 git clone {{ locagent_git_url }} codecanvas-repo
+{% endif %}
 cd codecanvas-repo
 {% if locagent_git_ref %}
 git checkout {{ locagent_git_ref }}

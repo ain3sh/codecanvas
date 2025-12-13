@@ -91,6 +91,10 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         dest="locagent_pip_package",
         help="Pip package spec for locagent (e.g., 'locagent==1.0.0')"
     )
+    parser.add_argument(
+        "--github-token",
+        help="GitHub token for cloning private repos (or set GITHUB_TOKEN env var)"
+    )
 
     # Output format
     parser.add_argument("--json", action="store_true", help="emit results as JSON")
@@ -171,6 +175,10 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     enabled_servers = None if args.no_mcp else args.mcp_servers
     mcp_path = None if args.no_mcp else mcp_config_path
 
+    # Resolve GitHub token: CLI > env var
+    import os
+    github_token = getattr(args, 'github_token', None) or os.environ.get('GITHUB_TOKEN')
+
     # Build agent profile
     profile = build_profile(
         key="claude-code",
@@ -182,6 +190,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         locagent_git_url=getattr(args, 'locagent_git_url', None),
         locagent_git_ref=getattr(args, 'locagent_git_ref', None),
         locagent_pip_package=getattr(args, 'locagent_pip_package', None),
+        github_token=github_token,
     )
 
     runner = HarborRunner(

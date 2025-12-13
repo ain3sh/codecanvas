@@ -100,6 +100,7 @@ def build_profile(
     locagent_git_url: Optional[str] = None,
     locagent_git_ref: Optional[str] = None,
     locagent_pip_package: Optional[str] = None,
+    github_token: Optional[str] = None,
     extra_env: Optional[Dict[str, str]] = None,
 ) -> AgentProfile:
     """Build an agent profile with MCP and hooks configuration."""
@@ -117,6 +118,11 @@ def build_profile(
     if hooks_path and hooks_path.exists():
         hooks_config_json = hooks_path.read_text()
 
+    # Build environment variables
+    env = dict(extra_env or {})
+    if github_token:
+        env["GITHUB_TOKEN"] = github_token
+
     return AgentProfile(
         key=key,
         model=model,
@@ -126,5 +132,5 @@ def build_profile(
         locagent_git_url=locagent_git_url,
         locagent_git_ref=locagent_git_ref,
         locagent_pip_package=locagent_pip_package,
-        extra_env=extra_env or {},
+        extra_env=env,
     )
