@@ -135,17 +135,28 @@ class ClaudeCodeMCP(ClaudeCode):
             )
             cmd_parts.extend(["--mcp-config", mcp_file])
 
-        # Write hooks config to file if provided
+        # Build settings.json with hooks and MCP permissions
+        settings = {}
         if self.hooks_config:
-            hooks_file = "/tmp/hooks-settings.json"
-            escaped_hooks = shlex.quote(self.hooks_config)
+            hooks_data = json.loads(self.hooks_config) if isinstance(self.hooks_config, str) else self.hooks_config
+            settings.update(hooks_data)
+        
+        # Pre-allow MCP tools if MCP config is provided
+        if self.mcp_config:
+            settings.setdefault("permissions", {})
+            settings["permissions"].setdefault("allow", [])
+            settings["permissions"]["allow"].append("mcp__*")
+        
+        if settings:
+            settings_file = "/tmp/claude-settings.json"
+            escaped_settings = shlex.quote(json.dumps(settings))
             setup_cmds.append(
                 ExecInput(
-                    command=f"echo {escaped_hooks} > {hooks_file}",
+                    command=f"echo {escaped_settings} > {settings_file}",
                     env=env,
                 )
             )
-            cmd_parts.extend(["--settings", hooks_file])
+            cmd_parts.extend(["--settings", settings_file])
 
         # Add system prompt if provided (pass content directly, not file path)
         if self.system_prompt:
