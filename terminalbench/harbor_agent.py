@@ -119,6 +119,10 @@ class ClaudeCodeMCP(ClaudeCode):
         ]
         cmd_parts.extend(self.ALLOWED_TOOLS)
 
+        # Add MCP tools to allowed list if MCP config is provided (use glob pattern)
+        if self.mcp_config:
+            cmd_parts.append("mcp__*")
+
         # Write MCP config to file if provided
         if self.mcp_config:
             mcp_file = "/tmp/mcp-config.json"
