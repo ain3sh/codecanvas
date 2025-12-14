@@ -138,10 +138,15 @@ class ClaudeCodeMCP(ClaudeCode):
             settings.update(hooks_data)
         
         # Pre-allow MCP tools if MCP config is provided
+        # Per Claude Code docs: MCP permissions do NOT support wildcards.
+        # Use mcp__<server_name> to approve ALL tools from that server.
         if self.mcp_config:
+            mcp_data = json.loads(self.mcp_config) if isinstance(self.mcp_config, str) else self.mcp_config
             settings.setdefault("permissions", {})
             settings["permissions"].setdefault("allow", [])
-            settings["permissions"]["allow"].append("mcp__*")
+            for server_name in mcp_data.get("mcpServers", {}).keys():
+                settings["permissions"]["allow"].append(f"mcp__{server_name}")
+            settings["permissions"]["defaultMode"] = "acceptEdits"
         
         if settings:
             settings_file = "/tmp/claude-settings.json"
