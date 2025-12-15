@@ -20,7 +20,7 @@ async def list_tools() -> list[Tool]:
     return [
         Tool(
             name="init_repository",
-            description="Initialize code index for a repository. MUST call first before other tools. Returns node/edge count on success.",
+            description="Initialize code index for a repository. MUST call first. After init, ALWAYS call get_dependencies(entities=['/'], depth=2) to see structure before proceeding.",
             inputSchema={
                 "type": "object",
                 "properties": {

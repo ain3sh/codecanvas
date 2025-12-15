@@ -86,7 +86,7 @@ def init_repository(repo_path: str, force_rebuild: bool = False) -> str:
         except Exception as e:
             return f"Initialized graph ({G.number_of_nodes()} nodes) but BM25 index failed: {e}"
     
-    return f"Initialized: {repo_path} ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges)"
+    return f"Initialized: {repo_path} ({G.number_of_nodes()} nodes, {G.number_of_edges()} edges). Next: get_dependencies(entities=['/'], depth=2) to see structure."
 
 
 def is_initialized() -> bool:
