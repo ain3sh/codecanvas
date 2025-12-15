@@ -84,6 +84,7 @@ class ClaudeCodeMCP(ClaudeCode):
             "CLAUDE_CODE_OAUTH_TOKEN": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", ""),
             "FORCE_AUTO_BACKGROUND_TASKS": "1",
             "ENABLE_BACKGROUND_TASKS": "1",
+            "ANTHROPIC_CUSTOM_HEADERS": "anthropic-beta: interleaved-thinking-2025-05-14",
         }
         env = {k: v for k, v in env.items() if v}
 
@@ -114,11 +115,8 @@ class ClaudeCodeMCP(ClaudeCode):
             "claude",
             "--verbose",
             "--output-format", "stream-json",
-            "--betas", "context-1m-2025-08-07",
             "-p", escaped_instruction,
-            "--allowedTools",
         ]
-        cmd_parts.extend(self.ALLOWED_TOOLS)
 
         # Write MCP config to file if provided
         if self.mcp_config:
@@ -133,32 +131,33 @@ class ClaudeCodeMCP(ClaudeCode):
             cmd_parts.extend(["--mcp-config", mcp_file])
 
         # Build settings.json with hooks and MCP permissions
-        settings = {}
+        settings: dict[str, Any] = {}
         if self.hooks_config:
             hooks_data = json.loads(self.hooks_config) if isinstance(self.hooks_config, str) else self.hooks_config
             settings.update(hooks_data)
-        
+
+        permissions = settings.setdefault("permissions", {})
+        permissions.setdefault("allow", [])
+        permissions.setdefault("defaultMode", "acceptEdits")
+
         # Pre-allow MCP tools if MCP config is provided
         # Per Claude Code docs: MCP permissions do NOT support wildcards.
         # Use mcp__<server_name> to approve ALL tools from that server.
         if self.mcp_config:
             mcp_data = json.loads(self.mcp_config) if isinstance(self.mcp_config, str) else self.mcp_config
-            settings.setdefault("permissions", {})
-            settings["permissions"].setdefault("allow", [])
             for server_name in mcp_data.get("mcpServers", {}).keys():
-                settings["permissions"]["allow"].append(f"mcp__{server_name}")
-            settings["permissions"]["defaultMode"] = "acceptEdits"
-        
-        if settings:
-            settings_file = "/tmp/claude-settings.json"
-            escaped_settings = shlex.quote(json.dumps(settings))
-            setup_cmds.append(
-                ExecInput(
-                    command=f"echo {escaped_settings} > {settings_file}",
-                    env=env,
-                )
+                permissions["allow"].append(f"mcp__{server_name}")
+            permissions["defaultMode"] = "acceptEdits"
+
+        settings_file = "/tmp/claude-settings.json"
+        escaped_settings = shlex.quote(json.dumps(settings))
+        setup_cmds.append(
+            ExecInput(
+                command=f"echo {escaped_settings} > {settings_file}",
+                env=env,
             )
-            cmd_parts.extend(["--settings", settings_file])
+        )
+        cmd_parts.extend(["--settings", settings_file])
 
         # Add system prompt if provided (pass content directly, not file path)
         if self.system_prompt:
