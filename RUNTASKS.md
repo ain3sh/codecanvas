@@ -1,163 +1,274 @@
 # TerminalBench Runner
 
-Run Terminal-Bench 2.0 tasks via Harbor framework with different agent configurations.
+Run Terminal-Bench 2.0 with Claude Code, with or without MCP tools, using Harbor.
 
 ## Quick Start
 
 ```bash
-# Prerequisites (harbor auto-installed via uvx on first run)
+# Install
 uv pip install -e ".[terminalbench]"
 
-# Run single task with text-only agent (uses terminalbench/.env by default)
-python -m terminalbench.cli --agent text --tasks processing-pipeline
+# Baseline (no MCP)
+python -m terminalbench.cli --tasks sanitize-git-repo --reasoning low \
+  --model anthropic/claude-haiku-4-5
 
-# Run all tasks with all agents
+# Baseline vs MCP in one call (text + locagent)
+python -m terminalbench.cli --tasks sanitize-git-repo --reasoning low \
+  --model anthropic/claude-haiku-4-5 --profiles-parallel 2 \
+  --config-set --no-mcp --key text \
+  --config-set --mcp-server locagent --mcp-git-source https://github.com/ain3sh/codecanvas --key loc
+```
+
+## Installation
+
+**Prerequisites:**
+- Python 3.10+
+- Docker (or alternative: daytona, modal, e2b)
+- `ANTHROPIC_API_KEY` in `terminalbench/.env`
+
+```bash
+# Install terminalbench
+uv pip install -e ".[terminalbench]"
+
+# Harbor is auto-installed via uvx on first run
+```
+
+**Build reuse:** environments are kept (`--no-delete`) to avoid rebuild spikes. The harness auto-rebuilds when the install template or MCP git source changes; set `TERMINALBENCH_FORCE_REBUILD=1` to force a fresh build once.
+
+## Basic Usage
+
+### Run All Tasks
+```bash
 python -m terminalbench.cli
 ```
 
-## CLI Reference
-
-### Agent Selection
+### Run Specific Tasks
 ```bash
---agent {text,locagent,codecanvas,all}   # default: all
+python -m terminalbench.cli --tasks sanitize-git-repo build-cython-ext
 ```
 
-### Task Selection
-```bash
---tasks processing-pipeline sanitize-git-repo   # specific tasks
---manifest custom.yaml                          # custom manifest file
-```
+### Model Selection
+Use API IDs (examples): `anthropic/claude-haiku-4-5`, `anthropic/claude-sonnet-4-5`, `anthropic/claude-opus-4-5`.
 
-### Execution Options
-```bash
---env-file .env          # load ANTHROPIC_API_KEY from file
---output-dir ./runs      # output directory (default: ./runs)
---attempts 3             # retry attempts per task (--n-attempts to harbor)
---retries 2              # retry on failure
---parallel 4             # parallel workers (passed to harbor -n)
---container-env docker   # container runtime (docker|daytona|modal|e2b)
---harbor-bin /path/to/harbor  # custom harbor binary (default: uses uvx)
---extra-flag --verbose   # extra flags passed to harbor run (repeatable)
---dry-run                # print commands without executing
---quiet                  # suppress summary output
-```
+Reasoning levels: `low`, `medium`, `high`.
+
+## MCP Integration
+
+MCP (Model Context Protocol) servers provide Claude with additional tools. The harness supports:
+1. Loading MCP config from `.mcp.json`
+2. Selectively enabling servers
+3. Installing MCP servers in Harbor containers
 
 ### MCP Configuration
-```bash
---locagent-mcp "http://localhost:8000"   # LocAgent MCP server
---canvas-mcp "http://localhost:8001"     # CodeCanvas MCP server
---hooks ./hooks.json                      # Claude Code hooks file
+
+MCP servers are defined in `.mcp.json` (Claude Code standard format):
+
+```json
+{
+  "mcpServers": {
+    "locagent": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "locagent.server"],
+      "env": {"PYTHONUNBUFFERED": "1"}
+    }
+  }
+}
 ```
 
-### Output Options
+### Enable MCP Servers
+
 ```bash
---json                   # emit results as JSON
---csv results.csv        # export to CSV file
+# List available servers
+python -m terminalbench.cli --list-mcp-servers
+
+# Enable specific server(s)
+python -m terminalbench.cli --mcp-server locagent --tasks sanitize-git-repo
+
+# Enable multiple servers
+python -m terminalbench.cli --mcp-server locagent --mcp-server another
+
+# Disable all MCP (baseline run)
+python -m terminalbench.cli --no-mcp --tasks sanitize-git-repo
 ```
+
+### Install MCP in Container
+
+For Harbor runs, MCP servers must be installed in the container:
+
+```bash
+python -m terminalbench.cli \
+  --mcp-server locagent \
+  --mcp-git-source https://github.com/ain3sh/codecanvas \
+  --tasks sanitize-git-repo
+```
+
+If you skip `--mcp-git-source`, the MCP server will fail to start and trajectories may not parse.
+
+For private repos, set `GITHUB_TOKEN` in `terminalbench/.env` or use `--github-token`.
+
+### System Prompts (USAGE.md)
+
+The harness auto-discovers `<server_name>/USAGE.md` files and appends them to Claude's system prompt. Create `locagent/USAGE.md` with tool usage instructions.
 
 ## Configuration
 
 ### Persistent Config
+
 ```bash
 python -m terminalbench.cli setup
 ```
 
-Saves to `~/.terminalbench/config.yaml`. CLI args override saved config.
+Saves to `~/.terminalbench/config.yaml`. CLI flags override saved config.
 
 ### Environment Variables
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | Required for Harbor runs |
-| `LOCAGENT_MCP` | Default LocAgent MCP URL |
-| `CODECANVAS_MCP` | Default CodeCanvas MCP URL |
-| `CLAUDE_CODE_HOOKS` | Default hooks file path |
 
-## tasks.yaml Format
+Create `terminalbench/.env`:
 
-```yaml
-env_file: terminalbench/.env     # optional: path to .env file (default: terminalbench/.env)
-
-tasks:
-  - id: processing-pipeline      # required: task identifier
-    dataset: terminal-bench@2.0  # optional: dataset (default shown)
-    order: 1                     # optional: execution order (lower = first)
-    tb_url: https://tbench.ai/tasks/processing-pipeline  # ignored (human reference)
-    gh_url: https://github.com/...                       # ignored (human reference)
-
-  - id: custom-task
-    dataset: my-dataset@1.0
-    order: 10
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
+GITHUB_TOKEN=ghp_...  # Optional: for private MCP repos
 ```
 
-**Note:** Extra fields like `tb_url` and `gh_url` are ignored during parsing - use them for human reference.
+### Manifest (tasks.yaml)
 
-**env_file resolution order:** CLI `--env-file` > manifest `env_file` > `terminalbench/.env` (if exists)
+```yaml
+env_file: terminalbench/.env
+mcp_config: .mcp.json
 
-**Default tasks:** processing-pipeline, sanitize-git-repo, swe-bench-fsspec, deterministic-tarball, tree-directory-parser, c-to-safe-rust, reverse-engineering
+tasks:
+  - id: sanitize-git-repo
+    dataset: terminal-bench@2.0
+    order: 1
+```
+
+## CLI Reference
+
+### Task Selection
+| Flag | Description |
+|------|-------------|
+| `--tasks ID [ID ...]` | Run specific tasks |
+| `--manifest FILE` | Custom manifest file |
+
+### Model Configuration
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--model`, `-m` | Model name | `anthropic/claude-sonnet-4-20250514` |
+| `--reasoning` | Thinking level (low/medium/high) | `medium` |
+
+### MCP Configuration
+| Flag | Description |
+|------|-------------|
+| `--mcp-config FILE` | Path to .mcp.json |
+| `--mcp-server NAME` | Enable specific server (repeatable) |
+| `--no-mcp` | Disable all MCP servers |
+| `--list-mcp-servers` | List available servers and exit |
+| `--mcp-git-source URL` | Git URL to install MCP from |
+| `--github-token TOKEN` | GitHub token for private repos |
+
+### Hooks Configuration
+| Flag | Description |
+|------|-------------|
+| `--hooks FILE` | Claude Code hooks settings file |
+
+### Execution Options
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--output-dir DIR` | Output directory | `./runs` |
+| `--attempts N` | Attempts per task | `1` |
+| `--retries N` | Retries on failure | `0` |
+| `--parallel`, `-n` | Parallel workers | `0` |
+| `--container-env` | Runtime (docker/daytona/modal/e2b) | `docker` |
+| `--dry-run` | Print commands without executing | |
+| `--quiet` | Suppress output | |
+| `--env-file FILE` | Load env vars from file | `terminalbench/.env` |
+| `--profiles-parallel N` | Parallelize multiple config-sets | `0` |
+| `--config-set ...` | Define an additional agent config (repeatable) | |
+
+### Output Options
+| Flag | Description |
+|------|-------------|
+| `--json` | Emit results as JSON |
+| `--csv FILE` | Export to CSV |
+
+### Advanced
+| Flag | Description |
+|------|-------------|
+| `--harbor-bin PATH` | Custom harbor binary |
+| `--extra-flag FLAG` | Extra harbor flag (repeatable) |
 
 ## Output Structure
 
 ```
 runs/
-├── index.json                              # auto-maintained run index
-└── {timestamp}/                            # Harbor job directory
-    ├── config.json                         # job configuration
-    ├── result.json                         # aggregate results with metrics
-    └── {task_id}__{hash}/                  # trial directory
+├── index.json                              # Run index
+└── {timestamp}/
+    ├── config.json                         # Job configuration
+    ├── result.json                         # Aggregate results
+    └── {task_id}__{hash}/
         └── agent/
-            ├── trajectory.json             # agent trace
-            └── sessions/                   # claude code session logs
-```
-
-### index.json
-```json
-{
-  "runs": [
-    {
-      "task_id": "build-cython-ext",
-      "agent_key": "text",
-      "success": true,
-      "accuracy": 0.0,
-      "resolved": false,
-      "elapsed_sec": 485.7,
-      "job_dir": "runs/2025-12-12__02-23-38",
-      "results_json": "runs/.../result.json",
-      "trajectory_json": "runs/.../agent/trajectory.json"
-    }
-  ]
-}
+            ├── trajectory.json             # Agent trace (ATIF format)
+            ├── claude-code.txt             # Raw Claude output
+            └── sessions/                   # Claude Code session logs
 ```
 
 ## Common Workflows
 
-### Benchmark all agents on one task
+### Baseline vs MCP Comparison
+
 ```bash
-python -m terminalbench.cli --tasks processing-pipeline --env-file .env
+# Baseline (no MCP)
+python -m terminalbench.cli --no-mcp --tasks sanitize-git-repo --csv baseline.csv
+
+# With MCP
+python -m terminalbench.cli --mcp-server locagent \
+  --mcp-git-source https://github.com/ain3sh/codecanvas \
+  --tasks sanitize-git-repo --csv mcp.csv
+
+# Both in one command (parallel profiles)
+python -m terminalbench.cli --tasks sanitize-git-repo --reasoning low \
+  --model anthropic/claude-haiku-4-5 --profiles-parallel 2 \
+  --config-set --no-mcp --key text \
+  --config-set --mcp-server locagent --mcp-git-source https://github.com/ain3sh/codecanvas --key loc
 ```
 
-### Compare two agents
+### Full Benchmark
+
 ```bash
-python -m terminalbench.cli --agent text --env-file .env --csv text.csv
-python -m terminalbench.cli --agent locagent --locagent-mcp http://localhost:8000 --env-file .env --csv locagent.csv
+python -m terminalbench.cli \
+  --mcp-server locagent \
+  --mcp-git-source https://github.com/ain3sh/codecanvas \
+  --parallel 4 \
+  --csv results.csv
 ```
 
-### Full benchmark with parallel execution
-```bash
-python -m terminalbench.cli --parallel 4 --env-file .env --csv full_results.csv
-```
+### Dry Run
 
-### Dry run to verify commands
 ```bash
-python -m terminalbench.cli --dry-run
+python -m terminalbench.cli --dry-run --tasks sanitize-git-repo
 ```
 
 ## Troubleshooting
 
 | Issue | Fix |
 |-------|-----|
-| `ANTHROPIC_API_KEY is required` | Use `--env-file` or export the key |
-| CRLF errors in .env | Run `dos2unix .env` |
-| `uvx` not found | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
-| Modal Python 3.14+ error | Expected - harbor runs in isolated Python 3.13 via uvx |
-| Docker errors | Ensure Docker daemon is running with sufficient resources |
-| Container env issues | Try `--container-env daytona` or `--container-env modal` |
+| `ANTHROPIC_API_KEY is required` | Add to `terminalbench/.env` |
+| `uvx not found` | Install uv: `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| MCP permission errors | Ensure `--mcp-server` matches server name in `.mcp.json` |
+| Git clone fails in container | Set `GITHUB_TOKEN` in `.env` and pass `--mcp-git-source` |
+| Docker errors | Ensure Docker daemon is running |
+| OOM errors | Task may read large files; try `--container-env modal` |
+| CRLF errors in .env | Run `dos2unix terminalbench/.env` |
+
+## Available Tasks
+
+| Task ID | Description |
+|---------|-------------|
+| `sanitize-git-repo` | Remove API keys from repository |
+| `build-cython-ext` | Build Cython extension |
+| `custom-memory-heap-crash` | Debug memory issue |
+| `db-wal-recovery` | Database recovery |
+| `modernize-scientific-stack` | Update dependencies |
+| `rstan-to-pystan` | R to Python migration |
+| `fix-code-vulnerability` | Security fix |
+
+See `tasks.yaml` for full task list.

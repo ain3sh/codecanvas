@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -10,6 +11,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 from .agents import AgentProfile
 from .tasks import Task
+from .config import CONFIG_DIR
 
 
 def load_env_file(env_file: Path | str | None) -> Dict[str, str]:
@@ -69,6 +71,7 @@ class HarborRunner:
         dry_run: bool = False,
         extra_flags: Optional[Sequence[str]] = None,
         env_file: Path | str | None = None,
+        build_cache_path: Path | None = None,
     ) -> None:
         self.harbor_bin = harbor_bin  # None = use uvx (default)
         self.output_root = Path(output_root).resolve() if output_root else None
@@ -79,8 +82,61 @@ class HarborRunner:
         self.dry_run = dry_run
         self.extra_flags = list(extra_flags) if extra_flags else []
         self.env_from_file = load_env_file(env_file)
+        self.build_cache_path = build_cache_path or CONFIG_DIR / "build-hash.json"
 
-    def _build_command(self, task: Task, profile: AgentProfile, output_dir: Optional[Path]) -> List[str]:
+    # ------------------------------------------------------------------
+    # Build fingerprint helpers
+    # ------------------------------------------------------------------
+
+    def _compute_build_fingerprint(self, profiles: List[AgentProfile]) -> str:
+        template_path = Path(__file__).parent / "install-claude-code-mcp.sh.j2"
+        template_bytes = template_path.read_bytes() if template_path.exists() else b""
+
+        # Combine unique relevant attributes across profiles to avoid stale builds.
+        mcp_sources = sorted({p.mcp_git_source or "" for p in profiles})
+        claude_versions = sorted({p.claude_version or "" for p in profiles})
+
+        # GitHub token presence can affect git clone auth; hash only presence, not value.
+        github_token_present = bool(
+            self.env_from_file.get("GITHUB_TOKEN")
+            or os.environ.get("GITHUB_TOKEN")
+            or any("GITHUB_TOKEN" in p.extra_env for p in profiles)
+        )
+
+        h = hashlib.sha256()
+        h.update(template_bytes)
+        for src in mcp_sources:
+            h.update(src.encode())
+        for cv in claude_versions:
+            h.update(cv.encode())
+        h.update(b"gh" if github_token_present else b"nogh")
+        return h.hexdigest()
+
+    def _load_cached_fingerprint(self) -> str | None:
+        if not self.build_cache_path.exists():
+            return None
+        try:
+            data = json.loads(self.build_cache_path.read_text())
+            return data.get("fingerprint")
+        except Exception:
+            return None
+
+    def _store_fingerprint(self, fingerprint: str) -> None:
+        try:
+            self.build_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            self.build_cache_path.write_text(json.dumps({"fingerprint": fingerprint}, indent=2))
+        except Exception:
+            # Cache failures should not block execution
+            pass
+
+    def _build_command(
+        self,
+        task: Task,
+        profile: AgentProfile,
+        output_dir: Optional[Path],
+        force_build: bool,
+        keep_environment: bool,
+    ) -> List[str]:
         if self.harbor_bin:
             cmd = [self.harbor_bin, "run"]
         else:
@@ -96,6 +152,11 @@ class HarborRunner:
             cmd.extend(["-n", str(self.parallel)])
         if self.container_env:
             cmd.extend(["--env", self.container_env])
+        # Keep environments by default to avoid rebuild churn (unless user explicitly overrides)
+        if keep_environment and not any(flag in {"--delete", "--no-delete"} for flag in self.extra_flags):
+            cmd.append("--no-delete")
+        if force_build:
+            cmd.append("--force-build")
         if self.extra_flags:
             cmd.extend(self.extra_flags)
         return cmd
@@ -166,12 +227,24 @@ class HarborRunner:
         runs.append(result.to_dict())
         index_file.write_text(json.dumps({"runs": runs}, indent=2))
 
-    def _run_single(self, task: Task, profile: AgentProfile) -> RunResult:
+    def _run_single(
+        self,
+        task: Task,
+        profile: AgentProfile,
+        force_build: bool,
+        keep_environment: bool,
+    ) -> RunResult:
         """Run a single task with retry logic."""
         if self.output_root:
             self.output_root.mkdir(parents=True, exist_ok=True)
 
-        cmd = self._build_command(task, profile, self.output_root)
+        cmd = self._build_command(
+            task,
+            profile,
+            self.output_root,
+            force_build=force_build,
+            keep_environment=keep_environment,
+        )
         env = self._env(profile)
 
         if self.dry_run:
@@ -228,10 +301,70 @@ class HarborRunner:
         self._update_index(last_result)
         return last_result
 
-    def run_tasks(self, tasks: Iterable[Task], profile: AgentProfile) -> List[RunResult]:
+    def run_tasks(
+        self,
+        tasks: Iterable[Task],
+        profile: AgentProfile,
+        force_build: bool = False,
+        keep_environment: bool = True,
+    ) -> List[RunResult]:
         """Run tasks sequentially (Harbor handles parallelization internally via -n flag)."""
         results: List[RunResult] = []
         for task in tasks:
-            result = self._run_single(task, profile)
+            result = self._run_single(task, profile, force_build, keep_environment)
+            # Only force build on first run in a batch
+            force_build = False
             results.append(result)
         return results
+
+    def run_profiles(
+        self,
+        tasks: Iterable[Task],
+        profiles: List[AgentProfile],
+        profiles_parallel: int = 0,
+    ) -> List[RunResult]:
+        """Run a list of profiles over the tasks, reusing environment builds when possible.
+
+        If profiles_parallel > 0, runs profiles concurrently after ensuring any required rebuild
+        is completed by the first profile.
+        """
+        if not profiles:
+            return []
+
+        fingerprint = self._compute_build_fingerprint(profiles)
+        cached = self._load_cached_fingerprint()
+        env_force_rebuild = os.environ.get("TERMINALBENCH_FORCE_REBUILD")
+        needs_rebuild = env_force_rebuild or (fingerprint != cached)
+
+        all_results: List[RunResult] = []
+
+        def run_profile(idx_profile: int, profile: AgentProfile, force_build_flag: bool) -> List[RunResult]:
+            return self.run_tasks(
+                tasks,
+                profile,
+                force_build=force_build_flag,
+                keep_environment=True,
+            )
+
+        # Always run first profile synchronously to perform any needed rebuild safely.
+        first_force = bool(needs_rebuild)
+        all_results.extend(run_profile(0, profiles[0], first_force))
+
+        remaining = profiles[1:]
+        if remaining:
+            if profiles_parallel and profiles_parallel > 0:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
+                    futures = [pool.submit(run_profile, i + 1, p, False) for i, p in enumerate(remaining)]
+                    for fut in as_completed(futures):
+                        all_results.extend(fut.result())
+            else:
+                for i, profile in enumerate(remaining, start=1):
+                    all_results.extend(run_profile(i, profile, False))
+
+        # Cache new fingerprint after successful scheduling
+        if fingerprint:
+            self._store_fingerprint(fingerprint)
+
+        return all_results

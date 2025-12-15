@@ -6,17 +6,55 @@ import json
 import sys
 
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Tuple
 
-from .agents import build_profile, get_available_servers, discover_mcp_usage_prompts
+from .agents import build_profile, get_available_servers, discover_mcp_usage_prompts, AgentProfile
 from .runner import HarborRunner, RunResult
 from .tasks import load_manifest, Task, DEFAULT_ENV_FILE
 from .display import print_summary
 
 
-def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
+def _split_config_sets(argv: List[str]) -> Tuple[List[str], List[List[str]]]:
+    """Extract repeated --config-set/-C groups from argv for separate parsing."""
+    base: List[str] = []
+    sets: List[List[str]] = []
+    i = 0
+    while i < len(argv):
+        tok = argv[i]
+        if tok in {"--config-set", "-C"}:
+            current: List[str] = []
+            i += 1
+            while i < len(argv) and argv[i] not in {"--config-set", "-C"}:
+                current.append(argv[i])
+                i += 1
+            sets.append(current)
+        else:
+            base.append(tok)
+            i += 1
+    return base, sets
+
+
+def _config_set_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--key")
+    parser.add_argument("--model")
+    parser.add_argument("--reasoning")
+    parser.add_argument("--claude-version")
+    parser.add_argument("--mcp-server", action="append", dest="mcp_servers")
+    parser.add_argument("--no-mcp", action="store_true")
+    parser.add_argument("--hooks", type=Path)
+    parser.add_argument("--mcp-config", type=Path)
+    parser.add_argument("--mcp-git-source")
+    parser.add_argument("--github-token")
+    return parser
+
+
+def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, List[argparse.Namespace]]:
     from .config import load_config
     cfg = load_config()
+
+    raw_argv = list(argv) if argv is not None else sys.argv[1:]
+    base_argv, config_sets_tokens = _split_config_sets(raw_argv or [])
 
     parser = argparse.ArgumentParser(description="Terminal-Bench harness")
     subparsers = parser.add_subparsers(dest="command")
@@ -38,11 +76,13 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--harbor-bin", default=cfg.harbor_bin, help="harbor executable (default: use uvx)")
     parser.add_argument("--container-env", default=cfg.container_env, help="container runtime (docker|daytona|modal|e2b)")
     parser.add_argument("--extra-flag", action="append", default=[], help="extra flag to pass to harbor run")
+    parser.add_argument("--profiles-parallel", type=int, default=0, help="parallel profile runs (0=sequential)")
     parser.add_argument("--env-file", type=Path, default=Path(cfg.env_file) if cfg.env_file else None)
 
     # Model configuration
     parser.add_argument("--model", "-m", default=cfg.model, help="model to use for evaluation")
     parser.add_argument("--reasoning", default=cfg.reasoning, help="reasoning level (low/medium/high)")
+    parser.add_argument("--claude-version", help="Claude Code version to install (optional)")
 
     # MCP configuration
     parser.add_argument(
@@ -92,7 +132,15 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--json", action="store_true", help="emit results as JSON")
     parser.add_argument("--csv", type=Path, help="export results to CSV file")
 
-    return parser.parse_args(list(argv) if argv is not None else None)
+    args = parser.parse_args(base_argv)
+
+    config_sets: List[argparse.Namespace] = []
+    if config_sets_tokens:
+        cs_parser = _config_set_parser()
+        for tokens in config_sets_tokens:
+            config_sets.append(cs_parser.parse_args(tokens))
+
+    return args, config_sets
 
 
 def select_tasks(all_tasks: List[Task], ids: List[str] | None) -> List[Task]:
@@ -123,7 +171,7 @@ def export_csv(results: List[RunResult], path: Path) -> None:
 
 
 def run_cli(argv: Iterable[str] | None = None) -> int:
-    args = parse_args(argv)
+    args, config_sets = parse_args(argv)
 
     # Handle setup subcommand
     if args.command == "setup":
@@ -167,7 +215,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     if hooks_path is None and manifest_config.hooks:
         hooks_path = Path(manifest_config.hooks)
 
-    # Determine MCP settings
+    # Determine MCP settings for default profile
     enabled_servers = None if args.no_mcp else args.mcp_servers
     mcp_path = None if args.no_mcp else mcp_config_path
 
@@ -179,23 +227,56 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         or os.environ.get('GITHUB_TOKEN')
     )
 
-    # Auto-discover USAGE.md system prompts for enabled MCP servers
-    system_prompt = None
-    if enabled_servers:
-        system_prompt = discover_mcp_usage_prompts(enabled_servers)
+    def build_profile_from_set(set_ns: argparse.Namespace | None, default_key: str) -> AgentProfile:
+        model = (set_ns.model if set_ns and getattr(set_ns, "model", None) else args.model)
+        reasoning = (set_ns.reasoning if set_ns and getattr(set_ns, "reasoning", None) else args.reasoning)
+        claude_version = (set_ns.claude_version if set_ns and getattr(set_ns, "claude_version", None) else getattr(args, "claude_version", None))
 
-    # Build agent profile
-    profile = build_profile(
-        key="claude-code",
-        model=args.model,
-        reasoning=args.reasoning,
-        mcp_config_path=mcp_path,
-        enabled_mcp_servers=enabled_servers,
-        hooks_path=hooks_path,
-        mcp_git_source=getattr(args, 'mcp_git_source', None),
-        github_token=github_token,
-        system_prompt=system_prompt,
-    )
+        # Resolve MCP specifics
+        no_mcp_flag = bool(set_ns.no_mcp) if set_ns and hasattr(set_ns, "no_mcp") else args.no_mcp
+        set_mcp_servers = getattr(set_ns, "mcp_servers", None) if set_ns else args.mcp_servers
+        local_enabled_servers = None if no_mcp_flag else set_mcp_servers
+
+        set_mcp_config = getattr(set_ns, "mcp_config", None) if set_ns else None
+        local_mcp_path = None if no_mcp_flag else (set_mcp_config or mcp_config_path)
+
+        set_hooks = getattr(set_ns, "hooks", None) if set_ns else None
+        local_hooks_path = set_hooks or hooks_path
+
+        set_git_source = getattr(set_ns, "mcp_git_source", None) if set_ns else None
+        local_git_source = set_git_source or getattr(args, "mcp_git_source", None)
+
+        set_github_token = getattr(set_ns, "github_token", None) if set_ns else None
+        local_github_token = set_github_token or github_token
+
+        # Auto-discover system prompt per config
+        system_prompt = None
+        if local_enabled_servers:
+            system_prompt = discover_mcp_usage_prompts(local_enabled_servers)
+
+        key = (getattr(set_ns, "key", None) if set_ns else None) or default_key
+
+        return build_profile(
+            key=key,
+            model=model,
+            reasoning=reasoning,
+            claude_version=claude_version,
+            mcp_config_path=local_mcp_path,
+            enabled_mcp_servers=local_enabled_servers,
+            hooks_path=local_hooks_path,
+            mcp_git_source=local_git_source,
+            github_token=local_github_token,
+            system_prompt=system_prompt,
+        )
+
+    profiles: List[AgentProfile] = []
+    if config_sets:
+        for idx, cs in enumerate(config_sets):
+            default_key = cs.key or ("nomcp" if getattr(cs, "no_mcp", False) else ("-".join(cs.mcp_servers) if cs.mcp_servers else f"profile{idx+1}"))
+            profiles.append(build_profile_from_set(cs, default_key))
+    else:
+        default_key = "nomcp" if args.no_mcp else ("-".join(args.mcp_servers) if args.mcp_servers else "claude-code")
+        profiles.append(build_profile_from_set(None, default_key))
 
     runner = HarborRunner(
         harbor_bin=args.harbor_bin,
@@ -209,7 +290,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         env_file=env_file,
     )
 
-    all_results = runner.run_tasks(tasks, profile)
+    all_results = runner.run_profiles(tasks, profiles, profiles_parallel=args.profiles_parallel)
 
     if args.json:
         print(json.dumps([r.to_dict() for r in all_results], indent=2))

@@ -67,6 +67,7 @@ class AgentProfile:
     agent: str = "claude-code"
     model: str = DEFAULT_MODEL
     reasoning: str = DEFAULT_REASONING
+    claude_version: Optional[str] = None
     mcp_config_json: Optional[str] = None  # JSON string of MCP config
     hooks_config_json: Optional[str] = None  # JSON string of hooks config
     mcp_git_source: Optional[str] = None  # Git URL for MCP server installation
@@ -91,6 +92,10 @@ class AgentProfile:
         # Pass reasoning level
         if self.reasoning:
             args.extend(["--ak", f"reasoning={self.reasoning}"])
+
+        # Pass Claude version override (optional)
+        if self.claude_version:
+            args.extend(["--ak", f"claude_version={self.claude_version}"])
 
         # Pass MCP git source for installation in container
         if self.mcp_git_source:
@@ -129,6 +134,7 @@ def build_profile(
     key: str,
     model: str = DEFAULT_MODEL,
     reasoning: str = DEFAULT_REASONING,
+    claude_version: Optional[str] = None,
     mcp_config_path: Optional[Path] = None,
     enabled_mcp_servers: Optional[List[str]] = None,
     hooks_path: Optional[Path] = None,
@@ -162,6 +168,7 @@ def build_profile(
         key=key,
         model=model,
         reasoning=reasoning,
+        claude_version=claude_version,
         mcp_config_json=mcp_config_json,
         hooks_config_json=hooks_config_json,
         mcp_git_source=mcp_git_source,

@@ -1,0 +1,53 @@
+{
+    "task": {
+        "path": "sanitize-git-repo",
+        "git_url": "https://github.com/laude-institute/terminal-bench-2.git",
+        "git_commit_id": "69671fbaac6d67a7ef0dfec016cc38a64ef7a77c",
+        "overwrite": false,
+        "download_dir": null,
+        "source": "terminal-bench"
+    },
+    "trial_name": "sanitize-git-repo__rr57Qo5",
+    "trials_dir": "/mnt/d/Personal_Folders/Tocho/ain3sh/codecanvas/runs/2025-12-14__22-48-17",
+    "timeout_multiplier": 1.0,
+    "agent": {
+        "name": null,
+        "import_path": "terminalbench.harbor_agent:ClaudeCodeMCP",
+        "model_name": "anthropic/claude-haiku-4-5",
+        "override_timeout_sec": null,
+        "max_timeout_sec": null,
+        "kwargs": {
+            "mcp_config": {
+                "mcpServers": {
+                    "locagent": {
+                        "command": "python3",
+                        "args": [
+                            "-m",
+                            "locagent.server"
+                        ],
+                        "env": {
+                            "PYTHONUNBUFFERED": "1"
+                        }
+                    }
+                }
+            },
+            "reasoning": "low",
+            "system_prompt": "## LocAgent MCP Tools\n\n**USE FIRST AND OFTEN.** Build your mental model before acting.\n\n**Start EVERY task:**\n```\ninit_repository(repo_path=\"/absolute/path\")           # 1. Initialize\nget_dependencies(entities=[\"/\"], depth=2)             # 2. See structure\n```\n\n**Then explore what's relevant to your task:**\n\n| To understand... | Use |\n|------------------|-----|\n| Overall structure | `get_dependencies(entities=[\"/\"], depth=2)` |\n| What calls X | `get_dependencies(entities=[\"file.py:X\"], direction=\"incoming\")` |\n| What X depends on | `get_dependencies(entities=[\"file.py:X\"], direction=\"outgoing\")` |\n| Find code by name | `search_code(query=[\"keyword\"])` |\n| Get full source | `get_code(entities=[\"file.py:X\"])` |\n\n**Entity format:** `file.py` | `file.py:Class` | `file.py:method`\n\n**Example - sanitizing secrets:**\n```\ninit_repository(repo_path=\"/project\")\nget_dependencies(entities=[\"/\"], depth=2)                    # what modules exist?\nsearch_code(query=[\"config\", \"settings\", \"env\"])             # where might secrets live?\nget_dependencies(entities=[\"config.py\"], direction=\"incoming\") # what uses config?\nget_code(entities=[\"config.py:Settings\"])                    # examine implementation\n# NOW use Grep for specific patterns like API keys\n```\n\n**The more you explore, the better you understand. Don't skip steps.**"
+        }
+    },
+    "environment": {
+        "type": "docker",
+        "force_build": false,
+        "delete": false,
+        "override_cpus": null,
+        "override_memory_mb": null,
+        "override_storage_mb": null,
+        "kwargs": {}
+    },
+    "verifier": {
+        "override_timeout_sec": null,
+        "max_timeout_sec": null,
+        "disable": false
+    },
+    "job_id": "bc7f03a3-6dbf-489a-9a48-1d2004c28168"
+}
