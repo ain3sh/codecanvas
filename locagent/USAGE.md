@@ -1,26 +1,33 @@
 ## LocAgent MCP Tools
 
-**FIRST: Match your task to the right tool:**
+**USE FIRST AND OFTEN.** Build your mental model before acting.
 
-| Your task says... | Do this |
-|-------------------|---------|
-| "what calls X" / "find callers" / "who uses" | `get_dependencies(direction="incoming")` |
-| "what does X use" / "dependencies" / "imports" | `get_dependencies(direction="outgoing")` |
-| "show code" / "implementation of" | `search_code` → `get_code` |
-| "find pattern" / "secrets" / "API keys" / "text" | **USE GREP NOT THESE TOOLS** |
+**Start EVERY task:**
+```
+init_repository(repo_path="/absolute/path")           # 1. Initialize
+get_dependencies(entities=["/"], depth=2)             # 2. See structure
+```
 
-**REQUIRED FIRST:** `init_repository(repo_path="/absolute/path")`
+**Then explore what's relevant to your task:**
 
-**Tools:**
-- `get_dependencies(entities=["file.py:Func"], direction="incoming|outgoing")` - relationships
-- `search_code(query=["keyword"])` - find by name
-- `get_code(entities=["file.py:Class"])` - get source
+| To understand... | Use |
+|------------------|-----|
+| Overall structure | `get_dependencies(entities=["/"], depth=2)` |
+| What calls X | `get_dependencies(entities=["file.py:X"], direction="incoming")` |
+| What X depends on | `get_dependencies(entities=["file.py:X"], direction="outgoing")` |
+| Find code by name | `search_code(query=["keyword"])` |
+| Get full source | `get_code(entities=["file.py:X"])` |
 
-**Entity format:** `file.py` | `file.py:Class` | `file.py:Class.method`
+**Entity format:** `file.py` | `file.py:Class` | `file.py:method`
 
+**Example - sanitizing secrets:**
 ```
 init_repository(repo_path="/project")
-get_dependencies(entities=["api.py:save"], direction="incoming")   # who calls save()?
-get_dependencies(entities=["db.py:Database"], direction="outgoing") # what does Database use?
-search_code(query=["Config"]) → get_code(entities=["config.py:Config"])
+get_dependencies(entities=["/"], depth=2)                    # what modules exist?
+search_code(query=["config", "settings", "env"])             # where might secrets live?
+get_dependencies(entities=["config.py"], direction="incoming") # what uses config?
+get_code(entities=["config.py:Settings"])                    # examine implementation
+# NOW use Grep for specific patterns like API keys
 ```
+
+**The more you explore, the better you understand. Don't skip steps.**
