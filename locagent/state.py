@@ -36,9 +36,11 @@ def _get_graph_cache_path(instance_id: str) -> Path:
 
 def init_repository(repo_path: str, force_rebuild: bool = False) -> str:
     """Initialize LocAgent's global state for a repository."""
+    if not os.path.isabs(repo_path):
+        return f"Error: repo_path must be absolute. Got '{repo_path}'. Use full path like '/home/user/project'"
     repo_path = str(Path(repo_path).resolve())
     if not os.path.isdir(repo_path):
-        return f"Error: '{repo_path}' is not a valid directory"
+        return f"Error: '{repo_path}' is not a valid directory. Check path exists and is accessible."
     
     instance_id = _get_instance_id(repo_path)
     graph_cache = _get_graph_cache_path(instance_id)

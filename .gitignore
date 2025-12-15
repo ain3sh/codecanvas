@@ -4,4 +4,5 @@ __pycache__/
 .venv/
 .canvas_*.png
 .canvas_state.json
-*.envnode_modules/
+*.env
+node_modules/

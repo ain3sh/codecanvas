@@ -1,13 +1,22 @@
-You have access to the locagent MCP tools for code navigation and analysis. Use these tools to understand the codebase structure before making changes:
+## LocAgent MCP Tools
 
-- mcp__locagent__init_repository: Initialize the code index for a repository. Call this FIRST before using other locagent tools.
-- mcp__locagent__explore_tree_structure: Get a hierarchical view of the codebase structure.
-- mcp__locagent__search_code_snippets: Search for code patterns, function names, or concepts across the codebase.
-- mcp__locagent__get_entity_contents: Get the full source code of a specific function, class, or code entity.
-- mcp__locagent__get_status: Check the indexing status of the repository.
+Use these MCP tools for code navigation. Call `init_repository` first before other tools.
 
-When working on code tasks:
-1. Start by calling init_repository to index the codebase
-2. Use explore_tree_structure to understand the project layout
-3. Use search_code_snippets to find relevant code sections
-4. Use get_entity_contents to examine specific functions or classes in detail
+**Tools:**
+- `init_repository(repo_path="/abs/path")` - Initialize index (required first)
+- `get_dependencies(entities=["path.py:Name"], direction="outgoing|incoming", depth=2)` - Find relationships
+- `search_code(query=["keyword"], files="**/*.py")` - Search by keywords
+- `search_code(lines=[10,20], files="src/main.py")` - Get specific lines
+- `get_code(entities=["path.py:ClassName"])` - Get full source
+
+**Entity format:** `file.py` | `file.py:Class` | `file.py:Class.method` | `/` (root)
+
+**Examples:**
+```
+init_repository(repo_path="/home/user/myproject")
+get_dependencies(entities=["/"], depth=2)  # explore structure
+get_dependencies(entities=["src/api.py:handler"], direction="incoming")  # find callers
+search_code(query=["MyClass"])  # then get_code for full source
+```
+
+If errors occur, verify `init_repository` was called with an absolute path.

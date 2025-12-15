@@ -119,17 +119,13 @@ def build_code_retriever_from_repo(repo_path,
         ],
         file_metadata=file_metadata_func,
         filename_as_id=True,
-        required_exts=['.py'],  # TODO: Shouldn't be hardcoded and filtered
+        required_exts=['.py'],
         recursive=True,
     )
     docs = reader.load_data()
-
-    # splitter = CodeSplitter(
-    #     language="python",
-    #     chunk_lines=100,  # lines per chunk
-    #     chunk_lines_overlap=15,  # lines overlap between chunks
-    #     max_chars=3000,  # max chars per chunk
-    # )
+    
+    if not docs:
+        raise ValueError(f"No Python files found in {repo_path} (excluding test directories)")
 
     splitter = EpicSplitter(
         min_chunk_size=min_chunk_size,
@@ -141,7 +137,11 @@ def build_code_retriever_from_repo(repo_path,
     )
     prepared_nodes = splitter.get_nodes_from_documents(docs, show_progress=show_progress)
 
-    # We can pass in the index, docstore, or list of nodes to create the retriever
+    if not prepared_nodes:
+        raise ValueError(f"Code splitter produced 0 nodes from {len(docs)} Python files - files may be empty or unparseable")
+
+    # BM25Retriever.from_defaults uses bool(nodes) which is False for empty list,
+    # causing confusing "pass exactly one of index, nodes, or docstore" error
     retriever = BM25Retriever.from_defaults(
         nodes=prepared_nodes,
         similarity_top_k=similarity_top_k,

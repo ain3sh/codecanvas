@@ -114,6 +114,7 @@ class ClaudeCodeMCP(ClaudeCode):
             "claude",
             "--verbose",
             "--output-format", "stream-json",
+            "--betas", "context-1m-2025-08-07",
             "-p", escaped_instruction,
             "--allowedTools",
         ]
