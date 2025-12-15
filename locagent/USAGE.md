@@ -1,22 +1,26 @@
 ## LocAgent MCP Tools
 
-Use these MCP tools for code navigation. Call `init_repository` first before other tools.
+**FIRST: Match your task to the right tool:**
+
+| Your task says... | Do this |
+|-------------------|---------|
+| "what calls X" / "find callers" / "who uses" | `get_dependencies(direction="incoming")` |
+| "what does X use" / "dependencies" / "imports" | `get_dependencies(direction="outgoing")` |
+| "show code" / "implementation of" | `search_code` → `get_code` |
+| "find pattern" / "secrets" / "API keys" / "text" | **USE GREP NOT THESE TOOLS** |
+
+**REQUIRED FIRST:** `init_repository(repo_path="/absolute/path")`
 
 **Tools:**
-- `init_repository(repo_path="/abs/path")` - Initialize index (required first)
-- `get_dependencies(entities=["path.py:Name"], direction="outgoing|incoming", depth=2)` - Find relationships
-- `search_code(query=["keyword"], files="**/*.py")` - Search by keywords
-- `search_code(lines=[10,20], files="src/main.py")` - Get specific lines
-- `get_code(entities=["path.py:ClassName"])` - Get full source
+- `get_dependencies(entities=["file.py:Func"], direction="incoming|outgoing")` - relationships
+- `search_code(query=["keyword"])` - find by name
+- `get_code(entities=["file.py:Class"])` - get source
 
-**Entity format:** `file.py` | `file.py:Class` | `file.py:Class.method` | `/` (root)
+**Entity format:** `file.py` | `file.py:Class` | `file.py:Class.method`
 
-**Examples:**
 ```
-init_repository(repo_path="/home/user/myproject")
-get_dependencies(entities=["/"], depth=2)  # explore structure
-get_dependencies(entities=["src/api.py:handler"], direction="incoming")  # find callers
-search_code(query=["MyClass"])  # then get_code for full source
+init_repository(repo_path="/project")
+get_dependencies(entities=["api.py:save"], direction="incoming")   # who calls save()?
+get_dependencies(entities=["db.py:Database"], direction="outgoing") # what does Database use?
+search_code(query=["Config"]) → get_code(entities=["config.py:Config"])
 ```
-
-If errors occur, verify `init_repository` was called with an absolute path.
