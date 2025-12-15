@@ -68,6 +68,9 @@ locagent = [
 where = ["."]
 include = ["codecanvas*", "locagent*"]
 
+[tool.setuptools.package-data]
+"locagent.core.repo_index.codeblocks.parser.queries" = ["*.scm"]
+
 [tool.pytest.ini_options]
 testpaths = ["codecanvas"]
 python_files = ["test.py", "test_*.py"]
