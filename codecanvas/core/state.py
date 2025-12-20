@@ -19,9 +19,9 @@ STATE_VERSION = 1
 
 
 def _get_state_path() -> Path:
-    """Get path to state file (in results/canvas with PNG outputs)."""
+    """Get path to state file (in .codecanvas with PNG outputs)."""
     project_dir = os.environ.get("CANVAS_PROJECT_DIR", os.getcwd())
-    return Path(project_dir) / "results" / "canvas" / "state.json"
+    return Path(project_dir) / ".codecanvas" / "state.json"
 
 
 @dataclass

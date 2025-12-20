@@ -31,7 +31,7 @@ If you only read a handful of files, read these in this order:
 - `codecanvas/core/models.py`
   - `GraphNode`, `GraphEdge`, `Graph` indexes/dedup.
 - `codecanvas/core/state.py`
-  - Evidence Board persistence (`results/canvas/state.json`), evidence/claim/decision models.
+  - Evidence Board persistence (`.codecanvas/state.json`), evidence/claim/decision models.
 - `codecanvas/core/analysis.py`
   - Impact traversal over the graph (slices + neighborhood).
 - `codecanvas/views/*`
@@ -96,8 +96,8 @@ What happens:
    - `parse_summary` (LSP vs fallback breakdown)
    - `symbol_files` mapping
    - initial architecture `Evidence` record
-7. Render `ArchitectureView` to `results/canvas/architecture.png`.
-8. Render `TaskView` (Evidence Board) to `results/canvas/task.png`.
+7. Render `ArchitectureView` to `.codecanvas/architecture.png`.
+8. Render `TaskView` (Evidence Board) to `.codecanvas/task.png`.
 
 Returns:
 
@@ -114,7 +114,7 @@ What happens:
 2. Compute inbound/outbound slices (callers/callees and import relations).
 3. Store an `AnalysisState` in `CanvasState.analyses` and set `CanvasState.focus`.
 4. Extract a bounded k-hop neighborhood subgraph for visualization.
-5. Render `ImpactView` to `results/canvas/impact_<node_id>.png`.
+5. Render `ImpactView` to `.codecanvas/impact_<node_id>.png`.
 6. Add an `Evidence` record and re-render the board (`TaskView`).
 
 Returns:
@@ -225,7 +225,7 @@ Implications:
 
 ### 4.2 `CanvasState` (`codecanvas/core/state.py`)
 
-`CanvasState` is persisted to `results/canvas/state.json` and is the backbone of the Evidence Board.
+`CanvasState` is persisted to `.codecanvas/state.json` and is the backbone of the Evidence Board.
 
 Key fields:
 
@@ -471,7 +471,7 @@ There is no traditional web UI. The “frontend” is:
 
 - Renderers return SVG strings.
 - `save_png(svg, path)` writes PNG bytes to disk and returns bytes.
-- PNGs are stored under: `<project_path>/results/canvas/`.
+- PNGs are stored under: `<project_path>/.codecanvas/`.
 
 ### 9.2 `ArchitectureView` (`codecanvas/views/architecture.py`)
 

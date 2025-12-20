@@ -49,8 +49,18 @@ def ensure_canvas_loaded() -> bool:
         # Note: "read" action returns early BEFORE _ensure_loaded, so use "status"
         canvas_action(action="status")
         return True
-    except Exception:
-        return False
+    except Exception as e:
+        # Output error as JSON so hook doesn't fail silently
+        import sys
+        import json
+        error_result = {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": f"[CodeCanvas DEBUG] ensure_canvas_loaded failed: {type(e).__name__}: {e}"
+            }
+        }
+        print(json.dumps(error_result), file=sys.stdout)
+        sys.exit(0)
 
 
 def run_impact_analysis(symbol: str) -> str | None:
@@ -96,6 +106,18 @@ def find_symbols_in_file(file_path: str, cwd: str) -> list[str]:
         return []
 
 
+def _debug_exit(reason: str):
+    """Output debug info and exit."""
+    result = {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse", 
+            "additionalContext": f"[CodeCanvas DEBUG] {reason}"
+        }
+    }
+    print(json.dumps(result))
+    sys.exit(0)
+
+
 def main():
     # Read hook input from stdin
     try:
@@ -109,15 +131,15 @@ def main():
 
     # Skip if no canvas state
     if not has_canvas_state(cwd):
-        sys.exit(0)
+        _debug_exit(f"no canvas state at {cwd}/.codecanvas/state.json")
 
     # Skip if no file path
     if not file_path:
-        sys.exit(0)
+        _debug_exit("no file_path in tool_input")
 
     # Ensure canvas state and graph are loaded
     if not ensure_canvas_loaded():
-        sys.exit(0)
+        _debug_exit("ensure_canvas_loaded returned False")
 
     # Find symbols in the file
     symbols = find_symbols_in_file(file_path, cwd)
@@ -129,7 +151,7 @@ def main():
             symbols = [main_symbol]
 
     if not symbols:
-        sys.exit(0)
+        _debug_exit(f"no symbols found in {file_path}")
 
     # Run impact analysis on first symbol(s)
     impact_results = []
@@ -139,7 +161,7 @@ def main():
             impact_results.append(result)
 
     if not impact_results:
-        sys.exit(0)
+        _debug_exit(f"no impact results for symbols {symbols[:2]}")
 
     # Output as additionalContext
     combined = "\n".join(impact_results)
