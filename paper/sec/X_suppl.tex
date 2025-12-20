@@ -1,0 +1,10 @@
+\clearpage
+\setcounter{page}{1}
+\maketitlesupplementary
+
+\section{Why these fusion choices and not KV edits}
+We avoid unproven, hard-to-stabilize KV-cache surgery. \emph{Control-tokens} are simple and transparent; \emph{gated cross-attention} is a documented, widely reproduced method for conditioning frozen LMs on auxiliary streams. Both admit clean ablations and minimize confounds from planner retraining \citep{Alayrac2022Flamingo,Hu2021LoRA,Li2021PrefixTuning}.
+
+\section{Ground-truthing endpoints without pixels}
+For \emph{AdSERP}, we use fixation points and SERP AOIs released with the dataset to build endpoint labels and to define positive/negative windows for imminence. For \emph{RecGaze}, we use interaction logs and gaze to derive endpoints for carousel targets. For \emph{OSWorld}, we use click outcomes and the verified harness to align clicks with UI state transitions; no DOM parsing is required \citep{Latifzadeh2025AdSERP,RecGaze2025,OSWorldVerified2025}.
+
