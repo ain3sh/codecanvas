@@ -1,13 +1,25 @@
 {
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Read|Edit|Write|Grep|Glob",
+        "matcher": "startup",
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"from codecanvas.hooks.auto_init import main; main()\"",
-            "timeout": 5
+            "command": "python3 -c \"from codecanvas.hooks.session_init import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 10
           }
         ]
       }

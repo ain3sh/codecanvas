@@ -1,43 +1,32 @@
-# CodeCanvas Usage Guide (for Agents)
+# CodeCanvas
 
-CodeCanvas helps you analyze code before changing it. It shows what functions call what, and tracks your reasoning as you work.
+**Auto-init and auto-impact happen via hooks. You'll see `[CodeCanvas]` messages - READ THEM.**
 
-## Quick Start
+## You MUST Do These
 
-```
-canvas(action="init", repo_path=".")     # Parse codebase, see architecture
-canvas(action="impact", symbol="foo")    # See blast radius before editing foo
-canvas(action="claim", text="...", kind="hypothesis")  # Record your analysis
-canvas(action="decide", text="...", kind="plan")       # Commit to a plan
-canvas(action="mark", symbol="foo", text="tested")     # Mark verified
-```
+```python
+# After analyzing something:
+canvas(action="claim", text="bug is in X because Y")
 
-## Recommended Pattern
+# Before changing code:
+canvas(action="decide", text="will fix by doing Z")
 
-**Before changing code:** Always run `impact` first to see what might break.
-
-```
-1. impact symbol="target"  →  See callers/callees
-2. claim text="..."        →  Record what you notice
-3. decide text="..."       →  State your plan
-4. [make changes]
-5. mark symbol="target"    →  Confirm verified
+# After verifying change:
+canvas(action="mark", symbol="function_name", text="done")
 ```
 
-## Hooks (Auto-Trigger)
+Without claim/decide/mark, your reasoning vanishes and progress isn't tracked.
 
-If configured, CodeCanvas auto-suggests init when you start working on a code repository. This happens via the PreToolUse hook when you Read/Edit/Grep files.
+## Optional
 
-## Response Format
+```python
+# Manual impact (auto runs on Read, use this for other symbols):
+canvas(action="impact", symbol="other_func", depth=2)
 
-Every response includes:
-- **What happened** (action result)
-- **Board summary** (evidence/claims/decisions count + current focus)
-- **Next hint** (suggested next action)
+# Skip irrelevant symbols from impact results:
+canvas(action="skip", symbol="unrelated", text="not affected")
+```
 
-## Tips
+## Pattern
 
-1. Use `impact` BEFORE editing to understand blast radius
-2. Claims and decisions auto-link to your most recent evidence
-3. Run `status` to refresh the board without reparsing
-4. Run `read` for text-only output (non-multimodal fallback)
+Read file → see auto-impact → `claim` → `decide` → edit → `mark`

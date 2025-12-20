@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """
-CodeCanvas auto-init hook (PreToolUse).
+CodeCanvas SessionStart hook - Auto Init.
 
-Suggests canvas init when:
-1. Repo detected (.git, pyproject.toml, package.json, etc.)
-2. Contains >=5 code files
-3. No existing canvas state
-
-Output: JSON with systemMessage (shown to user) on exit 0.
+Automatically initializes canvas when session starts in a code repository.
+Outputs additionalContext so Claude knows the codebase structure.
 """
 
 import json
@@ -47,6 +43,21 @@ def has_canvas_state(cwd: str) -> bool:
     return state_path.exists()
 
 
+def run_canvas_init(cwd: str) -> str:
+    """Run canvas init and return result summary."""
+    try:
+        from codecanvas.server import canvas_action
+        
+        result = canvas_action(action="init", repo_path=cwd)
+        
+        if result.error:
+            return f"[CodeCanvas] Init failed: {result.error}"
+        
+        return f"[CodeCanvas AUTO-INIT] {result.text}"
+    except Exception as e:
+        return f"[CodeCanvas] Init error: {e}"
+
+
 def main():
     # Read hook input from stdin
     try:
@@ -60,21 +71,35 @@ def main():
     if not detect_repo(cwd):
         sys.exit(0)
 
-    # Skip if canvas already initialized
-    if has_canvas_state(cwd):
-        sys.exit(0)
-
     # Skip if not enough code files
     code_count = count_code_files(cwd, limit=5)
     if code_count < 5:
         sys.exit(0)
 
-    # Output suggestion as systemMessage (shown to user, doesn't block)
+    # Check if already initialized
+    if has_canvas_state(cwd):
+        # Just remind Claude that canvas is available
+        result = {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": (
+                    "[CodeCanvas] Codebase already analyzed. State at .codecanvas/. "
+                    "Impact analysis available - dependencies will be shown when you read files."
+                )
+            }
+        }
+        print(json.dumps(result))
+        sys.exit(0)
+
+    # Run init
+    init_result = run_canvas_init(cwd)
+
+    # Output as additionalContext (injected into Claude's context)
     result = {
-        "systemMessage": (
-            "[CodeCanvas] Code repository detected without canvas state. "
-            'Consider: canvas(action="init", repo_path=".") for impact analysis.'
-        )
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": init_result
+        }
     }
     print(json.dumps(result))
     sys.exit(0)
