@@ -50,7 +50,7 @@ git clone {{ mcp_git_source }} mcp-repo
 cd mcp-repo
 
 # Install with all MCP extras (locagent, codecanvas, etc.)
-uv pip install --system ".[locagent]"
+uv pip install --system ".[locagent,mcp]"
 cd /
 rm -rf /tmp/mcp-repo
 {% else %}
