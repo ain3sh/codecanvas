@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codecanvas"
-version = "0.3.0"
+version = "0.7.0"
 description = "Impact analysis for LLM agents - track code dependencies and side-effects"
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,20 +22,24 @@ classifiers = [
 keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis"]
 
 dependencies = [
-    "tree-sitter>=0.21.0",
-    "tree-sitter-python>=0.21.0",
+    "CairoSVG>=2.7.1",
+    "pyyaml>=6.0",
+    "lsprotocol>=2024.0.0",
+    "basedpyright>=1.36.1",
+    "tree-sitter>=0.24.0",
+    "tree-sitter-language-pack>=0.13.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.6.0",
 ]
 mcp = [
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
 ]
 terminalbench = [
-    "pyyaml>=6.0",
     "rich>=13.0",
 ]
 
@@ -72,6 +76,18 @@ include = ["codecanvas*", "locagent*"]
 "locagent.core.repo_index.codeblocks.parser.queries" = ["*.scm"]
 
 [tool.pytest.ini_options]
-testpaths = ["codecanvas"]
-python_files = ["test.py", "test_*.py"]
+testpaths = ["codecanvas/tests"]
+python_files = ["*.py"]
 python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.407",
+]

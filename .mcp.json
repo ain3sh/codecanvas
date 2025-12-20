@@ -1,6 +1,13 @@
 {
   "mcpServers": {
-    "locagent": {
+    "codecanvas": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "codecanvas.server"],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    },
+    "codegraph": {
       "command": "uv",
       "args": ["run", "python", "-m", "locagent.server"],
       "env": {
