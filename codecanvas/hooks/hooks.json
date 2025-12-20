@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -c \"from codecanvas.hooks.auto_init import main; main()\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
