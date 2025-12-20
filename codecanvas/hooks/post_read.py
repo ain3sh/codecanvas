@@ -45,8 +45,9 @@ def ensure_canvas_loaded() -> bool:
         if not state.initialized:
             return False
         
-        # Trigger _ensure_loaded by calling canvas_action with read
-        canvas_action(action="read")
+        # Trigger _ensure_loaded by calling canvas_action with status
+        # Note: "read" action returns early BEFORE _ensure_loaded, so use "status"
+        canvas_action(action="status")
         return True
     except Exception:
         return False
