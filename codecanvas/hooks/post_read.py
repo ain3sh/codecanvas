@@ -35,17 +35,34 @@ def extract_main_symbol(file_path: str) -> str | None:
     return path.stem
 
 
-def run_impact_analysis(cwd: str, symbol: str) -> str | None:
+def ensure_canvas_loaded() -> bool:
+    """Ensure canvas state and graph are loaded. Returns True if successful."""
+    try:
+        from codecanvas.server import canvas_action
+        from codecanvas.core.state import load_state
+        
+        state = load_state()
+        if not state.initialized:
+            return False
+        
+        # Trigger _ensure_loaded by calling canvas_action with read
+        canvas_action(action="read")
+        return True
+    except Exception:
+        return False
+
+
+def run_impact_analysis(symbol: str) -> str | None:
     """Run impact analysis on a symbol."""
     try:
         from codecanvas.server import canvas_action
         
         result = canvas_action(action="impact", symbol=symbol, depth=2, max_nodes=20)
         
-        # CanvasResult only has .text and .images - no .error
         # Check if it's a meaningful result (not an error message)
-        if result.text and "callers" in result.text.lower():
-            return f"[CodeCanvas IMPACT] {result.text}"
+        text = result.text or ""
+        if "callers" in text.lower() or "callees" in text.lower():
+            return f"[CodeCanvas IMPACT] {text}"
         
         return None
     except Exception:
@@ -97,6 +114,10 @@ def main():
     if not file_path:
         sys.exit(0)
 
+    # Ensure canvas state and graph are loaded
+    if not ensure_canvas_loaded():
+        sys.exit(0)
+
     # Find symbols in the file
     symbols = find_symbols_in_file(file_path, cwd)
     
@@ -109,10 +130,10 @@ def main():
     if not symbols:
         sys.exit(0)
 
-    # Run impact analysis on first symbol
+    # Run impact analysis on first symbol(s)
     impact_results = []
     for symbol in symbols[:2]:  # Analyze up to 2 symbols
-        result = run_impact_analysis(cwd, symbol)
+        result = run_impact_analysis(symbol)
         if result:
             impact_results.append(result)
 
