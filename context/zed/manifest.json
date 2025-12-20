@@ -1,0 +1,140 @@
+{
+  "version": "3.0",
+  "entries": {
+    "https://zed.dev/docs/extensions/languages": {
+      "directory": "language-extensions-zed-code-editor-documentation",
+      "title": "Language Extensions | Zed Code Editor Documentation",
+      "fetched": "2025-12-19T03:19:07.448Z",
+      "contentPath": "context/language-extensions-zed-code-editor-documentation",
+      "contentHash": "10f64778",
+      "imageCount": 0,
+      "charCount": 16906
+    },
+    "https://zed.dev/docs/remote-development": {
+      "directory": "remote-development-zed-code-editor-documentation",
+      "title": "Remote Development | Zed Code Editor Documentation",
+      "fetched": "2025-12-19T03:19:07.557Z",
+      "contentPath": "context/remote-development-zed-code-editor-documentation",
+      "contentHash": "32822e1",
+      "imageCount": 0,
+      "charCount": 14758
+    },
+    "https://zed.dev/docs/configuring-languages": {
+      "directory": "configuring-languages-zed-code-editor-documentation",
+      "title": "Configuring Languages | Zed Code Editor Documentation",
+      "fetched": "2025-12-19T03:19:07.646Z",
+      "contentPath": "context/configuring-languages-zed-code-editor-documentation",
+      "contentHash": "6a91ee97",
+      "imageCount": 0,
+      "charCount": 18342
+    },
+    "https://zed.dev/blog/syntax-aware-editing": {
+      "directory": "enabling-low-latency-syntax-aware-editing-using-tree-sitter-zed-blog",
+      "title": "Enabling low-latency, syntax-aware editing using Tree-sitter - Zed Blog",
+      "fetched": "2025-12-19T03:19:07.807Z",
+      "contentPath": "context/enabling-low-latency-syntax-aware-editing-using-tree-sitter-zed-blog",
+      "contentHash": "5bafa657",
+      "imageCount": 0,
+      "charCount": 15426
+    },
+    "https://zed.dev/blog/language-extensions-part-1": {
+      "directory": "extensible-language-support-in-zed-part-1-zed-blog",
+      "title": "Extensible Language Support in Zed - Part 1 - Zed Blog",
+      "fetched": "2025-12-19T03:19:07.914Z",
+      "contentPath": "context/extensible-language-support-in-zed-part-1-zed-blog",
+      "contentHash": "4804450e",
+      "imageCount": 0,
+      "charCount": 13135
+    },
+    "https://zed.dev/blog/zed-decoded-async-rust": {
+      "directory": "async-rust-zed-blog",
+      "title": "Async Rust - Zed Blog",
+      "fetched": "2025-12-19T03:19:08.144Z",
+      "contentPath": "context/async-rust-zed-blog",
+      "contentHash": "78261556",
+      "imageCount": 0,
+      "charCount": 20391
+    },
+    "https://github.com/tree-sitter/tree-sitter": {
+      "directory": "github-tree-sittertree-sitter-an-incremental-parsing-system-for-programming-tools",
+      "title": "GitHub - tree-sitter/tree-sitter: An incremental parsing system for programming tools",
+      "fetched": "2025-12-19T03:19:08.770Z",
+      "contentPath": "context/github-tree-sittertree-sitter-an-incremental-parsing-system-for-programming-tools",
+      "contentHash": "7ce3d8a4",
+      "imageCount": 0,
+      "charCount": 6931
+    },
+    "https://zed.dev/blog/zed-decoded-rope-sumtree": {
+      "directory": "rope-sumtree-zed-blog",
+      "title": "Rope & SumTree - Zed Blog",
+      "fetched": "2025-12-19T03:19:08.992Z",
+      "contentPath": "context/rope-sumtree-zed-blog",
+      "contentHash": "7aee15a8",
+      "imageCount": 0,
+      "charCount": 25057
+    },
+    "https://zed.dev/blog/zed-decoded-extensions": {
+      "directory": "life-of-a-zed-extension-rust-wit-wasm-zed-blog",
+      "title": "Life of a Zed Extension: Rust, WIT, Wasm - Zed Blog",
+      "fetched": "2025-12-19T03:19:09.293Z",
+      "contentPath": "context/life-of-a-zed-extension-rust-wit-wasm-zed-blog",
+      "contentHash": "a9f961a",
+      "imageCount": 0,
+      "charCount": 25057
+    },
+    "https://tree-sitter.github.io/tree-sitter/using-parsers#pattern-matching-with-queries": {
+      "directory": "using-parsers-tree-sitter",
+      "title": "Using Parsers - Tree-sitter",
+      "fetched": "2025-12-19T03:19:53.056Z",
+      "contentPath": "context/using-parsers-tree-sitter",
+      "contentHash": "23c7d739",
+      "imageCount": 0,
+      "charCount": 1871
+    },
+    "https://tree-sitter.github.io/tree-sitter/using-parsers": {
+      "directory": "using-parsers-tree-sitter",
+      "title": "Using Parsers - Tree-sitter",
+      "fetched": "2025-12-19T03:19:53.095Z",
+      "contentPath": "context/using-parsers-tree-sitter",
+      "contentHash": "23c7d739",
+      "imageCount": 0,
+      "charCount": 1871
+    },
+    "https://tree-sitter.github.io/tree-sitter/": {
+      "directory": "introduction-tree-sitter",
+      "title": "Introduction - Tree-sitter",
+      "fetched": "2025-12-19T03:19:53.219Z",
+      "contentPath": "context/introduction-tree-sitter",
+      "contentHash": "5144cdce",
+      "imageCount": 0,
+      "charCount": 6748
+    },
+    "https://zed.dev/blog/zed-decoded-tasks": {
+      "directory": "syntax-aware-task-spawning-with-tree-sitter-zed-blog",
+      "title": "Syntax-Aware Task Spawning With Tree-Sitter - Zed Blog",
+      "fetched": "2025-12-19T03:35:11.145Z",
+      "contentPath": "context/syntax-aware-task-spawning-with-tree-sitter-zed-blog",
+      "contentHash": "7369c190",
+      "imageCount": 0,
+      "charCount": 13281
+    },
+    "https://zed.dev/blog/zed-decoded-text-coordinate-systems": {
+      "directory": "text-coordinate-systems-zed-blog",
+      "title": "Text Coordinate Systems - Zed Blog",
+      "fetched": "2025-12-19T03:35:11.350Z",
+      "contentPath": "context/text-coordinate-systems-zed-blog",
+      "contentHash": "6f267fb",
+      "imageCount": 0,
+      "charCount": 17485
+    },
+    "https://zed.dev/blog/zed-decoded-rope-optimizations-part-1": {
+      "directory": "rope-optimizations-part-1-zed-blog",
+      "title": "Rope Optimizations, Part 1 - Zed Blog",
+      "fetched": "2025-12-19T03:35:11.534Z",
+      "contentPath": "context/rope-optimizations-part-1-zed-blog",
+      "contentHash": "16bc3ae1",
+      "imageCount": 0,
+      "charCount": 14337
+    }
+  }
+}
