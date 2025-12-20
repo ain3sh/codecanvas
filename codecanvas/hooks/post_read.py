@@ -42,10 +42,8 @@ def run_impact_analysis(cwd: str, symbol: str) -> str | None:
         
         result = canvas_action(action="impact", symbol=symbol, depth=2, max_nodes=20)
         
-        if result.error:
-            return None
-        
-        # Return the impact text if meaningful
+        # CanvasResult only has .text and .images - no .error
+        # Check if it's a meaningful result (not an error message)
         if result.text and "callers" in result.text.lower():
             return f"[CodeCanvas IMPACT] {result.text}"
         

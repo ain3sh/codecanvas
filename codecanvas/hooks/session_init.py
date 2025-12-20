@@ -50,9 +50,7 @@ def run_canvas_init(cwd: str) -> str:
         
         result = canvas_action(action="init", repo_path=cwd)
         
-        if result.error:
-            return f"[CodeCanvas] Init failed: {result.error}"
-        
+        # CanvasResult only has .text and .images - no .error
         return f"[CodeCanvas AUTO-INIT] {result.text}"
     except Exception as e:
         return f"[CodeCanvas] Init error: {e}"
