@@ -12,7 +12,7 @@ from locagent.core.location_tools.repo_ops.repo_ops import (
     get_entity_contents,
 )
 
-server = Server("locagent")
+server = Server("codegraph")
 
 
 @server.list_tools()

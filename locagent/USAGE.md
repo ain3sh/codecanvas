@@ -1,4 +1,4 @@
-## LocAgent MCP Tools
+## CodeGraph MCP Tools
 
 **USE FIRST AND OFTEN.** Build your mental model before acting.
 
