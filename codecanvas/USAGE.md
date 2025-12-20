@@ -1,32 +1,48 @@
-# CodeCanvas
+# MANDATORY: CodeCanvas MCP Tool Usage
 
-**Auto-init and auto-impact happen via hooks. You'll see `[CodeCanvas]` messages - READ THEM.**
+You have access to `mcp__codecanvas__canvas`. This is NOT optional - it is REQUIRED for code changes.
 
-## You MUST Do These
+## CRITICAL RULES
+
+1. **BEFORE editing any code file**: You MUST call `canvas(action="impact", symbol="<function_or_class>")` to understand what depends on it
+2. **AFTER reading a file with dependencies shown**: You MUST call `canvas(action="claim", text="<your analysis>")` to record your reasoning
+3. **BEFORE making changes**: You MUST call `canvas(action="decide", text="<your plan>")` to declare intent
+4. **AFTER completing a change**: You MUST call `canvas(action="mark", symbol="<symbol>", text="verified")` to track progress
+
+## FAILURE CONDITIONS
+
+- Editing code WITHOUT prior `impact` analysis = INCORRECT behavior
+- Making changes WITHOUT `claim` + `decide` = Lost reasoning, untracked work
+- Completing work WITHOUT `mark` = No progress record
+
+## TRIGGERS - When You See These, ACT:
+
+| You See | You MUST Do |
+|---------|-------------|
+| `[CodeCanvas AUTO-INIT]` | Canvas is ready. Use it for ALL code changes. |
+| `[CodeCanvas IMPACT]` | Read the dependencies shown, then `claim` your analysis. |
+| Callers/callees listed | These symbols may break. Check them or `skip` with reason. |
+| About to edit a function | `impact` → `claim` → `decide` → edit → `mark` |
+
+## QUICK REFERENCE
 
 ```python
-# After analyzing something:
-canvas(action="claim", text="bug is in X because Y")
+# See dependencies before touching code
+canvas(action="impact", symbol="process_data")
 
-# Before changing code:
-canvas(action="decide", text="will fix by doing Z")
+# Record your analysis (REQUIRED after seeing impact)
+canvas(action="claim", text="process_data is called by main() and validate(), changes here affect both")
 
-# After verifying change:
-canvas(action="mark", symbol="function_name", text="done")
+# Declare your intent (REQUIRED before editing)
+canvas(action="decide", text="will add error handling, callers don't need changes")
+
+# Mark complete (REQUIRED after change verified)
+canvas(action="mark", symbol="process_data", text="added try/except, tested")
+
+# Skip irrelevant dependencies
+canvas(action="skip", symbol="unrelated_func", text="not affected by this change")
 ```
 
-Without claim/decide/mark, your reasoning vanishes and progress isn't tracked.
+## NON-NEGOTIABLE
 
-## Optional
-
-```python
-# Manual impact (auto runs on Read, use this for other symbols):
-canvas(action="impact", symbol="other_func", depth=2)
-
-# Skip irrelevant symbols from impact results:
-canvas(action="skip", symbol="unrelated", text="not affected")
-```
-
-## Pattern
-
-Read file → see auto-impact → `claim` → `decide` → edit → `mark`
+Every code modification task REQUIRES the canvas workflow. Skipping it is a failure mode.
