@@ -1,5 +1,6 @@
 env_file: terminalbench/.env
 mcp_config: .mcp.json
+hooks: codecanvas/hooks/hooks.json
 
 tasks:
   - id: sanitize-git-repo
