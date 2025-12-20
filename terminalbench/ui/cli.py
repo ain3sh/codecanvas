@@ -8,10 +8,10 @@ import sys
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
-from .agents import build_profile, get_available_servers, discover_mcp_usage_prompts, AgentProfile
-from .runner import HarborRunner, RunResult
-from .tasks import load_manifest, Task, DEFAULT_ENV_FILE
-from .display import print_summary
+from terminalbench.core.profiles import build_profile, get_available_servers, discover_mcp_usage_prompts, AgentProfile
+from terminalbench.harbor.runner import HarborRunner, RunResult
+from terminalbench.core.tasks import load_manifest, Task, DEFAULT_ENV_FILE
+from terminalbench.ui.display import print_summary
 
 
 def _split_config_sets(argv: List[str]) -> Tuple[List[str], List[List[str]]]:
@@ -50,7 +50,7 @@ def _config_set_parser() -> argparse.ArgumentParser:
 
 
 def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, List[argparse.Namespace]]:
-    from .config import load_config
+    from terminalbench.core.config import load_config
     cfg = load_config()
 
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -65,7 +65,7 @@ def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, L
     parser.add_argument("--manifest", type=Path, help="path to tasks manifest (yaml)")
 
     # Output and execution
-    parser.add_argument("--output-dir", type=Path, default=Path(cfg.output_dir))
+    parser.add_argument("--output-dir", type=Path, default=cfg.output_dir)
     parser.add_argument("--attempts", type=int, default=1, help="number of attempts per task (-k)")
     parser.add_argument("--retries", type=int, default=0, help="number of retries on failure")
     parser.add_argument("--dry-run", action="store_true", help="do not execute harbor, just emit commands")
@@ -175,7 +175,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
 
     # Handle setup subcommand
     if args.command == "setup":
-        from .config import run_setup
+        from terminalbench.core.config import run_setup
         run_setup()
         return 0
 
@@ -207,7 +207,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         env_file = DEFAULT_ENV_FILE
 
     # Load env file for reading config values (also used by HarborRunner)
-    from .runner import load_env_file
+    from terminalbench.harbor.runner import load_env_file
     env_from_file = load_env_file(env_file)
 
     # Resolve hooks path: CLI > manifest

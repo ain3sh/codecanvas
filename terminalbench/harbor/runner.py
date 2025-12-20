@@ -9,9 +9,9 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
-from .agents import AgentProfile
-from .tasks import Task
-from .config import CONFIG_DIR
+from terminalbench.core.profiles import AgentProfile
+from terminalbench.core.tasks import Task
+from terminalbench.core.config import CONFIG_DIR
 
 
 def load_env_file(env_file: Path | str | None) -> Dict[str, str]:
@@ -88,43 +88,46 @@ class HarborRunner:
     # Build fingerprint helpers
     # ------------------------------------------------------------------
 
-    def _compute_build_fingerprint(self, profiles: List[AgentProfile]) -> str:
+    def _compute_profile_fingerprint(self, profile: AgentProfile) -> str:
+        """Fingerprint a profile's install-affecting attributes for build caching."""
+
         template_path = Path(__file__).parent / "install-claude-code-mcp.sh.j2"
         template_bytes = template_path.read_bytes() if template_path.exists() else b""
 
-        # Combine unique relevant attributes across profiles to avoid stale builds.
-        mcp_sources = sorted({p.mcp_git_source or "" for p in profiles})
-        claude_versions = sorted({p.claude_version or "" for p in profiles})
-
-        # GitHub token presence can affect git clone auth; hash only presence, not value.
         github_token_present = bool(
             self.env_from_file.get("GITHUB_TOKEN")
             or os.environ.get("GITHUB_TOKEN")
-            or any("GITHUB_TOKEN" in p.extra_env for p in profiles)
+            or ("GITHUB_TOKEN" in profile.extra_env)
         )
 
         h = hashlib.sha256()
         h.update(template_bytes)
-        for src in mcp_sources:
-            h.update(src.encode())
-        for cv in claude_versions:
-            h.update(cv.encode())
+        h.update((profile.mcp_git_source or "").encode())
+        h.update((profile.claude_version or "").encode())
         h.update(b"gh" if github_token_present else b"nogh")
         return h.hexdigest()
 
-    def _load_cached_fingerprint(self) -> str | None:
+    def _load_cached_fingerprints(self) -> dict[str, str]:
         if not self.build_cache_path.exists():
-            return None
+            return {}
         try:
             data = json.loads(self.build_cache_path.read_text())
-            return data.get("fingerprint")
+            # Backward compatibility: old format was either a raw string or {"fingerprint": "..."}
+            if isinstance(data, str):
+                return {"__legacy__": data}
+            if isinstance(data, dict):
+                if "fingerprints" in data and isinstance(data["fingerprints"], dict):
+                    return data["fingerprints"]
+                if "fingerprint" in data and isinstance(data["fingerprint"], str):
+                    return {"__legacy__": data["fingerprint"]}
+            return {}
         except Exception:
-            return None
+            return {}
 
-    def _store_fingerprint(self, fingerprint: str) -> None:
+    def _store_fingerprints(self, fingerprints: dict[str, str]) -> None:
         try:
             self.build_cache_path.parent.mkdir(parents=True, exist_ok=True)
-            self.build_cache_path.write_text(json.dumps({"fingerprint": fingerprint}, indent=2))
+            self.build_cache_path.write_text(json.dumps({"fingerprints": fingerprints}, indent=2))
         except Exception:
             # Cache failures should not block execution
             pass
@@ -325,20 +328,42 @@ class HarborRunner:
     ) -> List[RunResult]:
         """Run a list of profiles over the tasks, reusing environment builds when possible.
 
-        If profiles_parallel > 0, runs profiles concurrently after ensuring any required rebuild
-        is completed by the first profile.
+        If profiles_parallel > 0, runs profiles concurrently when cached builds match; otherwise
+        runs sequentially, forcing rebuilds only for profiles whose fingerprints changed.
         """
         if not profiles:
             return []
 
-        fingerprint = self._compute_build_fingerprint(profiles)
-        cached = self._load_cached_fingerprint()
+        cached_map = self._load_cached_fingerprints()
         env_force_rebuild = os.environ.get("TERMINALBENCH_FORCE_REBUILD")
-        needs_rebuild = env_force_rebuild or (fingerprint != cached)
+
+        profile_fingerprints = {p.key: self._compute_profile_fingerprint(p) for p in profiles}
+
+        def profile_needs_rebuild(profile: AgentProfile) -> bool:
+            if env_force_rebuild:
+                return True
+            cached = cached_map.get(profile.key)
+            return cached != profile_fingerprints[profile.key]
+
+        # Prefer a "superset" profile (with MCP install/version) to seed the environment.
+        def is_superset_candidate(p: AgentProfile) -> bool:
+            return bool(p.mcp_git_source or p.claude_version)
+
+        canonical = next((p for p in profiles if is_superset_candidate(p)), profiles[0])
+
+        def is_compatible_with_canonical(p: AgentProfile) -> bool:
+            # A baseline profile without extra install requirements can run atop the canonical env.
+            if p is canonical:
+                return True
+            if p.mcp_git_source:
+                return False
+            if p.claude_version and p.claude_version != canonical.claude_version:
+                return False
+            return True
 
         all_results: List[RunResult] = []
 
-        def run_profile(idx_profile: int, profile: AgentProfile, force_build_flag: bool) -> List[RunResult]:
+        def run_profile(profile: AgentProfile, force_build_flag: bool) -> List[RunResult]:
             return self.run_tasks(
                 tasks,
                 profile,
@@ -346,25 +371,60 @@ class HarborRunner:
                 keep_environment=True,
             )
 
-        # Always run first profile synchronously to perform any needed rebuild safely.
-        first_force = bool(needs_rebuild)
-        all_results.extend(run_profile(0, profiles[0], first_force))
+        # Determine if any rebuild is needed at all.
+        any_rebuild = any(profile_needs_rebuild(p) for p in profiles)
 
-        remaining = profiles[1:]
-        if remaining:
-            if profiles_parallel and profiles_parallel > 0:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
+        if any_rebuild:
+            # First, ensure the canonical superset env is built.
+            all_results.extend(run_profile(canonical, True))
+            cached_map[canonical.key] = profile_fingerprints[canonical.key]
+            self._store_fingerprints(cached_map)
 
-                with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
-                    futures = [pool.submit(run_profile, i + 1, p, False) for i, p in enumerate(remaining)]
-                    for fut in as_completed(futures):
-                        all_results.extend(fut.result())
-            else:
-                for i, profile in enumerate(remaining, start=1):
-                    all_results.extend(run_profile(i, profile, False))
+            remaining = [p for p in profiles if p is not canonical]
 
-        # Cache new fingerprint after successful scheduling
-        if fingerprint:
-            self._store_fingerprint(fingerprint)
+            # Profiles compatible with canonical can run without rebuild even if fingerprint differs.
+            compatible = [p for p in remaining if is_compatible_with_canonical(p)]
+            incompatible = [p for p in remaining if p not in compatible]
+
+            # Run incompatible (truly different installs) sequentially with rebuild.
+            for profile in incompatible:
+                needs = profile_needs_rebuild(profile)
+                all_results.extend(run_profile(profile, needs))
+                cached_map[profile.key] = profile_fingerprints[profile.key]
+                self._store_fingerprints(cached_map)
+
+            # Run compatible profiles; allow parallel if requested.
+            if compatible:
+                if profiles_parallel and profiles_parallel > 0:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                    with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
+                        futures = [pool.submit(run_profile, p, False) for p in compatible]
+                        for fut in as_completed(futures):
+                            all_results.extend(fut.result())
+                else:
+                    for profile in compatible:
+                        all_results.extend(run_profile(profile, False))
+
+            # Cache updated fingerprints for all profiles that ran.
+            for p in compatible:
+                cached_map[p.key] = profile_fingerprints[p.key]
+            self._store_fingerprints(cached_map)
+        else:
+            # Cached builds match: run first synchronously, others possibly in parallel.
+            all_results.extend(run_profile(profiles[0], False))
+            remaining = profiles[1:]
+            if remaining:
+                if profiles_parallel and profiles_parallel > 0:
+                    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                    with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
+                        futures = [pool.submit(run_profile, p, False) for p in remaining]
+                        for fut in as_completed(futures):
+                            all_results.extend(fut.result())
+                else:
+                    for profile in remaining:
+                        all_results.extend(run_profile(profile, False))
+            self._store_fingerprints(profile_fingerprints)
 
         return all_results

@@ -79,7 +79,7 @@ class AgentProfile:
         args: List[str] = ["-m", self.model]
 
         # Use custom agent with MCP support
-        args.extend(["--agent-import-path", "terminalbench.harbor_agent:ClaudeCodeMCP"])
+        args.extend(["--agent-import-path", "terminalbench.harbor.agent:ClaudeCodeMCP"])
 
         # Pass MCP config as agent kwarg (JSON string)
         if self.mcp_config_json:
