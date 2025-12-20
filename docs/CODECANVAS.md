@@ -541,20 +541,31 @@ Hint: Run canvas(action="init", repo_path=".") first, or this may auto-trigger v
 
 ## Hooks
 
-CodeCanvas includes a PreToolUse hook for auto-initialization.
+CodeCanvas uses hooks to **automatically run** init and impact analysis. The agent doesn't need to manually invoke these actions.
 
-### Purpose
+### Hook 1: SessionStart - Auto Init
 
-When an agent starts working on a code repository, it should initialize CodeCanvas. The hook detects this situation and suggests init.
+**Trigger**: Session starts (matcher: `startup`)
 
-### Trigger Conditions
-
-The hook fires on: `Read | Edit | Write | Grep | Glob`
-
-It suggests init when ALL of:
+**Action**: Runs `canvas_action(action="init", repo_path=cwd)` when:
 1. Current directory is a code repo (.git, pyproject.toml, package.json, etc.)
 2. Contains ≥5 code files
-3. No existing `.codecanvas/state.json`
+
+**Output**: `additionalContext` injected into Claude's context:
+```
+[CodeCanvas AUTO-INIT] Parsed X files, Y functions, Z classes. Call graph: N edges.
+```
+
+### Hook 2: PostToolUse - Auto Impact on Read
+
+**Trigger**: After Claude uses the Read tool (matcher: `Read`)
+
+**Action**: Extracts symbols defined in the read file and runs impact analysis.
+
+**Output**: `additionalContext` injected into Claude's context:
+```
+[CodeCanvas IMPACT] function_name: 3 callers, 2 callees. Blast radius: 5 symbols.
+```
 
 ### Hook Configuration
 
@@ -562,40 +573,40 @@ It suggests init when ALL of:
 ```json
 {
   "hooks": {
-    "PreToolUse": [
+    "SessionStart": [
       {
-        "matcher": "Read|Edit|Write|Grep|Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -c \"from codecanvas.hooks.auto_init import main; main()\"",
-            "timeout": 5
-          }
-        ]
+        "matcher": "startup",
+        "hooks": [{
+          "type": "command",
+          "command": "python3 -c \"from codecanvas.hooks.session_init import main; main()\"",
+          "timeout": 30
+        }]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [{
+          "type": "command",
+          "command": "python3 -c \"from codecanvas.hooks.post_read import main; main()\"",
+          "timeout": 10
+        }]
       }
     ]
   }
 }
 ```
 
-### Hook Output
+### Why additionalContext (not systemMessage)?
 
-When conditions are met, outputs:
-```json
-{
-  "systemMessage": "[CodeCanvas] Code repository detected without canvas state. Consider: canvas(action=\"init\", repo_path=\".\") for impact analysis."
-}
-```
-
-The `systemMessage` is shown to the user (in Claude Code UI) without blocking the tool.
+- `systemMessage`: Shown to user only. Claude doesn't see it. **Useless.**
+- `additionalContext`: Injected into Claude's context. Claude sees it. **Useful.**
 
 ### Why Module Import?
 
-The hook command uses `python3 -c "from codecanvas.hooks.auto_init import main; main()"` instead of a file path because:
-
-1. In terminalbench/Harbor, the source repo is deleted after pip install
-2. The installed package is available via Python's import system
-3. This works regardless of installation location
+Hook commands use `python3 -c "from codecanvas.hooks.X import main; main()"` because:
+1. In Harbor containers, source files are deleted after pip install
+2. Module import works with installed packages regardless of location
 
 ---
 
@@ -707,11 +718,11 @@ All state is saved to `.codecanvas/` in the task repository:
 
 **Rationale**: Typos and partial names are common. Suggestions enable recovery without agent frustration. Scoring prioritizes likely matches (substring > prefix > overlap).
 
-### 9. Hook via Module Import
+### 9. Hooks That Actually Do Things
 
-**Decision**: Hook command uses `python -c "from codecanvas.hooks.auto_init import main; main()"`.
+**Decision**: SessionStart runs init, PostToolUse:Read runs impact. Both output `additionalContext`.
 
-**Rationale**: In Harbor, source files are deleted after pip install. Module import works with installed packages. This is more robust than file paths.
+**Rationale**: `systemMessage` is shown to user only - Claude doesn't see it (useless). `additionalContext` is injected into Claude's context (useful). Auto-running actions means small models don't need to be smart enough to invoke them manually.
 
 ### 10. Output to `.codecanvas/`
 
@@ -731,6 +742,6 @@ CodeCanvas transforms code editing from blind modification to informed analysis:
 | Lose reasoning on context compact | Evidence Board persists |
 | Guess what to do next | Next-step hints guide workflow |
 | Typo in symbol = failure | Fuzzy matching suggests alternatives |
-| Manual init required | Hooks auto-suggest init |
+| Manual init required | Hooks auto-run init and impact |
 
 The result: higher task completion rates, fewer cascading bugs, better reasoning traces.
