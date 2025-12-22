@@ -202,7 +202,7 @@ tasks:
 ```
 results/runs/
 ├── index.json                              # Run index
-└── {timestamp}/
+└── {timestamp}__{profile_key}/             # Unique per profile
     ├── config.json                         # Job configuration
     ├── result.json                         # Aggregate results
     └── {task_id}__{hash}/
@@ -211,6 +211,8 @@ results/runs/
             ├── claude-code.txt             # Raw Claude output
             └── sessions/                   # Claude Code session logs
 ```
+
+When running multiple profiles in parallel (`--profiles-parallel`), each profile gets its own timestamped directory with the profile key appended (e.g., `2025-12-21__14-30-00__text`, `2025-12-21__14-30-00__codegraph`).
 
 ## Common Workflows
 
@@ -232,7 +234,7 @@ python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning low \
   -C --mcp-server codegraph --mcp-git-source https://github.com/ain3sh/codecanvas --key loc
 ```
 
-### Full Benchmark
+### Full Benchmark (Single Profile)
 
 ```bash
 python -m terminalbench.ui.cli \
@@ -241,6 +243,28 @@ python -m terminalbench.ui.cli \
   --parallel 4 \
   --csv results.csv
 ```
+
+### Full Experiment Suite (3 Profiles x 7 Tasks)
+
+Run all tasks with text-only baseline, codegraph MCP, and codecanvas MCP profiles:
+
+```bash
+# Use the experiment runner script
+./scripts/run-experiment.sh
+
+# Or manually per task:
+python -m terminalbench.ui.cli \
+  --manifest tasks.yaml \
+  --tasks sanitize-git-repo \
+  --model anthropic/claude-haiku-4-5 \
+  --reasoning high \
+  --profiles-parallel 3 \
+  -C --no-mcp --key text \
+  -C --mcp-server codegraph --mcp-git-source https://github.com/ain3sh/codecanvas --key codegraph \
+  -C --mcp-server codecanvas --mcp-git-source https://github.com/ain3sh/codecanvas --key codecanvas
+```
+
+See `scripts/run-experiment.sh` for the complete automation script.
 
 ### Dry Run
 

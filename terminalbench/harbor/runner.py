@@ -139,6 +139,7 @@ class HarborRunner:
         output_dir: Optional[Path],
         force_build: bool,
         keep_environment: bool,
+        job_name: Optional[str] = None,
     ) -> List[str]:
         if self.harbor_bin:
             cmd = [self.harbor_bin, "run"]
@@ -151,6 +152,8 @@ class HarborRunner:
             cmd.extend(["--n-attempts", str(self.attempts)])
         if output_dir:
             cmd.extend(["--jobs-dir", str(output_dir)])
+        if job_name:
+            cmd.extend(["--job-name", job_name])
         if self.parallel > 0:
             cmd.extend(["-n", str(self.parallel)])
         if self.container_env:
@@ -236,6 +239,7 @@ class HarborRunner:
         profile: AgentProfile,
         force_build: bool,
         keep_environment: bool,
+        job_name: Optional[str] = None,
     ) -> RunResult:
         """Run a single task with retry logic."""
         if self.output_root:
@@ -247,6 +251,7 @@ class HarborRunner:
             self.output_root,
             force_build=force_build,
             keep_environment=keep_environment,
+            job_name=job_name,
         )
         env = self._env(profile)
 
@@ -310,11 +315,12 @@ class HarborRunner:
         profile: AgentProfile,
         force_build: bool = False,
         keep_environment: bool = True,
+        job_name: Optional[str] = None,
     ) -> List[RunResult]:
         """Run tasks sequentially (Harbor handles parallelization internally via -n flag)."""
         results: List[RunResult] = []
         for task in tasks:
-            result = self._run_single(task, profile, force_build, keep_environment)
+            result = self._run_single(task, profile, force_build, keep_environment, job_name)
             # Only force build on first run in a batch
             force_build = False
             results.append(result)
@@ -363,12 +369,18 @@ class HarborRunner:
 
         all_results: List[RunResult] = []
 
+        # Generate unique job names per profile to avoid collisions when running in parallel
+        from datetime import datetime
+        run_timestamp = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
+        job_names = {p.key: f"{run_timestamp}__{p.key}" for p in profiles}
+
         def run_profile(profile: AgentProfile, force_build_flag: bool) -> List[RunResult]:
             return self.run_tasks(
                 tasks,
                 profile,
                 force_build=force_build_flag,
                 keep_environment=True,
+                job_name=job_names[profile.key],
             )
 
         # Determine if any rebuild is needed at all.
@@ -411,20 +423,17 @@ class HarborRunner:
                 cached_map[p.key] = profile_fingerprints[p.key]
             self._store_fingerprints(cached_map)
         else:
-            # Cached builds match: run first synchronously, others possibly in parallel.
-            all_results.extend(run_profile(profiles[0], False))
-            remaining = profiles[1:]
-            if remaining:
-                if profiles_parallel and profiles_parallel > 0:
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
+            # Cached builds match: run all profiles in parallel if requested.
+            if profiles_parallel and profiles_parallel > 0:
+                from concurrent.futures import ThreadPoolExecutor, as_completed
 
-                    with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
-                        futures = [pool.submit(run_profile, p, False) for p in remaining]
-                        for fut in as_completed(futures):
-                            all_results.extend(fut.result())
-                else:
-                    for profile in remaining:
-                        all_results.extend(run_profile(profile, False))
+                with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
+                    futures = [pool.submit(run_profile, p, False) for p in profiles]
+                    for fut in as_completed(futures):
+                        all_results.extend(fut.result())
+            else:
+                for profile in profiles:
+                    all_results.extend(run_profile(profile, False))
             self._store_fingerprints(profile_fingerprints)
 
         return all_results
