@@ -1,0 +1,47 @@
+[
+  {
+    "task_id": "sanitize-git-repo",
+    "profile": "codecanvas",
+    "utilization_quality": 0.12,
+    "init_timing": "never",
+    "init_quality": "No repository initialization was performed with MCP (e.g., no init_repository call), so the agent never established an indexed/structured view of the codebase via the available MCP interface.",
+    "dependency_leverage": 0.0,
+    "search_effectiveness": 0.35,
+    "structural_understanding": 0.25,
+    "missed_opportunities": [
+      "init_repository: build a structured project index early, enabling more precise code-aware search and navigation instead of ad-hoc Grep/Bash.",
+      "search_code: perform targeted, repo-wide searches for credential assignment patterns (e.g., os.environ[...], YAML env blocks, CLI login commands) with path/language constraints rather than repeated regex greps.",
+      "get_code: retrieve full file contexts for suspect matches (instead of partial Read offsets) to reduce the risk of missing adjacent secrets or related config blocks.",
+      "get_symbol_info + find_references: identify where credential-related variables/functions are defined and propagated (e.g., where AWS/HF tokens are consumed), helping ensure sanitization is complete and consistent across call sites.",
+      "get_dependencies: detect use of SDKs (boto3, huggingface_hub, transformers, git credential helpers) and focus searches on the most likely credential entrypoints and config locations."
+    ],
+    "effective_uses": [
+      "mcp__codecanvas__canvas was used to record intent/decisions (claim/decide) around sanitization, providing lightweight planning traceability."
+    ],
+    "recommendation": "Start by calling init_repository, then use search_code to enumerate likely secret-bearing locations (CI configs, deployment YAMLs, notebooks, JSON artifacts) with path filters and fewer repetitive regex passes. Use get_dependencies to prioritize surfaces where secrets are commonly introduced. When a match is found, use get_code for full context and get_symbol_info/find_references to ensure token values and related variables aren\u2019t duplicated or reconstructed elsewhere. Reserve native Grep/Bash for edge cases (large data artifacts, generated files) or when MCP indexing intentionally excludes certain paths."
+  },
+  {
+    "task_id": "fix-code-vulnerability",
+    "profile": "codecanvas",
+    "utilization_quality": 0.32,
+    "init_timing": "never",
+    "init_quality": "No repository initialization was performed with the available MCP tools (e.g., init_repository). As a result, the agent never established a tool-backed project model (file inventory, language/package context, symbol index) and mostly operated via ad-hoc file reads and greps.",
+    "dependency_leverage": 0.1,
+    "search_effectiveness": 0.55,
+    "structural_understanding": 0.35,
+    "missed_opportunities": [
+      "Use init_repository at the start to build an indexed view of the repo and reduce reliance on large-file scanning.",
+      "Use search_code instead of repeated native Grep to perform broader, indexed searches across the repository for security-sensitive patterns (e.g., pickle.loads, static file serving paths, realpath/abspath usage).",
+      "Use get_symbol_info on static_file and cookie_decode to retrieve signature, docstring, and surrounding context in a structured way rather than manual offset Reads.",
+      "Use find_references for cookie_decode/cookie_encode to confirm call sites (including indirect usage) before deciding on a fix strategy; the agent inferred \u201cno direct callers\u201d primarily from limited inspection.",
+      "Use get_code to pull exact function bodies/regions reliably (and avoid offset/limit truncation risks) when reasoning about security checks and edge cases.",
+      "Use get_dependencies to verify whether Bottle is vendored/standalone here, what test runner/version constraints exist, and whether proposed changes (e.g., behavior changes in cookie handling) align with declared support."
+    ],
+    "effective_uses": [
+      "Used mcp__codecanvas__canvas(action=impact, symbol=static_file) to focus attention on a high-risk surface (static file serving) and frame the analysis around likely vulnerability classes.",
+      "Used mcp__codecanvas__canvas(action=claim, ...) to record findings in a structured manner, which is helpful for later reporting and auditability.",
+      "Used mcp__codecanvas__canvas(action=impact, symbol=cookie_decode) to attempt to validate blast radius before changing a security-sensitive function."
+    ],
+    "recommendation": "Initialize with init_repository immediately, then use search_code to locate all relevant patterns repo-wide (static file handlers, path normalization, deserialization, signing). For each candidate hotspot, use get_symbol_info/get_code to retrieve authoritative symbol context and find_references to validate call sites and behavioral impact before editing. Use get_dependencies to confirm compatibility constraints and to guide safe remediations (e.g., deprecation strategy, test expectations). Reserve native grep/read for spot checks, not as the main discovery workflow."
+  }
+]
