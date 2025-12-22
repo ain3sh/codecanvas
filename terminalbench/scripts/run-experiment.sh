@@ -39,6 +39,12 @@ echo "Profiles: text, codegraph, codecanvas (parallel: $PROFILES_PARALLEL)"
 echo "Tasks: ${#TASKS[@]}"
 echo "=============================================="
 
+# Clean up stale Docker networks to prevent address pool exhaustion
+echo ""
+echo "Pruning unused Docker networks..."
+docker network prune -f
+echo "Done."
+
 # Clear previous results
 if [[ -d "$RESULTS_DIR" ]]; then
     echo ""
