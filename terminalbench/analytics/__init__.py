@@ -1,22 +1,38 @@
 """
-TerminalBench Analytics v2 - Hybrid SOTA Agent Evaluation Framework
+TerminalBench Analytics - Hybrid evaluation framework for LLM agent trajectories.
 
-Two-layer architecture:
-- Layer 1: Deterministic metrics computed from ATIF trajectories
-- Layer 2: LLM-powered semantic analysis (GPT-5.2)
+Structure:
+- core/: Analysis pillars (deterministic + intelligent)
+- io/: Input/output (cli, parser, reports)  
+- extensions/: Extensions (prompts, codecanvas)
 """
 
-from .parser import TrajectoryParser, ParsedTrajectory
-from .deterministic import DeterministicMetrics, compute_metrics
-from .comparisons import ProfileComparator, ComparisonResult
-from .reports import ReportGenerator
+from .io.cli import main
+from .io.parser import TrajectoryParser, ParsedTrajectory
+from .io.reports import ReportGenerator
+from .core.deterministic import DeterministicMetrics, compute_metrics, compute_aggregate_metrics
+from .core.intelligent import LLMAnalyzer
+from .core.comparisons import ProfileComparator, ComparisonResult
+from .extensions.codecanvas import (
+    CanvasState,
+    CodeCanvasMetrics,
+    load_codecanvas_state,
+    compute_codecanvas_metrics,
+)
 
 __all__ = [
+    "main",
     "TrajectoryParser",
-    "ParsedTrajectory", 
+    "ParsedTrajectory",
+    "ReportGenerator",
     "DeterministicMetrics",
     "compute_metrics",
+    "compute_aggregate_metrics",
+    "LLMAnalyzer",
     "ProfileComparator",
     "ComparisonResult",
-    "ReportGenerator",
+    "CanvasState",
+    "CodeCanvasMetrics",
+    "load_codecanvas_state",
+    "compute_codecanvas_metrics",
 ]

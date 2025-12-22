@@ -6,28 +6,28 @@ Uses GPT-5.2 for semantic analysis that can't be computed deterministically.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
-import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional
 
 from litellm import completion
 
-# Load environment variables from terminalbench/.env
+# Load environment variables
 try:
     from dotenv import load_dotenv
-    env_path = Path(__file__).parent.parent / '.env'
+    env_path = Path(__file__).parent.parent.parent / '.env'
     if env_path.exists():
         load_dotenv(env_path)
 except ImportError:
-    pass  # python-dotenv not required if env vars set manually
+    pass
 
-from .parser import ParsedTrajectory
+from ..io.parser import ParsedTrajectory
 from .deterministic import DeterministicMetrics
-from .prompts import (
+from ..extensions.prompts import (
     STRATEGY_ANALYSIS_PROMPT,
     FAILURE_ANALYSIS_PROMPT,
     MCP_UTILIZATION_PROMPT,
@@ -38,7 +38,6 @@ from .prompts import (
 )
 
 
-# Default model for analysis
 DEFAULT_MODEL = "openrouter/openai/gpt-5.2"
 MAX_RETRIES = 3
 
@@ -116,7 +115,6 @@ class InsightSynthesis:
     raw_response: Dict[str, Any] = field(default_factory=dict)
 
 
-# Task descriptions for context
 TASK_DESCRIPTIONS = {
     "sanitize-git-repo": "Find and replace all API keys (AWS, GitHub, HuggingFace) in a repository with placeholder values.",
     "build-cython-ext": "Build Cython extensions for pyknotid package with NumPy 2.x compatibility.",
@@ -136,13 +134,8 @@ class LLMAnalyzer:
         self._validate_api_key()
     
     def _validate_api_key(self):
-        """Check that required API key is present."""
-        if self.model.startswith("openrouter/"):
-            if not os.getenv("OPENROUTER_API_KEY"):
-                raise ValueError(
-                    "OPENROUTER_API_KEY not found in environment. "
-                    "Set it in terminalbench/.env or export it."
-                )
+        if self.model.startswith("openrouter/") and not os.getenv("OPENROUTER_API_KEY"):
+            raise ValueError("OPENROUTER_API_KEY not found. Set it in terminalbench/.env or export it.")
     
     def _call_llm(self, prompt: str, max_retries: int = MAX_RETRIES) -> Dict[str, Any]:
         """Call LLM and parse JSON response."""
@@ -156,51 +149,64 @@ class LLMAnalyzer:
                     ],
                     response_format={"type": "json_object"},
                 )
-                
-                raw = response.choices[0].message.content
-                # Clean potential markdown
-                raw = raw.strip()
+                raw = response.choices[0].message.content.strip()
                 if raw.startswith("```"):
                     raw = raw.split("\n", 1)[-1]
                 if raw.endswith("```"):
                     raw = raw.rsplit("\n", 1)[0]
-                
                 return json.loads(raw.strip())
-            
             except json.JSONDecodeError as e:
                 print(f"  [!] JSON parse error (attempt {attempt + 1}): {e}")
                 time.sleep(1)
             except Exception as e:
                 print(f"  [!] API error (attempt {attempt + 1}): {e}")
                 time.sleep(2)
-        
         return {}
     
-    def analyze_strategy(
-        self,
-        trajectory: ParsedTrajectory,
-        metrics: DeterministicMetrics,
-    ) -> StrategyAnalysis:
-        """Analyze agent's problem-solving strategy."""
+    def _call_vision(self, prompt: str, image_path: Path, max_retries: int = MAX_RETRIES) -> Dict[str, Any]:
+        """Call LLM with image and parse JSON response."""
+        with open(image_path, "rb") as f:
+            image_b64 = base64.b64encode(f.read()).decode("utf-8")
         
+        for attempt in range(max_retries):
+            try:
+                response = completion(
+                    model=self.model,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+                        ]
+                    }],
+                    response_format={"type": "json_object"},
+                )
+                raw = response.choices[0].message.content.strip()
+                if raw.startswith("```"):
+                    raw = raw.split("\n", 1)[-1]
+                if raw.endswith("```"):
+                    raw = raw.rsplit("\n", 1)[0]
+                return json.loads(raw.strip())
+            except json.JSONDecodeError as e:
+                print(f"  [!] Vision JSON parse error (attempt {attempt + 1}): {e}")
+                time.sleep(1)
+            except Exception as e:
+                print(f"  [!] Vision API error (attempt {attempt + 1}): {e}")
+                time.sleep(2)
+        return {}
+    
+    def analyze_strategy(self, trajectory: ParsedTrajectory, metrics: DeterministicMetrics) -> StrategyAnalysis:
         condensed = condense_trajectory(trajectory)
         task_desc = TASK_DESCRIPTIONS.get(trajectory.task_id, "Unknown task")
-        has_mcp = metrics.mcp_tool_calls > 0
-        profile_desc = "with MCP tools" if has_mcp else "text-only baseline"
+        profile_desc = "with MCP tools" if metrics.mcp_tool_calls > 0 else "text-only baseline"
         
         prompt = STRATEGY_ANALYSIS_PROMPT.format(
-            task_id=trajectory.task_id,
-            task_description=task_desc,
-            profile_key=trajectory.profile_key,
-            profile_desc=profile_desc,
-            total_steps=metrics.total_steps,
-            tool_calls_count=metrics.tool_calls_count,
-            unique_tools=metrics.unique_tools,
-            success=metrics.success,
-            elapsed_sec=metrics.elapsed_sec,
-            condensed_trajectory=condensed,
+            task_id=trajectory.task_id, task_description=task_desc,
+            profile_key=trajectory.profile_key, profile_desc=profile_desc,
+            total_steps=metrics.total_steps, tool_calls_count=metrics.tool_calls_count,
+            unique_tools=metrics.unique_tools, success=metrics.success,
+            elapsed_sec=metrics.elapsed_sec, condensed_trajectory=condensed,
         )
-        
         result = self._call_llm(prompt)
         
         return StrategyAnalysis(
@@ -214,23 +220,12 @@ class LLMAnalyzer:
             raw_response=result,
         )
     
-    def analyze_failure(
-        self,
-        trajectory: ParsedTrajectory,
-        metrics: DeterministicMetrics,
-    ) -> FailureAnalysis:
-        """Analyze root cause of task failure."""
-        
+    def analyze_failure(self, trajectory: ParsedTrajectory, metrics: DeterministicMetrics) -> FailureAnalysis:
         if metrics.success:
             return FailureAnalysis(
-                root_cause="not_applicable",
-                confidence=1.0,
-                critical_step=None,
-                critical_step_explanation="Task succeeded",
-                missed_insight="N/A",
-                counterfactual="N/A",
-                contributing_factors=[],
-                recovery_opportunity="N/A",
+                root_cause="not_applicable", confidence=1.0, critical_step=None,
+                critical_step_explanation="Task succeeded", missed_insight="N/A",
+                counterfactual="N/A", contributing_factors=[], recovery_opportunity="N/A",
                 task_specific_difficulty="N/A",
             )
         
@@ -239,19 +234,13 @@ class LLMAnalyzer:
         test_results = format_test_results(trajectory.verifier)
         
         prompt = FAILURE_ANALYSIS_PROMPT.format(
-            task_id=trajectory.task_id,
-            task_description=task_desc,
-            profile_key=trajectory.profile_key,
-            test_results=test_results,
-            total_steps=metrics.total_steps,
-            tool_calls_count=metrics.tool_calls_count,
-            files_read_count=len(metrics.files_read),
-            files_edited_count=len(metrics.files_edited),
-            loop_count=metrics.loop_count,
-            backtrack_count=metrics.backtrack_count,
+            task_id=trajectory.task_id, task_description=task_desc,
+            profile_key=trajectory.profile_key, test_results=test_results,
+            total_steps=metrics.total_steps, tool_calls_count=metrics.tool_calls_count,
+            files_read_count=len(metrics.files_read), files_edited_count=len(metrics.files_edited),
+            loop_count=metrics.loop_count, backtrack_count=metrics.backtrack_count,
             condensed_trajectory=condensed,
         )
-        
         result = self._call_llm(prompt)
         
         return FailureAnalysis(
@@ -267,42 +256,25 @@ class LLMAnalyzer:
             raw_response=result,
         )
     
-    def analyze_mcp_utilization(
-        self,
-        trajectory: ParsedTrajectory,
-        metrics: DeterministicMetrics,
-    ) -> MCPUtilizationAnalysis:
-        """Analyze quality of MCP tool utilization."""
-        
+    def analyze_mcp_utilization(self, trajectory: ParsedTrajectory, metrics: DeterministicMetrics) -> MCPUtilizationAnalysis:
         if metrics.mcp_tool_calls == 0:
             return MCPUtilizationAnalysis(
-                utilization_quality=0.0,
-                init_timing="never",
-                init_quality="No MCP tools used",
-                dependency_leverage=0.0,
-                dependency_leverage_explanation="N/A",
-                search_effectiveness=0.0,
-                structural_understanding=0.0,
+                utilization_quality=0.0, init_timing="never", init_quality="No MCP tools used",
+                dependency_leverage=0.0, dependency_leverage_explanation="N/A",
+                search_effectiveness=0.0, structural_understanding=0.0,
                 missed_opportunities=["All MCP tools were available but unused"],
-                effective_uses=[],
-                fallback_to_native="Agent used only native tools",
+                effective_uses=[], fallback_to_native="Agent used only native tools",
                 recommendation="Agent should try using MCP tools for structural understanding",
             )
         
         condensed = condense_trajectory(trajectory)
-        
         prompt = MCP_UTILIZATION_PROMPT.format(
-            task_id=trajectory.task_id,
-            profile_key=trajectory.profile_key,
+            task_id=trajectory.task_id, profile_key=trajectory.profile_key,
             available_mcp_tools="init_repository, get_code, get_dependencies, search_code, get_symbol_info, find_references",
-            mcp_tool_calls=metrics.mcp_tool_calls,
-            native_tool_calls=metrics.native_tool_calls,
-            mcp_tools_used=", ".join(metrics.mcp_tools_used),
-            success=metrics.success,
-            total_steps=metrics.total_steps,
-            condensed_trajectory=condensed,
+            mcp_tool_calls=metrics.mcp_tool_calls, native_tool_calls=metrics.native_tool_calls,
+            mcp_tools_used=", ".join(metrics.mcp_tools_used), success=metrics.success,
+            total_steps=metrics.total_steps, condensed_trajectory=condensed,
         )
-        
         result = self._call_llm(prompt)
         
         return MCPUtilizationAnalysis(
@@ -321,44 +293,25 @@ class LLMAnalyzer:
         )
     
     def compare_profiles(
-        self,
-        task_id: str,
-        traj_a: ParsedTrajectory,
-        metrics_a: DeterministicMetrics,
-        traj_b: ParsedTrajectory,
-        metrics_b: DeterministicMetrics,
+        self, task_id: str,
+        traj_a: ParsedTrajectory, metrics_a: DeterministicMetrics,
+        traj_b: ParsedTrajectory, metrics_b: DeterministicMetrics,
     ) -> ComparativeNarrative:
-        """Generate comparative narrative between two profiles."""
-        
         task_desc = TASK_DESCRIPTIONS.get(task_id, "Unknown task")
-        
         condensed_a = condense_trajectory(traj_a, max_steps=30)
         condensed_b = condense_trajectory(traj_b, max_steps=30)
         
-        profile_a_desc = "with MCP" if metrics_a.mcp_tool_calls > 0 else "text-only"
-        profile_b_desc = "with MCP" if metrics_b.mcp_tool_calls > 0 else "text-only"
-        
         prompt = COMPARATIVE_NARRATIVE_PROMPT.format(
-            task_id=task_id,
-            task_description=task_desc,
-            profile_a=traj_a.profile_key,
-            profile_a_desc=profile_a_desc,
-            profile_a_success=metrics_a.success,
-            profile_a_steps=metrics_a.total_steps,
-            profile_a_tool_calls=metrics_a.tool_calls_count,
-            profile_a_cost=metrics_a.total_cost_usd,
-            profile_a_elapsed=metrics_a.elapsed_sec,
-            profile_a_trajectory=condensed_a,
-            profile_b=traj_b.profile_key,
-            profile_b_desc=profile_b_desc,
-            profile_b_success=metrics_b.success,
-            profile_b_steps=metrics_b.total_steps,
-            profile_b_tool_calls=metrics_b.tool_calls_count,
-            profile_b_cost=metrics_b.total_cost_usd,
-            profile_b_elapsed=metrics_b.elapsed_sec,
-            profile_b_trajectory=condensed_b,
+            task_id=task_id, task_description=task_desc,
+            profile_a=traj_a.profile_key, profile_a_desc="with MCP" if metrics_a.mcp_tool_calls > 0 else "text-only",
+            profile_a_success=metrics_a.success, profile_a_steps=metrics_a.total_steps,
+            profile_a_tool_calls=metrics_a.tool_calls_count, profile_a_cost=metrics_a.total_cost_usd,
+            profile_a_elapsed=metrics_a.elapsed_sec, profile_a_trajectory=condensed_a,
+            profile_b=traj_b.profile_key, profile_b_desc="with MCP" if metrics_b.mcp_tool_calls > 0 else "text-only",
+            profile_b_success=metrics_b.success, profile_b_steps=metrics_b.total_steps,
+            profile_b_tool_calls=metrics_b.tool_calls_count, profile_b_cost=metrics_b.total_cost_usd,
+            profile_b_elapsed=metrics_b.elapsed_sec, profile_b_trajectory=condensed_b,
         )
-        
         result = self._call_llm(prompt)
         
         return ComparativeNarrative(
@@ -374,36 +327,22 @@ class LLMAnalyzer:
         )
     
     def synthesize_insights(
-        self,
-        profiles: List[str],
-        tasks: List[str],
+        self, profiles: List[str], tasks: List[str],
         aggregate_metrics: Dict[str, Dict[str, Any]],
-        per_task_summary: str,
-        individual_summaries: str,
+        per_task_summary: str, individual_summaries: str,
     ) -> InsightSynthesis:
-        """Synthesize high-level insights across all runs."""
-        
-        # Format aggregate metrics as table
         metrics_lines = []
         for profile, metrics in aggregate_metrics.items():
             metrics_lines.append(f"\n### {profile}")
             for k, v in metrics.items():
-                if isinstance(v, float):
-                    metrics_lines.append(f"- {k}: {v:.2f}")
-                else:
-                    metrics_lines.append(f"- {k}: {v}")
-        
-        aggregate_table = "\n".join(metrics_lines)
+                metrics_lines.append(f"- {k}: {v:.2f}" if isinstance(v, float) else f"- {k}: {v}")
         
         prompt = INSIGHT_SYNTHESIS_PROMPT.format(
-            profiles=", ".join(profiles),
-            tasks=", ".join(tasks),
+            profiles=", ".join(profiles), tasks=", ".join(tasks),
             total_runs=sum(m.get("count", 0) for m in aggregate_metrics.values()),
-            aggregate_metrics_table=aggregate_table,
-            per_task_summary=per_task_summary,
-            individual_summaries=individual_summaries,
+            aggregate_metrics_table="\n".join(metrics_lines),
+            per_task_summary=per_task_summary, individual_summaries=individual_summaries,
         )
-        
         result = self._call_llm(prompt)
         
         return InsightSynthesis(
@@ -420,26 +359,20 @@ class LLMAnalyzer:
 
 
 def estimate_analysis_cost(num_trajectories: int, include_synthesis: bool = True) -> Dict[str, Any]:
-    """Estimate cost of running full LLM analysis."""
+    cost_per_trajectory = 0.05
+    cost_per_mcp_trajectory = 0.03
+    cost_per_comparison = 0.04
+    cost_synthesis = 0.10
     
-    # Rough estimates based on GPT-5.2 pricing
-    cost_per_trajectory = 0.05  # ~$0.05 for strategy + failure analysis
-    cost_per_mcp_trajectory = 0.03  # Additional MCP analysis
-    cost_per_comparison = 0.04  # Comparative narrative
-    cost_synthesis = 0.10  # Final synthesis
-    
-    num_comparisons = num_trajectories // 2  # Rough estimate
-    
+    num_comparisons = num_trajectories // 2
     base_cost = num_trajectories * cost_per_trajectory
-    mcp_cost = (num_trajectories // 2) * cost_per_mcp_trajectory  # Assume half have MCP
+    mcp_cost = (num_trajectories // 2) * cost_per_mcp_trajectory
     comparison_cost = num_comparisons * cost_per_comparison
     synthesis_cost = cost_synthesis if include_synthesis else 0
     
-    total = base_cost + mcp_cost + comparison_cost + synthesis_cost
-    
     return {
         "num_trajectories": num_trajectories,
-        "estimated_cost_usd": round(total, 2),
+        "estimated_cost_usd": round(base_cost + mcp_cost + comparison_cost + synthesis_cost, 2),
         "breakdown": {
             "strategy_analysis": round(base_cost, 2),
             "mcp_analysis": round(mcp_cost, 2),

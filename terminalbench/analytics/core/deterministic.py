@@ -11,7 +11,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Set
 
-from .parser import ParsedTrajectory, Step
+from ..io.parser import ParsedTrajectory, Step
+from ..extensions.codecanvas import (
+    load_codecanvas_state,
+    compute_codecanvas_metrics,
+)
 
 
 @dataclass
@@ -67,6 +71,18 @@ class DeterministicMetrics:
     # Failure taxonomy (heuristic detection)
     failure_indicators: Dict[str, int]
     
+    # CodeCanvas-specific (None if not a codecanvas run or no state.json)
+    codecanvas_evidence_count: Optional[int] = None
+    codecanvas_claims_count: Optional[int] = None
+    codecanvas_decisions_count: Optional[int] = None
+    codecanvas_impact_analyses: Optional[int] = None
+    codecanvas_blast_radius_edit_rate: Optional[float] = None
+    codecanvas_anticipated_failure_rate: Optional[float] = None
+    codecanvas_deliberation_depth: Optional[int] = None
+    codecanvas_reasoning_density: Optional[float] = None
+    codecanvas_systematic_progress: Optional[float] = None
+    codecanvas_informed_editing_score: Optional[float] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         d = {}
@@ -85,8 +101,8 @@ MCP_TOOL_BASE_NAMES = {
     # CodeGraph (locagent backend)
     "init_repository", "get_code", "get_dependencies", "search_code",
     "get_symbol_info", "find_references", "get_file_tree",
-    # CodeCanvas (future)
-    "render_codemap", "get_clusters", "highlight_path", "annotate_map",
+    # CodeCanvas
+    "canvas",
 }
 
 # Native Claude Code tools
@@ -97,16 +113,13 @@ NATIVE_TOOL_NAMES = {
 
 
 def is_mcp_tool(tool_name: str) -> bool:
-    """Check if a tool name is an MCP tool (handles prefixed names like mcp__codegraph__*)."""
-    # Direct match
+    """Check if a tool name is an MCP tool (handles prefixed names)."""
     if tool_name in MCP_TOOL_BASE_NAMES:
         return True
-    # Prefixed match (mcp__servername__toolname)
     if tool_name.startswith("mcp__"):
         parts = tool_name.split("__")
         if len(parts) >= 3:
-            base_name = parts[-1]
-            return base_name in MCP_TOOL_BASE_NAMES
+            return parts[-1] in MCP_TOOL_BASE_NAMES
     return False
 
 
@@ -132,7 +145,6 @@ def compute_metrics(trajectory: ParsedTrajectory) -> DeterministicMetrics:
     total_tokens = total_input + total_output
     total_cost = trajectory.final_metrics.total_cost_usd
     
-    # If no final_metrics cost, estimate from steps
     if total_cost == 0:
         total_cost = _estimate_cost_from_steps(trajectory.steps)
     
@@ -168,6 +180,10 @@ def compute_metrics(trajectory: ParsedTrajectory) -> DeterministicMetrics:
     
     # Failure indicators
     failure_indicators = _detect_failure_indicators(trajectory.steps, success)
+    
+    # CodeCanvas-specific metrics
+    cc_state = load_codecanvas_state(trajectory.trial_dir)
+    cc_metrics = compute_codecanvas_metrics(trajectory, cc_state) if cc_state else None
     
     return DeterministicMetrics(
         task_id=trajectory.task_id,
@@ -205,100 +221,80 @@ def compute_metrics(trajectory: ParsedTrajectory) -> DeterministicMetrics:
         files_edited=files_edited,
         grep_before_edit=grep_before_edit,
         failure_indicators=failure_indicators,
+        codecanvas_evidence_count=cc_metrics.evidence_count if cc_metrics else None,
+        codecanvas_claims_count=cc_metrics.claims_count if cc_metrics else None,
+        codecanvas_decisions_count=cc_metrics.decisions_count if cc_metrics else None,
+        codecanvas_impact_analyses=cc_metrics.impact_analyses_count if cc_metrics else None,
+        codecanvas_blast_radius_edit_rate=cc_metrics.blast_radius_edit_rate if cc_metrics else None,
+        codecanvas_anticipated_failure_rate=cc_metrics.anticipated_failure_rate if cc_metrics else None,
+        codecanvas_deliberation_depth=cc_metrics.deliberation_depth if cc_metrics else None,
+        codecanvas_reasoning_density=cc_metrics.reasoning_density if cc_metrics else None,
+        codecanvas_systematic_progress=cc_metrics.systematic_progress if cc_metrics else None,
+        codecanvas_informed_editing_score=cc_metrics.informed_editing_score if cc_metrics else None,
     )
 
 
 def _estimate_cost_from_steps(steps: List[Step]) -> float:
-    """Estimate cost from step-level metrics if final_metrics missing."""
-    total = 0.0
-    for step in steps:
-        if step.metrics and step.metrics.cost_usd:
-            total += step.metrics.cost_usd
-    return total
+    return sum(s.metrics.cost_usd for s in steps if s.metrics and s.metrics.cost_usd)
 
 
 def _extract_tool_names(steps: List[Step]) -> List[str]:
-    """Extract all tool names from trajectory."""
-    names = []
-    for step in steps:
-        for tc in step.tool_calls:
-            names.append(tc.function_name)
-    return names
+    return [tc.function_name for step in steps for tc in step.tool_calls]
 
 
 def _count_tool_errors(steps: List[Step]) -> int:
-    """Count tool calls that resulted in errors."""
     errors = 0
     for step in steps:
         for obs in step.observation_results:
-            if obs.error:
-                errors += 1
-            elif "error" in obs.content.lower()[:200]:
+            if obs.error or "error" in obs.content.lower()[:200]:
                 errors += 1
     return errors
 
 
 def _detect_loops(steps: List[Step]) -> int:
-    """Detect repeated identical tool calls (potential infinite loops)."""
     loop_count = 0
     recent_calls = []
-    
     for step in steps:
         for tc in step.tool_calls:
             call_sig = (tc.function_name, str(tc.arguments))
-            if call_sig in recent_calls[-5:]:  # Look at last 5 calls
+            if call_sig in recent_calls[-5:]:
                 loop_count += 1
             recent_calls.append(call_sig)
-    
     return loop_count
 
 
 def _detect_backtracks(steps: List[Step]) -> int:
-    """Detect edit-then-revert patterns."""
     backtrack_count = 0
     edit_history = []
-    
     for step in steps:
         for tc in step.tool_calls:
             if tc.function_name in ("Edit", "MultiEdit", "Create"):
                 file_path = tc.arguments.get("file_path") or tc.arguments.get("path")
                 if file_path:
-                    # Check if we're editing the same file again soon
                     if file_path in edit_history[-3:]:
                         backtrack_count += 1
                     edit_history.append(file_path)
-    
     return backtrack_count
 
 
 def _extract_file_operations(steps: List[Step]) -> tuple[Set[str], Set[str]]:
-    """Extract files read and edited."""
-    files_read = set()
-    files_edited = set()
-    
+    files_read, files_edited = set(), set()
     for step in steps:
         for tc in step.tool_calls:
             if tc.function_name == "Read":
-                path = tc.arguments.get("file_path")
-                if path:
+                if path := tc.arguments.get("file_path"):
                     files_read.add(path)
             elif tc.function_name in ("Grep", "Glob"):
-                path = tc.arguments.get("path")
-                if path:
+                if path := tc.arguments.get("path"):
                     files_read.add(path)
             elif tc.function_name in ("Edit", "MultiEdit", "Create"):
-                path = tc.arguments.get("file_path") or tc.arguments.get("path")
-                if path:
+                if path := (tc.arguments.get("file_path") or tc.arguments.get("path")):
                     files_edited.add(path)
-    
     return files_read, files_edited
 
 
 def _check_grep_before_edit(steps: List[Step]) -> bool:
-    """Check if agent used grep/search before editing."""
     seen_search = False
-    seen_edit = False
-    
     for step in steps:
         for tc in step.tool_calls:
             if tc.function_name in ("Grep", "Glob", "search_code"):
@@ -306,41 +302,25 @@ def _check_grep_before_edit(steps: List[Step]) -> bool:
             elif tc.function_name in ("Edit", "MultiEdit"):
                 if seen_search:
                     return True
-                seen_edit = True
-    
     return False
 
 
 def _detect_failure_indicators(steps: List[Step], success: bool) -> Dict[str, int]:
-    """Detect potential failure indicators in trajectory."""
-    indicators = {
-        "context_omission": 0,
-        "tool_misuse": 0,
-        "infinite_loop": 0,
-        "budget_exhaustion": 0,
-        "premature_stop": 0,
-    }
+    indicators = {"context_omission": 0, "tool_misuse": 0, "infinite_loop": 0, "budget_exhaustion": 0, "premature_stop": 0}
     
-    # Tool misuse: high error rate in tool calls
     tool_calls = sum(len(s.tool_calls) for s in steps)
     tool_errors = _count_tool_errors(steps)
     if tool_calls > 0 and tool_errors / tool_calls > 0.3:
         indicators["tool_misuse"] = tool_errors
     
-    # Infinite loop: many repeated calls
     loop_count = _detect_loops(steps)
     if loop_count > 5:
         indicators["infinite_loop"] = loop_count
     
-    # Budget exhaustion: trajectory ended abruptly with many tokens
-    total_tokens = sum(
-        (s.metrics.prompt_tokens + s.metrics.completion_tokens) 
-        for s in steps if s.metrics
-    )
+    total_tokens = sum((s.metrics.prompt_tokens + s.metrics.completion_tokens) for s in steps if s.metrics)
     if not success and total_tokens > 80000:
         indicators["budget_exhaustion"] = 1
     
-    # Premature stop: few steps but failed
     if not success and len(steps) < 10:
         indicators["premature_stop"] = 1
     
@@ -360,42 +340,18 @@ def compute_aggregate_metrics(metrics_list: List[DeterministicMetrics]) -> Dict[
         "success_rate": len(successes) / n * 100,
         "success_count": len(successes),
         "failure_count": n - len(successes),
-        
-        # Averages
         "avg_tokens": sum(m.total_tokens for m in metrics_list) / n,
         "avg_cost": sum(m.total_cost_usd for m in metrics_list) / n,
         "avg_steps": sum(m.total_steps for m in metrics_list) / n,
         "avg_tool_calls": sum(m.tool_calls_count for m in metrics_list) / n,
         "avg_unique_tools": sum(m.unique_tools for m in metrics_list) / n,
         "avg_elapsed_sec": sum(m.elapsed_sec for m in metrics_list) / n,
-        
-        # Success-only averages
-        "avg_cost_success": (
-            sum(m.total_cost_usd for m in successes) / len(successes) 
-            if successes else None
-        ),
-        "avg_tokens_success": (
-            sum(m.total_tokens for m in successes) / len(successes)
-            if successes else None
-        ),
-        
-        # MCP usage
+        "avg_cost_success": sum(m.total_cost_usd for m in successes) / len(successes) if successes else None,
+        "avg_tokens_success": sum(m.total_tokens for m in successes) / len(successes) if successes else None,
         "mcp_usage_rate": sum(1 for m in metrics_list if m.mcp_tool_calls > 0) / n * 100,
         "avg_mcp_calls": sum(m.mcp_tool_calls for m in metrics_list) / n,
-        
-        # Behavioral
         "avg_loop_count": sum(m.loop_count for m in metrics_list) / n,
         "avg_backtrack_count": sum(m.backtrack_count for m in metrics_list) / n,
         "grep_before_edit_rate": sum(1 for m in metrics_list if m.grep_before_edit) / n * 100,
-        
-        # Tool distribution (aggregated)
-        "tool_distribution": _aggregate_tool_distribution(metrics_list),
+        "tool_distribution": dict(Counter().update(m.tool_distribution) or Counter() for m in metrics_list),
     }
-
-
-def _aggregate_tool_distribution(metrics_list: List[DeterministicMetrics]) -> Dict[str, int]:
-    """Aggregate tool distributions across trajectories."""
-    total = Counter()
-    for m in metrics_list:
-        total.update(m.tool_distribution)
-    return dict(total)

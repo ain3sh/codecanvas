@@ -250,7 +250,7 @@ Run all tasks with text-only baseline, codegraph MCP, and codecanvas MCP profile
 
 ```bash
 # Use the experiment runner script
-./scripts/run-experiment.sh
+./terminalbench/scripts/run-experiment.sh
 
 # Or manually per task:
 python -m terminalbench.ui.cli \
@@ -264,7 +264,7 @@ python -m terminalbench.ui.cli \
   -C --mcp-server codecanvas --mcp-git-source https://github.com/ain3sh/codecanvas --key codecanvas
 ```
 
-See `scripts/run-experiment.sh` for the complete automation script.
+See `terminalbench/scripts/run-experiment.sh` for the complete automation script.
 
 ### Dry Run
 

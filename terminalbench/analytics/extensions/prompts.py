@@ -2,11 +2,16 @@
 Prompt Templates for LLM-powered analysis (Layer 2).
 
 All prompts designed for GPT-5.2 with structured JSON output.
+Includes both text analysis prompts and vision prompts.
 """
 
 from typing import Dict, Any
 
-# Strategy Classification Prompt
+
+# =============================================================================
+# Text Analysis Prompts
+# =============================================================================
+
 STRATEGY_ANALYSIS_PROMPT = """You are an expert at analyzing LLM agent behavior. Analyze this agent trajectory and classify its problem-solving strategy.
 
 ## Task Context
@@ -51,7 +56,6 @@ Strategy definitions:
 - **chaotic**: No discernible strategy, random actions"""
 
 
-# Failure Root Cause Analysis Prompt
 FAILURE_ANALYSIS_PROMPT = """You are an expert at diagnosing why LLM agents fail at tasks. Analyze this failed trajectory.
 
 ## Task Context
@@ -102,7 +106,6 @@ Root cause definitions:
 - **infinite_loop**: Got stuck repeating actions"""
 
 
-# MCP Utilization Quality Prompt
 MCP_UTILIZATION_PROMPT = """You are an expert at evaluating how effectively LLM agents use specialized tools. Analyze this MCP-enabled trajectory.
 
 ## Task Context
@@ -144,16 +147,9 @@ Evaluate the quality of MCP tool utilization. Output valid JSON:
     "fallback_to_native": "<description of when/why agent fell back to grep/etc>",
     "recommendation": "<how agent should use MCP tools differently>"
 }}
-```
-
-Key questions to consider:
-- Did the agent call init_repository early or waste time exploring first?
-- Did get_dependencies results inform subsequent actions?
-- Did agent use search_code or fall back to grep?
-- Did agent build a mental model from MCP tools or ignore the structural info?"""
+```"""
 
 
-# Comparative Narrative Prompt
 COMPARATIVE_NARRATIVE_PROMPT = """You are an expert at analyzing comparative experiments in AI research. Compare these two trajectories for the same task.
 
 ## Task Context
@@ -214,7 +210,6 @@ Generate a comparative analysis suitable for a research paper. Output valid JSON
 ```"""
 
 
-# Cross-Run Insight Synthesis Prompt
 INSIGHT_SYNTHESIS_PROMPT = """You are an expert at synthesizing research findings. Analyze these aggregate results across all tasks and profiles.
 
 ## Experiment Setup
@@ -269,15 +264,111 @@ Synthesize high-level insights for a research paper. Output valid JSON:
 ```"""
 
 
+# =============================================================================
+# Vision Analysis Prompts (CodeCanvas)
+# =============================================================================
+
+VISUAL_EDIT_ALIGNMENT_PROMPT = """You are an expert at analyzing code visualization diagrams and agent behavior.
+
+This is an IMPACT ANALYSIS visualization from CodeCanvas, showing the "blast radius" of a code symbol - what other code depends on it and might be affected by changes.
+
+The visualization shows:
+- A central node (the analyzed symbol)
+- Connected nodes representing callers (what calls this) and callees (what this calls)
+- Edges showing call relationships
+
+After viewing this visualization, the agent edited these files:
+{files_edited}
+
+The blast radius (files in the visualization) includes:
+{blast_radius_files}
+
+Analyze whether the agent's edits align with what the visualization showed:
+1. Did the agent edit files that appear in the blast radius?
+2. Did the agent edit files OUTSIDE the blast radius (potentially missing dependencies)?
+3. Does the edit pattern suggest the agent understood the visualization?
+
+Output valid JSON:
+```json
+{{
+    "alignment_score": <float 0-1>,
+    "aligned_edits": ["<file that was both edited and in blast radius>"],
+    "outside_edits": ["<file edited but not in blast radius>"],
+    "missed_dependencies": ["<file in blast radius that probably should have been edited>"],
+    "visual_understanding": "<low|medium|high>",
+    "observations": ["<specific observation about the alignment>"],
+    "recommendation": "<what the agent should have done differently>"
+}}
+```"""
+
+
+EVIDENCE_BOARD_QUALITY_PROMPT = """You are an expert at evaluating AI agent reasoning quality.
+
+This is an EVIDENCE BOARD from CodeCanvas, showing the agent's reasoning trail during a code task:
+- Left column: Claims (hypotheses, findings, questions the agent recorded)
+- Center: Evidence thumbnails (visualizations the agent viewed)
+- Right column: Decisions (plans, edits, marks, skips)
+
+Evaluate the quality of the agent's reasoning process:
+1. Did they form clear hypotheses before acting?
+2. Did they link their decisions to evidence?
+3. Is there a logical flow from evidence -> claims -> decisions?
+4. Did they track their progress systematically?
+
+Output valid JSON:
+```json
+{{
+    "board_quality_score": <float 0-1>,
+    "reasoning_style": "<systematic|hypothesis_driven|reactive|chaotic>",
+    "evidence_to_claim_linkage": <float 0-1>,
+    "claim_to_decision_linkage": <float 0-1>,
+    "progress_tracking_quality": "<none|partial|complete>",
+    "strengths": ["<what the agent did well in their reasoning>"],
+    "weaknesses": ["<what could be improved>"],
+    "key_insight": "<single most important observation about the reasoning quality>"
+}}
+```"""
+
+
+ARCHITECTURE_UNDERSTANDING_PROMPT = """You are an expert at analyzing code architecture diagrams.
+
+This is an ARCHITECTURE visualization from CodeCanvas, showing the module structure of a codebase:
+- Boxes represent modules (files)
+- Nested boxes show classes and functions within modules
+- Arrows show import/dependency relationships
+
+The agent was given task: {task_description}
+
+After viewing this architecture, the agent explored these files:
+{files_explored}
+
+And edited these files:
+{files_edited}
+
+Evaluate whether the agent's exploration and edit pattern suggests they understood the architecture:
+1. Did they explore relevant modules for the task?
+2. Did their edit locations make sense given the architecture?
+3. Did they miss any obviously relevant modules?
+
+Output valid JSON:
+```json
+{{
+    "architecture_understanding": <float 0-1>,
+    "relevant_modules_explored": ["<module that was appropriately explored>"],
+    "irrelevant_exploration": ["<module explored that wasn't relevant>"],
+    "missed_modules": ["<module that should have been explored but wasn't>"],
+    "edit_appropriateness": <float 0-1>,
+    "observations": ["<specific observation about architecture understanding>"]
+}}
+```"""
+
+
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
 def condense_trajectory(trajectory, max_steps: int = 50, max_chars_per_step: int = 500) -> str:
-    """
-    Condense a trajectory into LLM-digestible format.
-    
-    Preserves:
-    - Agent reasoning (truncated)
-    - Tool calls with summarized arguments
-    - Key results (first/last N chars)
-    """
+    """Condense a trajectory into LLM-digestible format."""
     lines = []
     step_count = 0
     
@@ -287,7 +378,6 @@ def condense_trajectory(trajectory, max_steps: int = 50, max_chars_per_step: int
             break
         
         if step.source == "agent":
-            # Agent step: show reasoning + tool calls
             thought = (step.message or "")[:max_chars_per_step]
             if len(step.message or "") > max_chars_per_step:
                 thought += "..."
@@ -305,8 +395,7 @@ def condense_trajectory(trajectory, max_steps: int = 50, max_chars_per_step: int
             step_count += 1
         
         elif step.observation_results:
-            # Tool results: summarize
-            for obs in step.observation_results[:2]:  # Max 2 results per step
+            for obs in step.observation_results[:2]:
                 content = obs.content
                 if len(content) > 200:
                     content = content[:100] + "..." + content[-100:]
@@ -331,9 +420,7 @@ def _summarize_args(args: Dict[str, Any], max_len: int = 100) -> str:
         parts.append(f"{k}={v_str}")
     
     result = ", ".join(parts)
-    if len(result) > max_len:
-        result = result[:max_len] + "..."
-    return result
+    return result[:max_len] + "..." if len(result) > max_len else result
 
 
 def format_test_results(verifier_results) -> str:
@@ -346,9 +433,9 @@ def format_test_results(verifier_results) -> str:
         f"Tests: {verifier_results.tests_passed}/{verifier_results.tests_total} passed",
     ]
     
-    for test in verifier_results.test_results[:5]:  # Max 5 tests
-        status_emoji = "PASS" if test.status == "passed" else "FAIL"
-        lines.append(f"  [{status_emoji}] {test.name}")
+    for test in verifier_results.test_results[:5]:
+        status = "PASS" if test.status == "passed" else "FAIL"
+        lines.append(f"  [{status}] {test.name}")
         if test.message and test.status != "passed":
             lines.append(f"       {test.message[:200]}")
     

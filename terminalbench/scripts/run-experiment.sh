@@ -5,7 +5,7 @@ set -euo pipefail
 # Runs all 7 tasks with 3 profiles (text, codegraph, codecanvas) in parallel
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 RESULTS_DIR="${PROJECT_ROOT}/results/runs"
 
 # Configuration

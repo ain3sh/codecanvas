@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Kill all experiment processes and containers cleanly
-# Usage: ./scripts/kill-experiment.sh
+# Usage: ./terminalbench/scripts/kill-experiment.sh
 #
 # Order matters:
 #   1. Docker containers first (they hold the actual agents)
