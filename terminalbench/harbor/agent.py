@@ -85,6 +85,7 @@ class ClaudeCodeMCP(ClaudeCode):
             "FORCE_AUTO_BACKGROUND_TASKS": "1",
             "ENABLE_BACKGROUND_TASKS": "1",
             "ANTHROPIC_CUSTOM_HEADERS": "anthropic-beta: interleaved-thinking-2025-05-14",
+            "IS_SANDBOX": "1",
         }
         env = {k: v for k, v in env.items() if v}
 

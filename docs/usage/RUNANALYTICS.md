@@ -145,6 +145,37 @@ export OPENROUTER_API_KEY=your_key_here
 
 The analytics module auto-loads `terminalbench/.env` if it exists.
 
+## CLI Reference
+
+### Selection Flags
+| Flag | Description |
+|------|-------------|
+| `--tasks TASK [...]` | Filter to specific task IDs |
+| `--profiles PROFILE [...]` | Filter to specific profiles (e.g., text, codegraph, codecanvas) |
+| `--succeeded` | Only analyze successful runs |
+| `--failed` | Only analyze failed runs |
+| `--limit N` | Randomly sample N trajectories |
+
+### Analysis Flags
+| Flag | Description |
+|------|-------------|
+| `--no-llm` | Skip LLM analysis (Layer 1 only, fast & free) |
+| `--llm-only` | Skip deterministic metrics (Layer 2 only) |
+| `--compare A B` | Compare two specific profiles |
+| `--model MODEL` | LLM model for analysis (default: `openrouter/openai/gpt-5.2`) |
+
+### Inspection Flags
+| Flag | Description |
+|------|-------------|
+| `--list` | List discovered runs and exit (no processing) |
+| `--estimate-cost` | Estimate LLM analysis cost and exit |
+
+### Output Flags
+| Flag | Description |
+|------|-------------|
+| `--output, -o DIR` | Output directory (default: `results/analytics/`) |
+| `--quiet, -q` | Suppress progress output |
+
 ## Usage
 
 ```bash
@@ -155,7 +186,7 @@ python -m terminalbench.analytics results/runs/ --no-llm
 python -m terminalbench.analytics results/runs/ --output results/analytics/
 
 # Compare specific profiles
-python -m terminalbench.analytics results/runs/ --compare text loc
+python -m terminalbench.analytics results/runs/ --compare text codegraph
 
 # Filter to specific tasks
 python -m terminalbench.analytics results/runs/ --tasks sanitize-git-repo build-cython-ext
@@ -165,6 +196,45 @@ python -m terminalbench.analytics results/runs/ --estimate-cost
 
 # Use different LLM model
 python -m terminalbench.analytics results/runs/ --model openrouter/openai/gpt-5.2
+```
+
+### Selection & Filtering
+
+```bash
+# List all discovered runs without processing
+python -m terminalbench.analytics results/runs/ --list
+
+# Filter by profile(s)
+python -m terminalbench.analytics results/runs/ --profiles text codegraph
+
+# Filter by outcome
+python -m terminalbench.analytics results/runs/ --succeeded   # only passing runs
+python -m terminalbench.analytics results/runs/ --failed      # only failing runs
+
+# Random sample N trajectories (useful for testing before full run)
+python -m terminalbench.analytics results/runs/ --limit 3 --no-llm
+
+# Combine filters
+python -m terminalbench.analytics results/runs/ --profiles codecanvas --succeeded --tasks sanitize-git-repo
+```
+
+### Common Workflows
+
+```bash
+# 1. Preview what's available
+python -m terminalbench.analytics results/runs/ --list
+
+# 2. Test on small subset (no LLM cost)
+python -m terminalbench.analytics results/runs/ --limit 3 --no-llm -o results/test/
+
+# 3. Estimate LLM cost before committing
+python -m terminalbench.analytics results/runs/ --estimate-cost
+
+# 4. Full analysis
+python -m terminalbench.analytics results/runs/ -o results/analytics/
+
+# 5. Failure-focused analysis
+python -m terminalbench.analytics results/runs/ --failed -o results/failures/
 ```
 
 ## Interpreting Results

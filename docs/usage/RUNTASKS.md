@@ -9,12 +9,12 @@ Run Terminal-Bench 2.0 with Claude Code, with or without MCP tools, using Harbor
 uv pip install -e ".[terminalbench]"
 
 # Baseline (no MCP)
-python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning low \
-  --model anthropic/claude-haiku-4-5
+python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning medium \
+  --model anthropic/claude-sonnet-4-5
 
 # Baseline vs MCP in one call (text + codegraph)
-python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning low \
-  --model anthropic/claude-haiku-4-5 --profiles-parallel 2 \
+python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning medium \
+  --model anthropic/claude-sonnet-4-5 --profiles-parallel 2 \
   -C --no-mcp --key text \
   -C --mcp-server codegraph --mcp-git-source https://github.com/ain3sh/codecanvas --key loc
 ```
@@ -48,7 +48,7 @@ python -m terminalbench.ui.cli --tasks sanitize-git-repo build-cython-ext
 ```
 
 ### Model Selection
-Use API IDs (examples): `anthropic/claude-haiku-4-5`, `anthropic/claude-sonnet-4-5`, `anthropic/claude-opus-4-5`.
+Use API IDs (examples): `anthropic/claude-sonnet-4-5`, `anthropic/claude-opus-4-5`.
 
 Reasoning levels: `low`, `medium`, `high`.
 
@@ -228,8 +228,8 @@ python -m terminalbench.ui.cli --mcp-server codegraph \
   --tasks sanitize-git-repo --csv mcp.csv
 
 # Both in one command (parallel profiles, -C is shorthand for --config-set)
-python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning low \
-  --model anthropic/claude-haiku-4-5 --profiles-parallel 2 \
+python -m terminalbench.ui.cli --tasks sanitize-git-repo --reasoning medium \
+  --model anthropic/claude-sonnet-4-5 --profiles-parallel 2 \
   -C --no-mcp --key text \
   -C --mcp-server codegraph --mcp-git-source https://github.com/ain3sh/codecanvas --key loc
 ```
@@ -256,8 +256,8 @@ Run all tasks with text-only baseline, codegraph MCP, and codecanvas MCP profile
 python -m terminalbench.ui.cli \
   --manifest tasks.yaml \
   --tasks sanitize-git-repo \
-  --model anthropic/claude-haiku-4-5 \
-  --reasoning high \
+  --model anthropic/claude-sonnet-4-5 \
+  --reasoning medium \
   --profiles-parallel 3 \
   -C --no-mcp --key text \
   -C --mcp-server codegraph --mcp-git-source https://github.com/ain3sh/codecanvas --key codegraph \

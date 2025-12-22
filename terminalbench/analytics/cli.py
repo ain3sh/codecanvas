@@ -68,6 +68,31 @@ def main():
         help="Filter to specific tasks",
     )
     parser.add_argument(
+        "--profiles",
+        nargs="+",
+        help="Filter to specific profiles (e.g., text codegraph codecanvas)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        help="Randomly sample N trajectories (useful for testing)",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List discovered runs and exit (no processing)",
+    )
+    parser.add_argument(
+        "--succeeded",
+        action="store_true",
+        help="Only analyze successful runs",
+    )
+    parser.add_argument(
+        "--failed",
+        action="store_true",
+        help="Only analyze failed runs",
+    )
+    parser.add_argument(
         "--estimate-cost",
         action="store_true",
         help="Estimate LLM analysis cost and exit",
@@ -107,6 +132,44 @@ def main():
         if not trajectories:
             print(f"No trajectories found for tasks: {args.tasks}", file=sys.stderr)
             sys.exit(1)
+    
+    # Filter by profiles if specified
+    if args.profiles:
+        trajectories = [t for t in trajectories if t.profile_key in args.profiles]
+        if not trajectories:
+            print(f"No trajectories found for profiles: {args.profiles}", file=sys.stderr)
+            sys.exit(1)
+    
+    # Filter by outcome
+    if args.succeeded:
+        trajectories = [t for t in trajectories if t.success]
+        if not trajectories:
+            print("No successful trajectories found.", file=sys.stderr)
+            sys.exit(1)
+    elif args.failed:
+        trajectories = [t for t in trajectories if not t.success]
+        if not trajectories:
+            print("No failed trajectories found.", file=sys.stderr)
+            sys.exit(1)
+    
+    # Random sample if --limit specified
+    if args.limit and args.limit < len(trajectories):
+        import random
+        trajectories = random.sample(trajectories, args.limit)
+        if not args.quiet:
+            print(f"Randomly sampled {args.limit} trajectories")
+    
+    # List mode - show discovered runs and exit
+    if args.list:
+        print(f"\nDiscovered {len(trajectories)} trajectories:\n")
+        print(f"{'Task':<32} {'Profile':<15} {'Success':<8}")
+        print("-" * 55)
+        for t in sorted(trajectories, key=lambda x: (x.task_id, x.profile_key)):
+            status = "PASS" if t.success else "FAIL"
+            print(f"{t.task_id:<32} {t.profile_key:<15} {status:<8}")
+        print(f"\nUnique tasks: {sorted(set(t.task_id for t in trajectories))}")
+        print(f"Unique profiles: {sorted(set(t.profile_key for t in trajectories))}")
+        sys.exit(0)
     
     if not args.quiet:
         print(f"Found {len(trajectories)} trajectories")
