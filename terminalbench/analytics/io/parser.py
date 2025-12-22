@@ -258,6 +258,9 @@ class TrajectoryParser:
         # Parse verifier results
         verifier = self._parse_verifier(trial_dir / "verifier")
         
+        # Get elapsed time from result.json or compute from trajectory timestamps
+        elapsed_sec = self._get_elapsed_sec(run_entry, traj_data)
+        
         # Build ParsedTrajectory
         return ParsedTrajectory(
             task_id=run_entry.get("task_id", ""),
@@ -270,9 +273,45 @@ class TrajectoryParser:
             steps=[Step.from_dict(s) for s in traj_data.get("steps", [])],
             final_metrics=FinalMetrics.from_dict(traj_data.get("final_metrics")),
             verifier=verifier,
-            elapsed_sec=run_entry.get("elapsed_sec", 0.0),
+            elapsed_sec=elapsed_sec,
             command=run_entry.get("command", []),
         )
+    
+    def _get_elapsed_sec(self, run_entry: Dict[str, Any], traj_data: Dict[str, Any]) -> float:
+        """Get elapsed time from result.json or compute from trajectory timestamps."""
+        from datetime import datetime
+        
+        # Try result.json first (has started_at/finished_at)
+        results_json_path = run_entry.get("results_json")
+        if results_json_path:
+            results_path = self.runs_dir.parent / results_json_path
+            if results_path.exists():
+                try:
+                    result_data = json.loads(results_path.read_text())
+                    started = result_data.get("started_at")
+                    finished = result_data.get("finished_at")
+                    if started and finished:
+                        # Parse ISO format timestamps
+                        start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
+                        end_dt = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+                        return (end_dt - start_dt).total_seconds()
+                except (ValueError, KeyError, json.JSONDecodeError):
+                    pass
+        
+        # Fallback: compute from trajectory step timestamps
+        steps = traj_data.get("steps", [])
+        if len(steps) >= 2:
+            try:
+                first_ts = steps[0].get("timestamp", "")
+                last_ts = steps[-1].get("timestamp", "")
+                if first_ts and last_ts:
+                    start_dt = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
+                    end_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
+                    return (end_dt - start_dt).total_seconds()
+            except (ValueError, KeyError):
+                pass
+        
+        return 0.0
     
     def _parse_verifier(self, verifier_dir: Path) -> Optional[VerifierResults]:
         """Parse verifier outputs (ctrf.json + reward.txt)."""
