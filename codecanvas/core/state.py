@@ -290,14 +290,35 @@ def load_state() -> CanvasState:
     return CanvasState()
 
 
+def _save_for_harbor_extraction(json_str: str) -> None:
+    """Save a copy to ~/.claude/codecanvas/ for Harbor extraction.
+    
+    Best-effort: silently fails if write doesn't work.
+    """
+    extraction_dir = Path.home() / ".claude" / "codecanvas"
+    try:
+        extraction_dir.mkdir(parents=True, exist_ok=True)
+        (extraction_dir / "state.json").write_text(json_str, encoding="utf-8")
+    except (OSError, PermissionError):
+        pass
+
+
 def save_state(state: CanvasState):
-    """Save state to disk."""
+    """Save state to disk.
+    
+    Saves to two locations:
+    1. Primary: .codecanvas/state.json in project
+    2. Extraction: ~/.claude/codecanvas/state.json (for Harbor artifact extraction)
+    """
     path = _get_state_path()
     tmp = path.with_name(path.name + ".tmp")
     tmp.parent.mkdir(parents=True, exist_ok=True)
+    json_str = json.dumps(state.to_dict(), indent=2)
     with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(state.to_dict(), f, indent=2)
+        f.write(json_str)
     tmp.replace(path)
+    
+    _save_for_harbor_extraction(json_str)
 
 
 def clear_state():
