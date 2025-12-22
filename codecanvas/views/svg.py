@@ -7,6 +7,7 @@ Provides high-contrast, multimodal-optimized SVG generation primitives.
 from __future__ import annotations
 
 import html
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -220,16 +221,27 @@ def svg_string_to_png_bytes(svg: str) -> bytes:
     return cairosvg.svg2png(bytestring=svg.encode("utf-8"))
 
 
+def _get_extraction_dir() -> Path:
+    """Get the extraction directory for Harbor.
+    
+    Uses CLAUDE_CONFIG_DIR if set (Harbor container), otherwise ~/.claude/.
+    """
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir) / "codecanvas"
+    return Path.home() / ".claude" / "codecanvas"
+
+
 def _save_for_harbor_extraction(png_bytes: bytes, filename: str) -> None:
-    """Save a copy to ~/.claude/codecanvas/ for Harbor extraction.
+    """Save a copy to CLAUDE_CONFIG_DIR/codecanvas/ for Harbor extraction.
     
     In Harbor containers, the project's .codecanvas/ directory is not extracted.
-    But ~/.claude/ (which becomes agent/sessions/) IS extracted. Saving here
+    But CLAUDE_CONFIG_DIR (which becomes agent/sessions/) IS extracted. Saving here
     ensures images are available for post-hoc analysis.
     
     Best-effort: silently fails if write doesn't work.
     """
-    extraction_dir = Path.home() / ".claude" / "codecanvas"
+    extraction_dir = _get_extraction_dir()
     try:
         extraction_dir.mkdir(parents=True, exist_ok=True)
         (extraction_dir / filename).write_bytes(png_bytes)
@@ -242,7 +254,7 @@ def save_png(svg: str, png_path: str | Path) -> bytes:
     
     Saves to two locations:
     1. Primary: The requested path (typically .codecanvas/ in project)
-    2. Extraction: ~/.claude/codecanvas/ (for Harbor artifact extraction)
+    2. Extraction: CLAUDE_CONFIG_DIR/codecanvas/ (for Harbor artifact extraction)
     """
     out_path = Path(png_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)

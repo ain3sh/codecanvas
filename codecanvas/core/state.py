@@ -290,12 +290,23 @@ def load_state() -> CanvasState:
     return CanvasState()
 
 
+def _get_extraction_dir() -> Path:
+    """Get the extraction directory for Harbor.
+    
+    Uses CLAUDE_CONFIG_DIR if set (Harbor container), otherwise ~/.claude/.
+    """
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir) / "codecanvas"
+    return Path.home() / ".claude" / "codecanvas"
+
+
 def _save_for_harbor_extraction(json_str: str) -> None:
-    """Save a copy to ~/.claude/codecanvas/ for Harbor extraction.
+    """Save a copy to CLAUDE_CONFIG_DIR/codecanvas/ for Harbor extraction.
     
     Best-effort: silently fails if write doesn't work.
     """
-    extraction_dir = Path.home() / ".claude" / "codecanvas"
+    extraction_dir = _get_extraction_dir()
     try:
         extraction_dir.mkdir(parents=True, exist_ok=True)
         (extraction_dir / "state.json").write_text(json_str, encoding="utf-8")
@@ -308,7 +319,7 @@ def save_state(state: CanvasState):
     
     Saves to two locations:
     1. Primary: .codecanvas/state.json in project
-    2. Extraction: ~/.claude/codecanvas/state.json (for Harbor artifact extraction)
+    2. Extraction: CLAUDE_CONFIG_DIR/codecanvas/state.json (for Harbor artifact extraction)
     """
     path = _get_state_path()
     tmp = path.with_name(path.name + ".tmp")
