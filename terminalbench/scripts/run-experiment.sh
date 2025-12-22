@@ -7,6 +7,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 RESULTS_DIR="${PROJECT_ROOT}/results/runs"
+LOGFILE="${PROJECT_ROOT}/results/experiment_$(date +%Y%m%d_%H%M%S).log"
+
+# Redirect all output to log file
+exec > >(tee -a "$LOGFILE") 2>&1
 
 # Configuration
 MODEL="${MODEL:-anthropic/claude-sonnet-4-5}"
