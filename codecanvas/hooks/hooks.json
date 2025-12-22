@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"from codecanvas.hooks.session_init import main; main()\"",
+            "command": "uv run python -c \"from codecanvas.hooks.session_init import main; main()\"",
             "timeout": 30
           }
         ]
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
             "timeout": 10
           }
         ]

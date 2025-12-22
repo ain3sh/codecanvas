@@ -49,8 +49,9 @@ git clone {{ mcp_git_source }} mcp-repo
 {% endif %}
 cd mcp-repo
 
-# Install with all MCP extras (locagent, codecanvas, etc.)
-uv pip install --system ".[locagent,mcp]"
+# Create isolated venv and install MCP packages (avoids PEP 668 issues on Ubuntu 24.04+)
+uv venv /opt/mcp-venv --python 3.13
+uv pip install --python /opt/mcp-venv/bin/python ".[locagent,mcp]"
 cd /
 rm -rf /tmp/mcp-repo
 {% else %}
