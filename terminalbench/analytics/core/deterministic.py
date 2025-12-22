@@ -353,5 +353,5 @@ def compute_aggregate_metrics(metrics_list: List[DeterministicMetrics]) -> Dict[
         "avg_loop_count": sum(m.loop_count for m in metrics_list) / n,
         "avg_backtrack_count": sum(m.backtrack_count for m in metrics_list) / n,
         "grep_before_edit_rate": sum(1 for m in metrics_list if m.grep_before_edit) / n * 100,
-        "tool_distribution": dict(Counter().update(m.tool_distribution) or Counter() for m in metrics_list),
+        "tool_distribution": dict(sum((Counter(m.tool_distribution) for m in metrics_list), Counter())),
     }
