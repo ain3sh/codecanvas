@@ -115,6 +115,7 @@ class ClaudeCodeMCP(ClaudeCode):
             "claude",
             "--verbose",
             "--output-format", "stream-json",
+            "--dangerously-skip-permissions",  # Non-interactive: skip permission prompts
             "-p", escaped_instruction,
         ]
 
@@ -137,17 +138,16 @@ class ClaudeCodeMCP(ClaudeCode):
             settings.update(hooks_data)
 
         permissions = settings.setdefault("permissions", {})
-        permissions.setdefault("allow", [])
-        permissions.setdefault("defaultMode", "acceptEdits")
+        permissions.setdefault("defaultMode", "bypassPermissions")
 
         # Pre-allow MCP tools if MCP config is provided
         # Per Claude Code docs: MCP permissions do NOT support wildcards.
         # Use mcp__<server_name> to approve ALL tools from that server.
         if self.mcp_config:
             mcp_data = json.loads(self.mcp_config) if isinstance(self.mcp_config, str) else self.mcp_config
+            permissions.setdefault("allow", [])
             for server_name in mcp_data.get("mcpServers", {}).keys():
                 permissions["allow"].append(f"mcp__{server_name}")
-            permissions["defaultMode"] = "acceptEdits"
 
         settings_file = "/tmp/claude-settings.json"
         escaped_settings = shlex.quote(json.dumps(settings))
