@@ -278,7 +278,13 @@ class HarborRunner:
             proc = subprocess.run(cmd, env=env)
             elapsed = time.time() - start
 
-            job_dir = self._find_latest_job_dir(self.output_root)
+            # Use explicit job_name path if provided, otherwise fall back to latest
+            if job_name and self.output_root:
+                job_dir = self.output_root / job_name
+                if not job_dir.exists():
+                    job_dir = self._find_latest_job_dir(self.output_root)
+            else:
+                job_dir = self._find_latest_job_dir(self.output_root)
             result_json = self._find_result_json(job_dir)
             trajectory_json = self._find_trajectory(job_dir, task.id)
 
