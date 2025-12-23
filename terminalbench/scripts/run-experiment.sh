@@ -74,7 +74,7 @@ for i in "${!TASKS[@]}"; do
         --profiles-parallel "$PROFILES_PARALLEL" \
         -C --no-mcp --key text \
         -C --mcp-server codegraph --mcp-git-source "$MCP_GIT_SOURCE" --key codegraph \
-        -C --mcp-server codecanvas --mcp-git-source "$MCP_GIT_SOURCE" --key codecanvas
+        -C --mcp-server codecanvas --mcp-git-source "$MCP_GIT_SOURCE" --hooks codecanvas/hooks/hooks.json --key codecanvas
     
     echo ""
     echo "Task $TASK completed."
