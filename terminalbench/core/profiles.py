@@ -13,6 +13,11 @@ DEFAULT_REASONING = "medium"
 # Path to Python in the MCP venv created by install-claude-code-mcp.sh
 MCP_VENV_PYTHON = "/opt/mcp-venv/bin/python"
 
+# Aliases for MCP server names -> source directory names (for USAGE.md discovery)
+MCP_USAGE_ALIASES = {
+    "codegraph": "locagent",
+}
+
 
 def load_mcp_config(config_path: Path) -> Dict[str, Any]:
     """Load and parse MCP config file."""
@@ -55,7 +60,8 @@ def discover_mcp_usage_prompts(server_names: List[str], search_dir: Path = None)
     
     prompts = []
     for name in server_names:
-        usage_file = search_dir / name / "USAGE.md"
+        source_name = MCP_USAGE_ALIASES.get(name, name)
+        usage_file = search_dir / source_name / "USAGE.md"
         if usage_file.exists():
             prompts.append(usage_file.read_text().strip())
     
