@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 
-DEFAULT_MODEL = "anthropic/claude-sonnet-4-20250514"
+DEFAULT_MODEL = "anthropic/claude-sonnet-4-5-20250929"
 DEFAULT_REASONING = "medium"
 
 # Path to Python in the MCP venv created by install-claude-code-mcp.sh

@@ -21,7 +21,7 @@ CONFIG_FILE = CONFIG_DIR / "config.yaml"
 class TBConfig:
     """Terminal-Bench configuration."""
 
-    model: str = "anthropic/claude-sonnet-4-20250514"
+    model: str = "anthropic/claude-sonnet-4-5-20250929"
     reasoning: str = "medium"
     mcp_config: Optional[str] = None  # Path to .mcp.json
     hooks: Optional[str] = None  # Path to hooks settings
