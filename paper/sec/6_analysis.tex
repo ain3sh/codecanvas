@@ -1,0 +1,109 @@
+\section{Analysis}
+\label{sec:analysis}
+
+We analyze ATIF trajectories to characterize how observation modality shapes behavior beyond binary success. Layer~2 semantic analysis provides failure root-cause labels, while Layer~1 metrics quantify search, editing, and verification patterns.
+
+\subsection{Tool Invocation Patterns}
+\label{sec:tool-use}
+
+Pre-edit search behavior varies across conditions. The grep-before-edit rate is 42.9\% for Text-Only and CodeCanvas and 57.1\% for LocAgent, suggesting the graph baseline relies more heavily on search before editing. Search frequency alone does not explain outcomes: the CodeCanvas condition solves 4/7 tasks and exhibits lower backtracking despite matching Text-Only on grep-before-edit.
+
+\noindent\textbf{Activation coverage.} CodeCanvas state was recorded on 2/7 tasks due to a SessionStart heuristic requiring at least five recognized code files. Those are also the only tasks with CodeCanvas MCP tool calls (\texttt{sanitize-git-repo} and \texttt{fix-code-vulnerability}), and both fail; CodeCanvas-specific artifacts therefore mostly characterize failure cases here. Tool-use patterns remain measurable across all trajectories: Figure~\ref{fig:tool-mix} shows the CodeCanvas condition uses fewer total tool calls than both baselines.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{fig/tool_mix.png}
+\caption{Tool-call mix across conditions (sum over 7 tasks). Numbers above bars denote total tool calls.}
+\label{fig:tool-mix}
+\end{figure}
+
+~
+
+~
+
+~
+
+~
+
+~
+
+~
+
+\subsection{Failure Mode Taxonomy}
+\label{sec:failure-modes}
+
+We categorize each failed trajectory into one of five modes:
+\textbf{Poor Execution} (plausible approach, missed details);
+\textbf{Tool Misuse} (correct tools used destructively);
+\textbf{Incomplete Exploration} (failed to find relevant code);
+\textbf{Misunderstood Task} (wrong objective);
+\textbf{Premature Termination} (ran out of budget/time).
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}p{2.7cm}ccc@{}}
+\toprule
+\textbf{Failure Mode} & \textbf{Text} & \textbf{LocAgent} & \textbf{CodeCanvas} \\
+\midrule
+Poor Execution & 50.0\% & 50.0\% & 33.3\% \\
+Tool Misuse & 25.0\% & 25.0\% & 66.7\% \\
+Incomplete Exploration & 0.0\% & 0.0\% & 0.0\% \\
+Misunderstood Task & 0.0\% & 25.0\% & 0.0\% \\
+Premature Termination & 25.0\% & 0.0\% & 0.0\% \\
+\bottomrule
+\end{tabular}
+\caption{Failure mode distribution (\% of failures) from Layer~2 analysis.}
+\label{tab:failure-modes}
+\end{table}
+
+\noindent Denominators are the number of failed runs per condition (Text-Only: 4, LocAgent: 4, CodeCanvas: 3).
+
+\noindent\textbf{Common failure points.} Across all conditions, \emph{db-wal-recovery} failures are attributable to procedurally unsafe interaction with the live database (opening a WAL-mode database before preserving the WAL). For CodeCanvas on \emph{fix-code-vulnerability}, the core code changes were close to correct but the run failed due to a strict report-schema mismatch, illustrating that impact awareness does not substitute for contract checking.
+
+~
+
+~
+
+~
+
+~
+
+~
+
+~
+
+~
+
+~
+
+\subsection{Efficiency vs.\ Effectiveness}
+\label{sec:efficiency}
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Metric} & \textbf{Text} & \textbf{LocAgent} & \textbf{CodeCanvas} \\
+\midrule
+Avg Tokens (M) & 3.34 & \textbf{2.48} & 2.61 \\
+Avg Backtrack & 4.57 & 2.57 & \textbf{2.14} \\
+Avg Loop & 0.86 & 0.29 & \textbf{0.14} \\
+Tokens / Success (M) & 7.80 & 5.79 & \textbf{4.56} \\
+Time / Success (m) & 23.3 & 19.8 & \textbf{12.4} \\
+Steps / Success & 201.0 & 178.0 & \textbf{127.3} \\
+\bottomrule
+\end{tabular}
+\caption{Efficiency metrics (lower is better). Tokens/time/steps per success include failed trajectories in the numerator.}
+\label{tab:efficiency}
+\end{table}
+
+\noindent\textbf{Efficiency and effectiveness diverge across baselines.} LocAgent uses the fewest tokens per run on average (2.48M) but does not improve Pass@1 relative to Text-Only (both 42.9\%). In this run set, normalizing by success, the CodeCanvas condition has the lowest cost per solved task (4.56M tokens and 12.4 minutes per success vs.\ 5.79M/19.8m for LocAgent and 7.80M/23.3m for Text-Only). Figure~\ref{fig:tokens-vs-backtrack} shows this pattern at the trajectory level: the CodeCanvas condition achieves comparable or lower backtracking at moderate token budgets, while Text-Only exhibits higher-cost failures and higher backtracking.
+
+\subsection{Scope of Representation Benefits}
+\label{sec:where-helps}
+
+In this run set, the CodeCanvas condition uniquely succeeds on \emph{rstan-to-pystan} and shows lower backtracking and looping than both baselines. Because CodeCanvas state is recorded on only two tasks in this study, we cannot directly connect aggregate outcomes to codemap-guided impact analysis; instead, we treat the activated trajectories as qualitative evidence about the tool's interaction with failure cases. On \emph{fix-code-vulnerability}, CodeCanvas exhibits high alignment between analyzed regions and edits (IES=0.70; Table~\ref{tab:ies-results}) yet still fails due to a strict report-schema mismatch, illustrating that impact awareness does not substitute for contract checking. \emph{db-wal-recovery} fails across all conditions due to procedural fragility: interacting with the live database can destroy recovery evidence, a failure mode orthogonal to repository representation.
+
+\noindent These results indicate that representation-level tools are most effective when success depends on coordinating edits across a dependency surface, but they do not replace careful contract validation or domain-specific operational discipline.

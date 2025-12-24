@@ -1,10 +1,167 @@
-\clearpage
 \setcounter{page}{1}
 \maketitlesupplementary
 
-\section{Why these fusion choices and not KV edits}
-We avoid unproven, hard-to-stabilize KV-cache surgery. \emph{Control-tokens} are simple and transparent; \emph{gated cross-attention} is a documented, widely reproduced method for conditioning frozen LMs on auxiliary streams. Both admit clean ablations and minimize confounds from planner retraining \citep{Alayrac2022Flamingo,Hu2021LoRA,Li2021PrefixTuning}.
+\section{CodeCanvas MCP Tool Schema}
+\label{app:schema}
 
-\section{Ground-truthing endpoints without pixels}
-For \emph{AdSERP}, we use fixation points and SERP AOIs released with the dataset to build endpoint labels and to define positive/negative windows for imminence. For \emph{RecGaze}, we use interaction logs and gaze to derive endpoints for carousel targets. For \emph{OSWorld}, we use click outcomes and the verified harness to align clicks with UI state transitions; no DOM parsing is required \citep{Latifzadeh2025AdSERP,RecGaze2025,OSWorldVerified2025}.
+The \texttt{canvas} tool exposes the following JSON-RPC interface:
 
+\begin{verbatim}
+{
+  "name": "canvas",
+  "description": "Visual impact analysis and 
+                  evidence tracking for code edits",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "action": {
+        "type": "string",
+        "enum": ["init", "impact", "claim", 
+                 "decide", "mark", "skip", 
+                 "status", "read"]
+      },
+      "file": { "type": "string" },
+      "symbol": { "type": "string" },
+      "content": { "type": "string" },
+      "rationale": { "type": "string" }
+    },
+    "required": ["action"]
+  }
+}
+\end{verbatim}
+
+\section{Terminal-Bench 2.0 Task Prompts}
+\label{app:prompts}
+
+\paragraph{sanitize-git-repo.}
+Remove leaked credentials from the repository history while preserving commit structure. Verify no secrets remain in any reachable commit.
+
+\paragraph{build-cython-ext.}
+Build the pyknotid Cython extension against NumPy 2.x. Resolve API compatibility issues and produce a working wheel.
+
+\paragraph{custom-memory-heap-crash.}
+Debug a C++ application that crashes only in release builds. Identify the undefined behavior and fix without breaking debug mode.
+
+\paragraph{db-wal-recovery.}
+Recover a SQLite database from WAL files after an unclean shutdown. Verify data integrity matches the expected checkpoint.
+
+\paragraph{modernize-scientific-stack.}
+Migrate a Python 2.7 scientific codebase to Python 3.11+. Update deprecated APIs and ensure numerical results match.
+
+\paragraph{rstan-to-pystan.}
+Translate an R/RStan probabilistic model to PyStan. Verify posterior distributions match within tolerance.
+
+\paragraph{fix-code-vulnerability.}
+Audit bottle.py for security vulnerabilities, identify the CWE classification, and implement a fix with regression tests.
+
+\section{Layer 2 Analysis Prompt}
+\label{app:layer2-prompt}
+
+The following prompt is used for GPT-5.2 semantic analysis:
+
+\begin{quote}
+\small
+You are analyzing an agent trajectory from a code editing task. The agent attempted to complete: \{task\_description\}.
+
+Given the trajectory below, classify the primary failure mode:
+\begin{itemize}
+    \item LOCALIZATION: Agent could not find relevant code
+    \item CONTEXT\_LOSS: Agent observed relevant info but lost it
+    \item TOOL\_MISUSE: Agent used tools incorrectly
+    \item IMPACT\_HANDLING: Agent edited correctly but missed dependencies
+    \item SUCCESS: Task completed successfully
+\end{itemize}
+
+Provide a one-sentence rationale.
+
+Trajectory:
+\{trajectory\_json\}
+\end{quote}
+
+\section{Informed Editing Score (IES)}
+\label{app:ies}
+
+For a CodeCanvas run with trajectory $\tau$ and recorded CodeCanvas state $S$, let $F_{\text{edit}}$ be the set of edited files. Let $B$ be the union of files appearing in any recorded impact analysis (blast radius) within $S$. Let $T_{\text{fail}}$ be the set of failing tests reported by the verifier and define $T_{\text{blast}} = \{t \in T_{\text{fail}}: \operatorname{file}(t) \in B\}$. Finally, let $d_{\text{deliberate}} = |C| + |P|$, where $C$ is the set of recorded claims and $P$ is the set of plan decisions. We compute:
+\begin{equation}
+\begin{aligned}
+r_{\text{blast}} &= \frac{|F_{\text{edit}} \cap B|}{|F_{\text{edit}}|}, \\
+r_{\text{anticipate}} &= \frac{|T_{\text{blast}}|}{\max(1, |T_{\text{fail}}|)}, \\
+\mathrm{IES} &= 0.4\,r_{\text{blast}} + 0.3\,r_{\text{anticipate}} + 0.3\,\min\left(1, \frac{d_{\text{deliberate}}}{3}\right).
+\end{aligned}
+\end{equation}
+Weights are heuristic defaults (not tuned) that emphasize blast-radius consultation; deliberation is capped to prevent verbose agents from inflating the score.
+
+\begin{table}[t]
+\centering
+\small
+\begin{tabular}{@{}cccc@{}}
+\toprule
+\textbf{IES} & $r_{\text{blast}}$ & $r_{\text{anticipate}}$ & $d_{\text{deliberate}}$ \\
+\midrule
+0.50 & 0.50 & 0.00 & 4.0 \\
+\bottomrule
+\end{tabular}
+\caption{Informed Editing Score (CodeCanvas only), averaged over the two trajectories where CodeCanvas state and impact analyses were recorded.}
+\label{tab:ies-results}
+\end{table}
+
+\noindent\textbf{Interpretation.} On the two runs where CodeCanvas recorded state, IES averaged 0.50 (0.30 on \texttt{sanitize-git-repo} and 0.70 on \texttt{fix-code-vulnerability}). Both trajectories were failures, so IES here acts as a process diagnostic rather than a predictor of success. The anticipated-failure component remains 0.0 in this run set.
+
+\section{Evidence Board State Examples}
+\label{app:evidence-board}
+
+Example Evidence Board state mid-task:
+
+\begin{verbatim}
+=== EVIDENCE BOARD ===
+CLAIMS:
+  [C1] Bug is in parser module (OPEN)
+  [C2] Return type changed in v2.0 (SUPPORTED)
+
+EVIDENCE:
+  [E1] Stack trace points to parse_input:42
+       -> supports C1
+  [E2] CHANGELOG mentions return type change
+       -> supports C2
+
+DECISIONS:
+  [D1] Will refactor parse_input to handle 
+       edge case (rationale: E1 + C1)
+
+FOCUS: src/parser.py:40-60
+BLAST RADIUS: 12 callers, 3 test files
+\end{verbatim}
+
+\newpage
+\section{Extended Codemap Example}
+\label{app:codemap}
+
+Example ASCII codemap output:
+
+\begin{verbatim}
+IMPACT ANALYSIS: parse_input (parser.py:42)
+=========================================
+CALLERS (12):
+  main.py:15      -> process_file()
+  main.py:89      -> batch_process()
+  utils.py:23     -> validate_input()
+  ...
+  
+AFFECTED TESTS (3):
+  test_parser.py  -> test_basic_parse
+  test_parser.py  -> test_edge_cases
+  test_main.py    -> test_integration
+
+DOWNSTREAM DEPS:
+  parse_input -> validate_schema -> write_output
+                                 -> log_result
+\end{verbatim}
+
+\section{Author Contributions}
+\label{app:contrib}
+
+\noindent Ainesh Chatterjee: Led design and implementation of CodeCanvas; repackaged LocAgent as an MCP server; architected Terminal-Bench evaluation harness and analytics framework; wrote final draft.
+
+\noindent Navya Khurana: Conducted literature review; explored related approaches; helped refine CodeCanvas MCP agent-UX design.
+
+\noindent Eric Wang: Helped implement evaluation harness and analytics framework; ran and monitored experiments.

@@ -1,0 +1,76 @@
+\section{Method: CodeCanvas}
+\label{sec:method}
+
+\subsection{Design Principles}
+\label{sec:design-goals}
+
+CodeCanvas is designed around three principles:
+\begin{enumerate}
+    \item \textbf{Observable Blast Radius.} Before editing, the agent should see what code depends on the focus region: callers, tests, downstream consumers.
+    \item \textbf{Persistent Reasoning State.} Claims, evidence, and decisions should survive context compaction, enabling coherent multi-step reasoning.
+    \item \textbf{Reduced Query Burden.} Deterministic hooks inject context automatically when CodeCanvas is active; the agent need not remember to invoke analysis tools.
+\end{enumerate}
+
+\subsection{Architecture Overview}
+\label{sec:architecture}
+
+CodeCanvas is packaged as an MCP server exposing a single tool, \texttt{canvas}. It supports (i) session initialization and repository parsing (\texttt{init}), (ii) blast-radius slicing for a file or symbol (\texttt{impact}), and (iii) persistent state updates for claims and decisions (\texttt{claim}, \texttt{decide}) with lightweight progress tracking (\texttt{mark}, \texttt{skip}, \texttt{status}, \texttt{read}).
+
+Internally, CodeCanvas uses LSP-first parsing (e.g., pylsp, tsserver, clangd) with tree-sitter fallback for unsupported or failing language servers. All state and generated artifacts are persisted under \texttt{.codecanvas/} in the workspace.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{fig/architecture_example.png}
+\caption{Repository architecture view from \texttt{sanitize-git-repo}, grouping modules into layers and surfacing cross-layer dependencies for navigation and triage.}
+\label{fig:architecture-example}
+\end{figure*}
+
+\subsection{Blast Radius Visualization}
+\label{sec:blast-radius}
+
+We operationalize \emph{blast radius} as a bounded slice of the dependency surface obtained via LSP queries: for symbols in the focus region, we collect reference locations and call-hierarchy neighbors and map them to file paths. CodeCanvas renders this slice and its relations as a compact \emph{codemap} artifact.
+
+When the agent reads a file, the \texttt{PostToolUse:Read} hook triggers impact analysis:
+\begin{enumerate}
+    \item Extract symbols from the focus region using LSP \texttt{documentSymbol}
+    \item Query references and dependents via LSP \texttt{references} and \texttt{callHierarchy}
+    \item Render a codemap showing dependency structure
+    \item Annotate with caller counts, test file indicators, and modification hints
+\end{enumerate}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{fig/impact_example.png}
+\caption{Example blast-radius codemap for \texttt{pyknotid/make/torus.py} (from \texttt{build-cython-ext}), surfacing upstream and downstream modules affected by edits to the target file.}
+\label{fig:codemap-example}
+\end{figure}
+
+\subsection{Evidence Board}
+\label{sec:evidence-board}
+
+The Evidence Board provides three primitives for externalizing reasoning:
+\begin{description}
+    \item[Claim] A hypothesis about the codebase or task (e.g., ``The bug is in the parser module'')
+    \item[Evidence] An observation supporting or refuting a claim (e.g., ``Found stack trace pointing to line 42'')
+    \item[Decision] A committed action with rationale (e.g., ``Will refactor \texttt{parse\_input} to handle edge case'')
+\end{description}
+
+The board is rendered as a compact artifact that survives compaction and is re-injected via hooks.
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{fig/evidence_board.png}
+\caption{Evidence Board interface from the \texttt{fix-code-vulnerability} task. Left: Claims summarize suspected vulnerabilities (e.g., CWE-502, CWE-22). Center: Evidence thumbnails link to impact analyses. Right: Decisions record planned and executed actions and verification status.}
+\label{fig:evidence-board}
+\end{figure}
+
+\subsection{Hook Integration}
+\label{sec:hooks}
+
+CodeCanvas uses Claude Code hooks for deterministic augmentation:
+\begin{itemize}
+    \item \textbf{SessionStart}: Auto-initialize canvas state and inject Evidence Board summary
+    \item \textbf{PostToolUse:Read}: Trigger impact analysis for any file read, injecting codemap into observation
+\end{itemize}
+
+In our implementation, SessionStart initialization is gated by a lightweight repository check and a minimum threshold on recognized code files to avoid overhead in non-code directories; when the gate fails to trigger, CodeCanvas does not produce visual artifacts for that task.

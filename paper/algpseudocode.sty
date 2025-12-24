@@ -1,0 +1,16 @@
+% Minimal algpseudocode.sty stub for systems without algorithmicx
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{algpseudocode}[2024/01/01 Minimal algpseudocode stub]
+
+\newenvironment{algorithmic}[1][]{%
+  \par\small\ttfamily
+  \begin{list}{}{\setlength{\leftmargin}{1.5em}\setlength{\itemsep}{0.2em}}%
+}{%
+  \end{list}%
+}
+
+\newcommand{\Require}{\item[\textbf{Input:}]}
+\newcommand{\Ensure}{\item[\textbf{Output:}]}
+\newcommand{\State}{\item}
+\newcommand{\Return}{\textbf{return} }
+\newcommand{\Comment}[1]{\hfill\textrm{\textit{// #1}}}

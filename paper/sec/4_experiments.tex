@@ -1,0 +1,120 @@
+\section{Experimental Setup}
+\label{sec:experiments}
+
+\subsection{Benchmark: Terminal-Bench 2.0}
+\label{sec:benchmark}
+
+We evaluate on Terminal-Bench~2.0~\cite{terminalbench2harbor2025}, which emphasizes end-to-end terminal execution with verifiable outcomes. We select seven tasks spanning diverse domains and complexity:
+
+\begin{table}[h]
+\centering
+\scriptsize
+\begin{tabular}{@{}p{2.4cm}llc@{}}
+\toprule
+\textbf{Task} & \textbf{Domain} & \textbf{Language} & \textbf{Difficulty} \\
+\midrule
+sanitize-git-repo & Security & Shell/Git & Medium \\
+build-cython-ext & Compilation & Python/C & Medium \\
+custom-memory-heap-crash & Debugging & C++ & Medium \\
+db-wal-recovery & Database & SQL/Python & Medium \\
+modernize-scientific-stack & Migration & Python & Medium \\
+rstan-to-pystan & Translation & R/Python & Medium \\
+fix-code-vulnerability & Security & Python & Hard \\
+\bottomrule
+\end{tabular}
+\caption{Terminal-Bench 2.0 tasks used in evaluation.}
+\label{tab:tasks}
+\end{table}
+
+Tasks are executed in Harbor-managed containers with build fingerprinting for reproducibility~\cite{terminalbench2harbor2025}.
+
+~
+
+~
+
+~
+
+~
+
+~
+
+~
+
+\subsection{Agent Harness}
+\label{sec:harness}
+
+All conditions use Claude Code via a custom \texttt{ClaudeCodeMCP} wrapper, executed under Harbor with multi-profile support (\texttt{-C} flags). Trajectories are logged in ATIF format for post-hoc analysis~\cite{harborATIF2025}.
+
+\subsection{Experimental Conditions}
+\label{sec:conditions}
+
+We compare three observation modalities while holding the harness constant:
+
+\begin{table}[h]
+\centering
+\scriptsize
+\begin{tabular}{@{}p{1.6cm}p{2.2cm}p{2.9cm}@{}}
+\toprule
+\textbf{Condition} & \textbf{MCP Tools} & \textbf{Hooks} \\
+\midrule
+Text-Only & None & None \\
+LocAgent & LocAgent~(5 tools) & None \\
+CodeCanvas & canvas~(8 actions) & SessionStart,~PostToolUse \\
+\bottomrule
+\end{tabular}
+\caption{Experimental conditions. LocAgent~\cite{locagent2025} is used as the graph-based MCP baseline.}
+\label{tab:conditions}
+\end{table}
+
+\noindent\textbf{CodeCanvas activation.}
+SessionStart initialization is gated by (i) detection of a code repository marker and (ii) a minimum number of recognized code files. If initialization does not trigger, CodeCanvas produces no state artifacts for that run and CodeCanvas-specific process metrics are undefined. In our run set, CodeCanvas state was recorded on 2/7 tasks (and IES is computed only on that subset).
+
+\noindent\textbf{LocAgent baseline packaging.}
+LocAgent~\cite{locagent2025} is originally presented as a full agent framework. To isolate the effect of observation modality, we repackage its dependency-graph construction and retrieval primitives as an MCP server and run them under Claude Code, removing baseline-specific orchestration from the comparison.
+This repackaging may degrade LocAgent relative to its original implementation; we therefore interpret results as LocAgent primitives under Claude Code rather than LocAgent as a complete system.
+
+\paragraph{Run batches (mixed reporting).}
+The 21 trajectories analyzed in this paper derive from two Terminal-Bench run batches sharing identical tasks, model, and Harbor + Claude Code harness. Text-Only and CodeCanvas trajectories are drawn from an earlier batch, while LocAgent trajectories are drawn from a later batch after baseline packaging changes. We report this mixed-batch aggregate to preserve the corrected LocAgent baseline and treat all comparisons as descriptive (single trial per task and condition).
+
+~
+
+~
+
+~
+
+\paragraph{Hypotheses (exploratory).}
+We structure our analysis around two design hypotheses, framed as qualitative expectations rather than statistical claims:
+\begin{itemize}
+    \item \textbf{H1 (Impact visibility reduces revision churn).} When the dependency surface is made explicit at edit time (codemaps), the agent performs fewer revision cycles, reflected in lower backtrack and loop counts.
+    \item \textbf{H2 (Persistent state reduces redundant work).} When claims/evidence/decisions persist across context compaction and are re-injected via hooks, the agent repeats fewer identical actions, reflected in lower loop counts and fewer tool calls.
+\end{itemize}
+
+\subsection{Metrics}
+\label{sec:metrics}
+
+\paragraph{Primary Outcomes.}
+\begin{itemize}
+    \item \textbf{Pass@1}: Task success rate (one run per task and condition)
+\end{itemize}
+
+\paragraph{Process Metrics.}
+\begin{itemize}
+    \item Token usage (input + output)
+    \item Step count (tool invocations)
+    \item Tool invocation density (tools per step)
+    \item \textbf{Backtrack count}: number of edit actions that revisit a file edited within the previous three edit actions (detected over \texttt{Edit}/\texttt{MultiEdit}/\texttt{Create} tool calls)
+    \item \textbf{Loop count}: number of tool calls whose (tool name, arguments) repeats within the previous five tool calls
+    \item \textbf{Grep-before-edit}: whether any search call (\texttt{Grep}/\texttt{Glob} or LocAgent \texttt{search\_code}) occurs before the first \texttt{Edit} or \texttt{MultiEdit}
+\end{itemize}
+
+\paragraph{CodeCanvas-Specific: Informed Editing Score (IES).}
+We propose IES as a process diagnostic that summarizes (i) how much editing stays within the analyzed blast radius, (ii) whether failing tests were anticipated by impact analysis, and (iii) evidence of deliberation via recorded claims and decisions. The full definition is given in Appendix~\ref{app:ies}. IES is computed only for runs where CodeCanvas state was recorded (n=2) and should be interpreted as preliminary.
+
+\subsection{Analysis Protocol}
+\label{sec:analysis-protocol}
+
+We employ a two-layer analysis framework:
+\begin{description}
+    \item[Layer 1 (Deterministic):] Free metrics extracted directly from ATIF trajectories: step counts, token usage, tool patterns, success/failure outcomes.
+    \item[Layer 2 (Automated):] GPT-5.2 semantic analysis (\$0.05/trajectory) for failure attribution, labeling failures into the five modes in Section~\ref{sec:failure-modes}. These labels are treated as automated heuristics rather than ground truth.
+\end{description}

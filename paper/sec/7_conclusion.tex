@@ -1,0 +1,38 @@
+~
+
+~
+
+\section{Conclusion}
+\label{sec:conclusion}
+
+We introduced CodeCanvas, an MCP tool designed to reduce side-effect blindness in code-editing agents by providing blast-radius visualization and persistent reasoning state. In an exploratory evaluation on Terminal-Bench~2.0, we compared three observation modalities: text-only, graph-based (LocAgent), and visual codemaps (CodeCanvas), while holding the agent harness constant.
+
+~
+
+~
+
+~
+
+\paragraph{Key Findings.}
+In this run set (7 tasks, one run per task and condition), the CodeCanvas condition solved 4/7 tasks, while Text-Only and LocAgent solved 3/7. Three observations stand out:
+\begin{enumerate}
+    \item \textbf{The CodeCanvas condition shows lower revision churn in this run set.} In these runs, the CodeCanvas condition exhibits lower backtracking and looping than both baselines.
+    \item \textbf{Procedurally fragile tasks dominate the failure set.} Two tasks (sanitize-git-repo, db-wal-recovery) failed across all conditions, indicating that operational constraints and domain expertise can dominate representation choices.
+    \item \textbf{Impact awareness does not replace contract checking.} In fix-code-vulnerability (a failure), CodeCanvas showed high alignment between analyzed regions and edits (IES=0.70) but still failed due to a strict report schema mismatch.
+\end{enumerate}
+
+\paragraph{Limitations.}~\\[0.3em]
+\textbf{Study design:} Our evaluation uses $n=7$ tasks with a single run per condition, precluding strong statistical conclusions. We evaluate on one model (Claude Sonnet 4.5); generalization to other LLMs is untested. The Informed Editing Score (IES) was computed on 2 runs where CodeCanvas state was recorded, and should be treated as preliminary.
+
+\noindent\textbf{Tool activation:} CodeCanvas' SessionStart hook is gated by a repository-size heuristic (minimum number of recognized code files). As a result, CodeCanvas state was only recorded on 2/7 tasks in this run set, and CodeCanvas-specific process metrics have limited coverage; we do not attribute aggregate performance differences to codemaps given this activation gap.
+
+\noindent\textbf{Approach:} Blast radius quality depends on LSP support for the target language. Agents must effectively process visual or structured representations. Benefits are most pronounced for coordination-heavy tasks; discovery-heavy tasks (e.g., exhaustive vulnerability enumeration) may not benefit.
+
+\paragraph{Future Work.}
+
+\noindent Future work could address:
+\begin{itemize}
+    \item Richer codemap semantics (data flow, control flow beyond call graphs)
+    \item Cross-language dependency tracking for polyglot repositories
+    \item Adaptive hook policies that trigger analysis selectively based on task context
+\end{itemize}

@@ -1,0 +1,55 @@
+\section{Results}
+\label{sec:results}
+
+We analyze 21 trajectories (7 tasks $\times$ 3 conditions; one run per task and condition). As described in Section~\ref{sec:conditions}, these trajectories come from two run batches (Text-Only and CodeCanvas from an earlier batch; LocAgent from a later batch). Table~\ref{tab:aggregate-results} summarizes aggregate performance; Figure~\ref{fig:per-task-heatmap} visualizes per-task outcomes and token usage. In this run set, the CodeCanvas condition solves 4/7 tasks (57.1\%), while Text-Only and LocAgent each solve 3/7 (42.9\%). With $n=7$, single trials per condition, and mixed-batch provenance, we treat differences as descriptive. Because CodeCanvas activation is gated (Section~\ref{sec:conditions}), CodeCanvas state was recorded on only 2/7 tasks; CodeCanvas-specific process metrics (IES) are reported only on that subset.
+
+\subsection{Primary Outcomes}
+\label{sec:primary-outcomes}
+
+Table~\ref{tab:aggregate-results} reports Pass@1 and average resource usage across tasks. Figure~\ref{fig:tokens-vs-backtrack} summarizes trajectory-level efficiency as tokens vs.\ backtracking.
+
+\begin{table}[t]
+\centering
+\scriptsize
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Condition} & \textbf{Pass@1} & \textbf{Tokens (M)} & \textbf{Steps} & \textbf{Time (m)} \\
+\midrule
+Text-Only & 3/7 (42.9\%) & 3.34 & 86.1 & 10.0 \\
+LocAgent & 3/7 (42.9\%) & 2.48 & 76.3 & 8.5 \\
+CodeCanvas & 4/7 (57.1\%) & 2.61 & 72.7 & 7.1 \\
+\bottomrule
+\end{tabular}
+\caption{Aggregate results across all tasks (7 tasks; one run per task and condition). Tokens are input+output; comparisons are descriptive given mixed-batch provenance.}
+\label{tab:aggregate-results}
+\end{table}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{fig/tokens_vs_backtrack.png}
+\caption{Trajectory-level efficiency (21 trajectories): tokens vs.\ backtracking. Filled markers indicate success; x-axis is log-scaled. The y-axis is capped at 10; the single outlier (22 backtracks) is annotated.}
+\label{fig:tokens-vs-backtrack}
+\end{figure}
+
+\subsection{Per-Task Breakdown}
+\label{sec:per-task}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=0.98\linewidth]{fig/per_task_heatmap.png}
+\caption{Per-task outcomes and token usage. Each cell shows success (\,\checkmark\,/\,$\times$\,) and total tokens (M); background color indicates token usage (log scale). Task labels are abbreviated for readability.}
+\label{fig:per-task-heatmap}
+\end{figure}
+
+\noindent\textbf{Where modalities differ.} Outcomes differ on four tasks: only CodeCanvas succeeds on \emph{rstan-to-pystan}; only Text-Only fails on \emph{custom-memory-heap-crash}; only LocAgent fails on \emph{build-cython-ext}; and only CodeCanvas fails on \emph{fix-code-vulnerability}. All conditions succeed on \emph{modernize-scientific-stack} and fail on \emph{sanitize-git-repo} and \emph{db-wal-recovery}.
+
+\paragraph{Informed Editing Score (IES).}
+We report IES as a preliminary process diagnostic on the two CodeCanvas trajectories with recorded state (Appendix~\ref{app:ies}).
+
+~
+
+~
+
+~
+
+~

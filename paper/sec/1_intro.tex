@@ -1,109 +1,17 @@
 \section{Introduction}
-Agents that operate full desktops or browsers still fail on small targets, animated widgets, and transient lag. Humans compensate using \emph{motor micro-signals} visible in ongoing cursor trajectories hundreds of milliseconds before a click. Two strands justify treating cursor dynamics as a first-class input: (1) \emph{cursor $\leftrightarrow$ gaze/attention} correlation on SERPs and browsing, including characterization of alignment vs divergence by behavior (reading, hesitation, scrolling) \citep{Huang2011NoClicks,Huang2012UserSee,Egner2018MouseClickEMAT}, and (2) \emph{endpoint predictability} from unfolding kinematics \citep{Pasqual2014Endpoint}. We turn these into a \emph{frame-free intent channel} and test whether injecting it into an off-the-shelf planner improves control on OSWorld-Verified \citep{OSWorldSite,OSWorldVerified2025}.
+\label{sec:intro}
+
+LLM-based agents can now navigate repositories, edit files, and drive terminal workflows. Yet they remain brittle when a correct local change has nonlocal consequences. A model may fix a bug in a target function yet violate assumptions held by callers, tests, or downstream scripts that were never inspected. In interactive benchmarks, these regressions appear late (often during verification), forcing expensive backtracking. We refer to this pattern as \textbf{side-effect blindness}: editing without an explicit view of the \emph{dependency surface} (callers, tests, and downstream consumers) that must remain consistent for the change to be correct.
+
+This pattern persists because modern agent loops present code as text snippets, leaving dependency structure implicit. Graph-based tools improve localization by exposing structure and enabling multi-hop traversal~\cite{locagent2025,repograph2024}. Compiler- and verifier-driven systems constrain generation toward valid APIs~\cite{cocogen2024,marin2025}. Yet impact is rarely delivered as a first-class observation \emph{at the moment an edit is chosen}. Instead, agents either infer blast radius from ad hoc searches or discover dependencies reactively via failing tests. Both approaches are fragile under context compaction: once early discoveries drop out of context, agents repeat exploration and lose a consistent rationale for what has already been checked.
+
+We introduce \textbf{CodeCanvas}, an MCP tool that makes impact explicit and persistent. CodeCanvas automatically produces a \emph{codemap} (a bounded, visual dependency slice centered on the current file or symbol), highlighting callers, callees, and test touchpoints. In parallel, it maintains an \emph{Evidence Board} that externalizes reasoning state as claims, evidence, and decisions. Deterministic hooks inject both artifacts during the session (e.g., after file reads), reducing query burden: the agent need not invoke analysis tools explicitly to see what may break~\cite{claudeCodeHooks2025}.
+
+Our goal is to reduce side-effect blindness without changing the underlying agent. We therefore evaluate three observation modalities under a fixed Harbor + Claude Code harness on seven Terminal-Bench~2.0 tasks: (i) text-only interaction, (ii) a graph-based MCP baseline derived from LocAgent, and (iii) CodeCanvas. In this run set, the CodeCanvas condition solves 4/7 tasks (one more than either baseline) and exhibits lower backtracking and lower cost per success; we treat comparisons as descriptive given single trials, mixed-batch provenance, and limited CodeCanvas activation (2/7 tasks).
 
 \paragraph{Contributions.}
-(1) A precise modality specification and encoder for cursor micro-kinematics. (2) Two fusion mechanisms with frozen planners: control-token conditioning and gated cross-attention adapters \citep{Alayrac2022Flamingo,Hu2021LoRA,Li2021PrefixTuning}. (3) A data and training protocol that uses gaze only for offline supervision, never at inference \citep{Latifzadeh2025AdSERP,Leiva2020AttentiveCursor,RecGaze2025}. (4) A reproducible evaluation on OSWorld-Verified with micro-metrics for mis-actions and timing, plus stress tests for delay and device shift \citep{OSWorldSite,OSWorldVerified2025}.
-
-\section{Related Work}
-\textbf{Cursor as attention proxy.} Search and browsing studies show cursor positions and movement/hover patterns correlate with gaze and user examination on SERPs; follow-ups quantify when they align vs diverge and define behavior patterns relevant to intent modeling \citep{Huang2011NoClicks,Huang2012UserSee,Egner2018MouseClickEMAT}.
-
-\noindent\textbf{Endpoint prediction from kinematics.} Template matching over early velocity profiles predicts pointing endpoints without requiring target metadata, establishing feasibility for short-window predictors \citep{Pasqual2014Endpoint}.
-
-\noindent\textbf{Motor-control priors.} The Kinematic Theory with the sigma-lognormal model explains sub-movements and lognormal velocity bursts; it motivates using speed/acceleration/jerk and curvature features and optional parametric fits for denoising \citep{Plamondon1995KinematicI,Plamondon2013LognormalHandwriter}.
-
-\noindent\textbf{Modern pointing-time models.} Recent ergonomics work shows trajectory-shape features improve pointing-time prediction beyond Fitts' law, reinforcing that micro-kinematics carry signal \citep{Murata2025PointingTime}.
-
-\noindent\textbf{Adapters and gated cross-attention.} Parameter-efficient adapters and Flamingo-style gated cross-attention layers allow conditioning frozen LMs on auxiliary streams, giving two principled fusion baselines \citep{Hu2021LoRA,Li2021PrefixTuning,Alayrac2022Flamingo}.
-
-\noindent\textbf{Benchmarks for desktop agents.} OSWorld introduced execution-checked desktop tasks and infrastructure; on \emph{July 28, 2025}, OSWorld-Verified addressed community feedback, added scalable evaluation, and publishes verified trajectories/results \citep{OSWorldSite,OSWorldVerified2025}.
-
-\section{Background and Problem Setup}
-Let the agent operate at discrete control steps $k$ with a rolling pointer event buffer
-\[
-\mathcal{B}_k=\{(\Delta x_i,\Delta y_i,\Delta t_i)\}_{i=k-N}^{k}
-\]
-spanning $T\!\approx\!0.8$--$1.2$\,s. We include light context $c_k$ (focused window/app, modifier keys, wheel deltas, device type).
-
-\textbf{Goal.} From $(\mathcal{B}_k,c_k)$, predict \emph{intent/endpoint variables} that reduce mis-actions and latency without altering the planner’s high-level policy.
-
-\textbf{Outputs per step.}
-(i) Endpoint distribution $p(\mathbf{y}\mid \mathcal{B}_k,c_k)=\mathcal{N}(\boldsymbol{\mu}_k,\Sigma_k)$ over screen coords $\mathbf{y}=(x,y)$; (ii) click imminence $q_k=\Pr(\text{click within }\tau)$ for $\tau\in[200,400]$\,ms; (iii) time-to-click $\hat t_k$ (regression). We omit speculative risk classes unless labels are available (see \S\ref{sec:labels}).
-
-\section{Modality and Features}
-\textbf{Resampling and normalization.} We resample pointer deltas to 20\,Hz, z-score per session, and normalize by \emph{effective DPI} if known or by screen-diagonal heuristics if not, to counter device heterogeneity (mouse vs touchpad). Public biometrics datasets (e.g., SapiMouse) inform cross-device augmentations \citep{SapiMouse2020}.
-
-\textbf{Kinematic features.} From resampled positions $(x(t),y(t))$: instantaneous speed $v$, acceleration $a$, jerk $j$, signed curvature $\kappa$, heading changes, and stop-and-go indicators. Optionally, fit a short \emph{sigma-lognormal} burst to summarize sub-movements; parameters are used as additional features but not required \citep{Plamondon1995KinematicI,Plamondon2013LognormalHandwriter}.
-
-\textbf{Behavioral windows.} Following search HCI, we tag lightweight behavior windows (reading/hesitation/scrolling) with simple heuristics for auxiliary supervision; these reflect patterns that affect cursor-gaze alignment \citep{Huang2012UserSee}.
-
-\section{Model}
-\textbf{Encoder.} A 1D temporal transformer (or Conv-GRU) over $(\Delta x,\Delta y,\Delta t)$ and derived features for the last $T$ seconds. Two heads: \emph{Endpoint head} outputs $\boldsymbol{\mu}\in\mathbb{R}^2$ and a Cholesky-parametrized $\Sigma\succeq 0$. \emph{Timing head} outputs $q\in(0,1)$ and $\hat t\in\mathbb{R}_+$.
-
-\textbf{Fusion with the planner.}
-\emph{(F1) Control-tokens}: serialize $(\boldsymbol{\mu},\Sigma,q,\hat t)$ into a fixed schema and append to the planner’s context each step.
-\emph{(F2) Gated cross-attention adapter}: insert Flamingo-style gated cross-attention blocks at late layers $\ell\in\{L-6,L-3\}$ of a frozen LM; the cursor encoder outputs act as keys/values, the LM queries the stream, and a tanh-gate scales contributions. Train only the adapter and small projections with parameter-efficient updates (LoRA/Prefix-Tuning) \citep{Alayrac2022Flamingo,Hu2021LoRA,Li2021PrefixTuning}.
-
-\section{Datasets}
-We require gaze for \emph{training labels only}, not at inference.
-\begin{itemize}\itemsep0pt
-  \item \textbf{AdSERP (SIGIR 2025).} In-lab \emph{mouse+eye} on SERPs with HTML, screenshots, per-event logs; includes baselines for cursor$\to$attention decoding. Use fixations as endpoints and AOIs to derive click labels \citep{Latifzadeh2025AdSERP}.
-  \item \textbf{Attentive Cursor (2020).} Large-scale cursor traces targeted at attention prediction; useful for representation pretraining \citep{Leiva2020AttentiveCursor}.
-  \item \textbf{RecGaze (SIGIR 2025).} Carousel UI interactions with gaze, clicks, cursor; narrower domain for out-of-SERP generalization \citep{RecGaze2025}.
-  \item \textbf{Moving-Target-with-Delay (MMSys 2021).} Public datasets from user studies on selecting moving targets under controlled input delay; ideal stress tests for timing \citep{Liu2021MovingDelay}.
-  \item \textbf{SapiMouse (2020).} Mouse-dynamics dataset (120 subjects). Not for endpoints, but useful to design device/DPI invariance and augmentations \citep{SapiMouse2020}.
-\end{itemize}
-
-\section{Labels and Objectives}
-\label{sec:labels}
-Let $y^*=(x^*,y^*)$ be the ground-truth \emph{endpoint}. We obtain $y^*$ as: (i) \emph{click endpoint} when a click occurs soon after the window; (ii) \emph{fixation endpoint} (from eye tracking) when no click occurs or for attention pretraining \citep{Huang2011NoClicks,Huang2012UserSee}.\,
-Let $t^*$ be \emph{time-to-click} from the current step if a click occurs within $\tau$\,ms; otherwise we drop timing supervision for that step.
-
-\noindent\textbf{Loss.}
-\begin{align*}
-\mathcal{L} &= \lambda_{e}\,\underbrace{-\log \mathcal{N}\!\left(y^*;\boldsymbol{\mu},\Sigma\right)}_{\text{endpoint NLL}}
-\;+\; \lambda_{i}\,\underbrace{\mathrm{BCE}\!\left(q,\mathbb{1}[t^*\le \tau]\right)}_{\text{imminence}}
-\;+\; \lambda_{t}\,\underbrace{\mathrm{Huber}\!\left(\hat t,t^*\right)}_{\text{time-to-click}} \\
-&\quad+\; \lambda_{\mathrm{cal}}\,\mathrm{ECE}(q,\Sigma)
-\;+\; \lambda_{\mathrm{inv}}\,\mathcal{L}_{\mathrm{inv}}.
-\end{align*}
-$\mathcal{L}_{\mathrm{inv}}$ enforces \emph{device invariance} via augmentation or adversarial confusion across device/DPI domains. We adopt standard calibration penalties (temperature/ECE) to encourage \emph{useful uncertainty} in $q$ and $\Sigma$. The risk classifier is omitted unless target bounding boxes are available (e.g., from AOIs in AdSERP).
-
-\section{Training Protocol}
-\textbf{Pretraining.} Stage A: representation pretrain on Attentive Cursor to predict attention heatmaps or fixation likelihood from cursor windows; augment for device variability \citep{Leiva2020AttentiveCursor}. Stage B: supervised endpoint/timing on AdSERP using fixation-derived endpoints and SERP AOIs for click labels \citep{Latifzadeh2025AdSERP}.
-
-\textbf{Adaptation to evaluation domain.} Small supervised finetune using OSWorld instrumented logs (see \S\ref{sec:evaluation}) to match desktop distributions, training only the encoder and fusion modules with parameter-efficient updates (LoRA/Prefix-Tuning) \citep{Hu2021LoRA,Li2021PrefixTuning}.
-
-\textbf{Hyperparameters (recommended ranges).} Window $T=0.8$--$1.2$\,s; resampling 20\,Hz. Encoder: 4--6 layers, $d_{\text{model}}$ 256--512, dropout 0.1. Optimizer: AdamW, lr $2\!\times\!10^{-4}$, cosine decay; batch 256 windows. Fusion: 1--2 gated cross-attn blocks for F2; otherwise control-token schema with 32--64 dims. No screenshots/DOM at training beyond offline label extraction; no pixels at inference.
-
-\section{Evaluation}
-\label{sec:evaluation}
-\textbf{Benchmark.} \emph{OSWorld-Verified} (upgrade posted 2025-07-28): 369 real tasks, execution-checked scoring, verified trajectories, and scalable evaluation \citep{OSWorldSite,OSWorldVerified2025}.
-
-\textbf{Agent under test.} Keep the baseline planner fixed; compare: \textbf{B0} baseline agent, no kinematics; \textbf{B1} heuristic kinematics (simple velocity/dwell thresholds); \textbf{K-Tok} Cursor-Kinematics with control-tokens (F1); \textbf{K-GXA} Cursor-Kinematics with gated cross-attention adapter (F2) \citep{Alayrac2022Flamingo}.
-
-\textbf{Primary metrics.} \emph{Time-to-first-correct-click (TTFC)} in ms (measured from the step a target becomes selectable to the first correct click); \emph{mis-click rate} (\% of clicks not advancing task state); \emph{retries per task} and \emph{Pass@1}.
-
-\textbf{Micro-metric extraction.} OSWorld-Verified publishes trajectories and code for verified runs; we patch the evaluation harness to log pointer events, click outcomes, and UI activation times to compute TTFC and mis-clicks. We will release the patch \citep{OSWorldVerified2025}.
-
-\textbf{Stress tests.} \emph{Delay robustness}: repeat a 50-task subset with injected input delays (50--150\,ms) and compare TTFC/mis-click deltas; use Moving-Target-with-Delay datasets for complementary, controlled analyses \citep{Liu2021MovingDelay}. \emph{Device shift}: mouse vs touchpad; different pointer speeds. \emph{UI perturbations}: small layout shifts and animation onsets.
-
-\textbf{Statistical protocol.} Three independent seeds, stratified task sampling, paired Wilcoxon tests on per-task metrics; Holm--Bonferroni correction. Report 95\% bootstrap CIs over tasks and Cliff’s $\delta$ effect sizes.
-
-\section{Ablations}
-(1) \emph{Window length}: 0.4/0.8/1.2\,s to test lookahead vs latency. (2) \emph{Fusion}: F1 (tokens) vs F2 (gated cross-attention) \citep{Alayrac2022Flamingo}. (3) \emph{Calibration}: with vs without temperature/ECE loss; evaluate sharpness and coverage of $\Sigma$. (4) \emph{Feature sets}: deltas-only vs +kinematics vs +lognormal parameters \citep{Plamondon2013LognormalHandwriter}. (5) \emph{Device invariance}: with vs without $\mathcal{L}_{\mathrm{inv}}$; evaluate on SapiMouse-style augmentations \citep{SapiMouse2020}.
-
-\section{Expected Outcomes (claims to test)}
-\textbf{H1:} K-Tok and K-GXA reduce mis-click rate and TTFC vs B0 at fixed Pass@1 on OSWorld-Verified. \textbf{H2:} Gains persist under injected delays (50--150\,ms) and across device settings. \textbf{H3:} Calibrated $\Sigma$ improves the planner’s defer/commit decisions, reducing premature actions.
-
-\section{Limitations and Risk}
-\textbf{Domain shift.} Cursor-gaze alignment varies by task (e.g., reading vs navigation); we mitigate via multi-task training and uncertainty-aware fusion, but alignment is not guaranteed \citep{Huang2012UserSee}. \textbf{Label ambiguity.} Fixations are a proxy, not intent itself; therefore we evaluate only on execution-grounded metrics (Pass@k, mis-clicks, TTFC). \textbf{Privacy.} Cursor streams are behavioral data; we log locally within OSWorld VMs, and release only aggregated metrics.
-
-\section{Ethical Considerations}
-We avoid eye tracking at inference and reduce reliance on full-frame capture, lowering privacy surface area. We follow dataset licenses and consent terms; for any internal data, obtain IRB/ethics approval and minimize retention.
-
-\section{Implementation Notes}
-\textbf{Libraries.} PyTorch; adapters via LoRA; optional Prefix-Tuning for control-token formatting \citep{Hu2021LoRA,Li2021PrefixTuning}. \textbf{Compute.} Encoder and fusion modules run on CPU at 10--20\,Hz; training fits on a single modest GPU. \textbf{Engineering sanity checks.} Gradient clipping; avoid mixed precision in the small encoder to prevent calibration drift; profile latency with wall-clock timers.
-
-\section{Reproducibility Checklist}
-Data preprocessing pipelines and splits (released). OSWorld-Verified runner diffs and logging hooks (released) \citep{OSWorldVerified2025}. Configs, seeds, and scripts for all ablations. Pretrained encoder weights and adapter params. Detailed failure taxonomy with examples.
-
+\begin{enumerate}
+    \item \textbf{CodeCanvas.} An MCP tool that surfaces blast radius as a visual codemap and persists task-local reasoning state via an Evidence Board injected through deterministic hooks.
+    \item \textbf{Exploratory fixed-harness comparison of observation modalities.} An evaluation that holds the harness constant while varying the observation channel (text-only vs.\ graph-based vs.\ visual codemaps) on Terminal-Bench~2.0 with ATIF logging~\cite{terminalbench2harbor2025,harborATIF2025}.
+    \item \textbf{A preliminary process metric for impact-aware editing.} An \emph{Informed Editing Score} that measures whether edits align with previously observed impact and whether the agent externalizes deliberation; computed only when CodeCanvas state is recorded.
+\end{enumerate}

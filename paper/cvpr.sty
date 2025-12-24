@@ -27,7 +27,9 @@
 \NeedsTeXFormat{LaTeX2e}[1999/12/01]
 \ProvidesPackage{cvpr}[2026 LaTeX class for IEEE CVPR]
 
-\RequirePackage{times}    % Integrate Times for here
+% Prefer the official Times-based appearance when PS font metrics are available.
+% Fall back to Latin Modern on minimal TeX installations.
+\IfFileExists{ptmr.tfm}{\RequirePackage{times}}{\RequirePackage{lmodern}}
 \RequirePackage{xspace}
 \RequirePackage[dvipsnames]{xcolor}
 \RequirePackage{graphicx}
@@ -37,7 +39,14 @@
 \RequirePackage[numbers,sort&compress]{natbib}
 \setlength{\bibsep}{1pt plus 1pt minus 1pt}
 
-\RequirePackage{silence}  % Suppress unwanted warnings
+% Suppress unwanted warnings (optional dependency on `silence`).
+\IfFileExists{silence.sty}{%
+  \RequirePackage{silence}
+}{%
+  \newcommand{\WarningFilter}[3][]{\relax}
+  \newcommand{\ActivateWarningFilters}[1][]{\relax}
+  \newcommand{\DeactivateWarningFilters}[1][]{\relax}
+}
 \hbadness=10000 \vbadness=10000 \vfuzz=30pt \hfuzz=30pt
 \WarningFilter{latexfont}{Font shape declaration}
 \WarningFilter{latex}{Font shape}
@@ -214,13 +223,17 @@
 
 \typeout{CVPR 8.5 x 11-Inch Proceedings Style `cvpr.sty'.}
 
-% ten point helvetica bold required for captions
-% eleven point times bold required for second-order headings
-% in some sites the name of the fonts may differ,
-% change the name here:
-\font\cvprtenhv  = phvb at 8pt % *** IF THIS FAILS, SEE cvpr.sty ***
-\font\elvbf  = ptmb scaled 1100
-\font\tenbf  = ptmb scaled 1000
+% ten point helvetica bold required for captions.
+% Some TeX installations may not ship PS font metrics by default; fall back to
+% Computer Modern bold for reproducible compilation.
+\IfFileExists{phvb.tfm}{\font\cvprtenhv=phvb at 8pt}{\font\cvprtenhv=cmbx10 at 8pt}
+\IfFileExists{ptmb.tfm}{%
+  \font\elvbf=ptmb scaled 1100
+  \font\tenbf=ptmb scaled 1000
+}{%
+  \font\elvbf=cmbx10 scaled 1100
+  \font\tenbf=cmbx10 scaled 1000
+}
 
 % If the above lines give an error message, try to comment them and
 % uncomment these:
@@ -493,7 +506,14 @@
 %% Support for easy cross-referencing (e.g. \cref{sec:intro}
 % configured with \AtEndPreamble as it needs to be called after hyperref
 \AtEndPreamble{
-    \usepackage[capitalize]{cleveref}
+    \IfFileExists{cleveref.sty}{%
+        \usepackage[capitalize]{cleveref}
+    }{%
+        \newcommand{\crefname}[3]{}
+        \newcommand{\Crefname}[3]{}
+        \newcommand{\cref}[1]{\ref{##1}}
+        \newcommand{\Cref}[1]{\ref{##1}}
+    }
     \crefname{section}{Sec.}{Secs.}
     \Crefname{section}{Section}{Sections}
     \Crefname{table}{Table}{Tables}
@@ -503,6 +523,10 @@
 % ---------------------------------------------------------------
 
 %% More compact compact itemize/enumeration (e.g. list contributions)
-\RequirePackage[shortlabels,inline]{enumitem}
+\IfFileExists{enumitem.sty}{\RequirePackage[shortlabels,inline]{enumitem}}{%
+    \newcommand{\setlist}[2][]{\relax}
+    \newenvironment{enumerate*}{\begin{enumerate}}{\end{enumerate}}
+    \newenvironment{itemize*}{\begin{itemize}}{\end{itemize}}
+}
 \setlist[itemize]{noitemsep,leftmargin=*,topsep=0em}
 \setlist[enumerate]{noitemsep,leftmargin=*,topsep=0em}
