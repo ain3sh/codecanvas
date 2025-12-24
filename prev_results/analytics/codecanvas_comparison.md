@@ -1,12 +1,12 @@
 # CodeCanvas vs Baselines Comparison
 
-Generated: 2025-12-23T05:07:38.622712
+Generated: 2025-12-22T14:10:42.169954
 
 ## Informed Editing Score Comparison
 
 | Profile | Runs | Avg Score | Blast Radius Edit Rate | Deliberation Depth |
 |---------|------|-----------|------------------------|-------------------|
-| codecanvas | 4 | 0.375 | 0.312 | 3.5 |
+| codecanvas | 2 | 0.500 | 0.500 | 4.0 |
 | codegraph | 7 | N/A | N/A | N/A |
 | text | 7 | N/A | N/A | N/A |
 
@@ -14,7 +14,7 @@ Generated: 2025-12-23T05:07:38.622712
 
 | Profile | Avg Evidence | Avg Claims | Avg Decisions | Reasoning Density |
 |---------|--------------|------------|---------------|-------------------|
-| codecanvas | 6.2 | 2.8 | 4.8 | 0.46 |
+| codecanvas | 6.5 | 2.5 | 3.5 | 0.48 |
 | codegraph | N/A | N/A | N/A | N/A |
 | text | N/A | N/A | N/A | N/A |
 

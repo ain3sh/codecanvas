@@ -1,81 +1,78 @@
 # Cross-Run Insight Synthesis
 
-Generated: 2025-12-22T14:27:10.683806
+Generated: 2025-12-23T05:21:32.511280
 
 ## Task Difficulty Ranking
 
-- **build-cython-ext** (easy): Succeeded for all profiles (codecanvas/codegraph/text all SUCCESS), indicating high solvability under multiple interaction styles.
-- **modernize-scientific-stack** (easy): Succeeded for all profiles (all SUCCESS) and was approached via systematic_exploration across profiles, suggesting the task structure is robust to tool/profile differences.
-- **custom-memory-heap-crash** (medium): Mixed outcomes (codecanvas SUCCESS, codegraph SUCCESS, text FAIL). Debugging requires correct hypothesis selection; not all profiles converged.
-- **fix-code-vulnerability** (medium): Only text succeeded (text SUCCESS; codecanvas/codegraph FAIL), implying that success depends on specific investigative behavior or coverage rather than baseline capability.
-- **rstan-to-pystan** (medium): Only codecanvas succeeded (codecanvas SUCCESS; codegraph/text FAIL), suggesting translation/migration complexity where certain tooling/workflow helps but is not universally sufficient.
-- **sanitize-git-repo** (hard): All profiles failed (all FAIL) despite all using a similar grep_and_fix approach, indicating deeper pitfalls (e.g., history rewriting edge cases, repo constraints) not resolved by current strategies.
-- **db-wal-recovery** (hard): All profiles failed (all FAIL) across differing strategies (hypothesis_driven vs trial_and_error), indicating the benchmark likely requires specialized domain knowledge or nontrivial recovery procedures beyond current workflows.
+- **custom-memory-heap-crash** (easy): Uniform success across all profiles (codecanvas/codegraph/text all SUCCESS), suggesting the task is solvable with standard debugging workflows independent of profile/tooling.
+- **modernize-scientific-stack** (easy): Uniform success across all profiles (all SUCCESS), indicating well-trodden dependency/compatibility upgrades with clear feedback loops.
+- **fix-code-vulnerability** (medium): Mixed outcomes (codegraph and text SUCCESS; codecanvas FAIL) imply solvable but sensitive to strategy/tooling; systematic exploration profiles performed better than grep-and-fix here.
+- **build-cython-ext** (medium): Only text succeeded while both MCP-enabled profiles failed, indicating moderate complexity with environment/build-chain pitfalls where extra tooling did not translate into higher success.
+- **sanitize-git-repo** (hard): All profiles failed (all FAIL), consistent with tasks requiring precise, multi-step history rewriting and verification where errors are easy to make and hard to validate.
+- **db-wal-recovery** (hard): All profiles failed (all FAIL), suggesting specialized domain knowledge and/or careful procedural correctness not achieved by any profile in these runs.
+- **rstan-to-pystan** (hard): All profiles failed (all FAIL), consistent with high complexity migration work (API, statistical modeling semantics, and dependency ecosystem changes) that exceeded current agent capabilities in this setting.
 
 ## MCP Benefit Patterns
 
-- Selective advantage on complex cross-ecosystem migration: codecanvas is the only profile that succeeded on rstan-to-pystan (SUCCESS vs codegraph/text FAIL), and it is also the only profile with MCP usage (mcp_usage_rate 28.57%, avg_mcp_calls 2.14). This suggests MCP-backed canvas/workspace structuring can help coordinate multi-step translation tasks.
-- Overall success uplift coincides with MCP availability: codecanvas achieved the highest aggregate success_rate (57.14%) versus codegraph/text (both 42.86%) while being the only profile to use MCP tools.
+- Possible benefit in vulnerability fixing when paired with systematic exploration: codegraph (systematic_exploration) succeeded on fix-code-vulnerability while codecanvas (grep_and_fix) failed, suggesting that structured repository-level reasoning (which MCP tools are intended to support) may help when the task requires more than localized edits.
+- MCP usage did not prevent success on tasks that were inherently straightforward (custom-memory-heap-crash, modernize-scientific-stack), implying MCP is not necessary for tasks with strong, direct tool-feedback loops and well-defined fixes.
 
 ## MCP Overhead Patterns
 
-- No benefit on uniformly failing tasks: sanitize-git-repo and db-wal-recovery failed for all profiles, including codecanvas, implying MCP/canvas did not overcome core task difficulty and may add interaction overhead without changing outcomes in these domains.
-- Potential efficiency cost without commensurate gains on grep_and_fix-style tasks: sanitize-git-repo and fix-code-vulnerability are labeled grep_and_fix for codecanvas, yet codecanvas did not outperform others on those tasks (sanitize-git-repo: all FAIL; fix-code-vulnerability: codecanvas FAIL while text SUCCESS), suggesting canvas structure is not the bottleneck for localized search/patch tasks.
+- Higher interaction and token overhead with MCP-enabled profiles without corresponding success gains: codecanvas had the highest avg_tokens (3,190,841.86) and lowest success_rate (28.57%) despite a 57.14% MCP usage rate and high avg_mcp_calls (5.29).
+- Repository-graph tooling appeared underutilized relative to overall tool activity: codegraph had 57.14% MCP usage rate but only 1.14 avg_mcp_calls, while still exhibiting longer avg_elapsed_sec (508.47) than text (281.66), suggesting overhead from tool orchestration/context switching without consistent payoff.
+- For build-chain tasks (build-cython-ext), both MCP-enabled profiles failed while text succeeded, indicating MCP layers can add friction when rapid iteration on compiler/build errors is required.
 
 ## Emergent Findings
 
-- More interaction does not imply higher success: text has the highest avg_tokens (3342636.57), avg_steps (86.14), avg_tool_calls (53.57), and avg_elapsed_sec (599.86) yet ties for the lowest success_rate (42.86). This indicates additional exploration/backtracking can increase cost/time without improving pass rate.
-- Backtracking/looping aligns with inefficiency: text shows higher avg_backtrack_count (4.57) and avg_loop_count (0.86) compared to codecanvas (2.14, 0.14) and codegraph (2.86, 0.14), consistent with longer runtimes and higher token usage without aggregate success gains.
-- Success cases are not necessarily shorter in token usage across profiles: codegraph’s avg_tokens_success (2481975.67) exceeds codecanvas (2161188.00) and text (1903308.00), suggesting that when codegraph succeeds it may require more extensive reasoning/verification rather than quick fixes.
+- The no-MCP 'text' profile outperformed MCP-enabled profiles on both success_rate (57.14% vs 42.86% codegraph vs 28.57% codecanvas) and efficiency (lowest avg_tokens 1,774,353.14; lowest avg_steps 59.00; lowest avg_elapsed_sec 281.66), contradicting the expectation that richer MCP tooling automatically improves outcomes.
+- Success was more aligned with strategy choice than with tool richness: tasks labeled hypothesis_driven or systematic_exploration tended to succeed when the problem had clear diagnostic signals (heap crash, stack modernization), whereas grep_and_fix did not reliably rescue tasks requiring global correctness (e.g., sanitize-git-repo).
+- Codecanvas exhibited substantially higher backtracking (avg_backtrack_count 4.86) than text (1.29) and codegraph (2.57), suggesting that certain UI/representation choices may increase rework even when tool access is broader.
 
 ## Recommended Improvements
 
-- **Grep**: Increase pre-edit localization rigor: grep_before_edit_rate is only 42.86% for all profiles. Enforce a policy of locating all relevant call sites/definitions (multi-file grep) before the first Edit to reduce mis-edits and backtracking.
-- **Bash**: Add structured “diagnostic runbooks” and capture key outputs: Bash dominates tool usage (codecanvas 144, codegraph 93, text 162). Introduce standardized commands per task type (build, test, minimal repro, environment introspection) and automatically summarize failures to prevent repeated ad-hoc reruns.
-- **TodoWrite**: Reduce planning churn and tie todos to verification steps: TodoWrite usage is high (31–38). Require each todo item to include an explicit validation command/output expectation, improving convergence and reducing loop/backtrack behavior.
-- **mcp__codecanvas__canvas**: Trigger MCP/canvas only for tasks with high dependency coordination (migrations, multi-module refactors). Add a lightweight heuristic classifier to avoid canvas overhead on simple grep_and_fix tasks.
-- **Read/Edit**: Promote ‘read-before-edit’ on critical files and add patch scoping: text has very high Reads (81) and Edits (47). Introduce bounded-edit strategies (small diffs, compile/test between edits) to reduce backtracks and long debugging sessions.
+- **mcp__codecanvas__canvas**: Add mechanism to produce compact, action-prioritized diffs/next-steps (e.g., top-3 hypotheses + required file edits) to reduce token-heavy narrative exploration; enforce a tighter summarize-and-act loop when repeated backtracking is detected.
+- **mcp__codegraph__init_repository**: Make repository initialization outputs more directly actionable by returning a short 'navigation plan' (key modules, entry points, likely files) and caching across steps to reduce repeated context-building overhead.
+- **mcp__codegraph__get_dependencies**: Surface dependency conflicts as ranked fix suggestions (e.g., minimum version sets, known migration paths) and provide an 'apply patch' option for common upgrade patterns to better support modernization/build tasks.
+- **mcp__codegraph__search_code**: Integrate semantic search results with grep outputs (dedupe, rank, show call chains) so the agent does fewer redundant Grep/Read cycles and can jump to root-cause locations faster.
+- **Grep**: Add structured grep templates for common task types (security fix, build failure, WAL recovery, history rewrite) and automatic expansion to adjacent context (imports/callers/tests) to reduce trial-and-error navigation.
+- **Bash**: Introduce a standardized build/debug script harness per task type (e.g., build-cython-ext) that captures compiler output, environment state, and minimal repro logs in a single artifact to accelerate iterative fixes.
 
 ## Paper Claims
 
 
 ### Claim (medium confidence)
-> MCP-enabled canvas workflows can improve aggregate success rate and may be particularly beneficial for complex migration tasks.
+> In this benchmark, a lightweight text-centric workflow achieved higher success and lower resource use than MCP-augmented profiles.
 
-**Evidence**: Only codecanvas uses MCP (mcp_usage_rate 28.57%, avg_mcp_calls 2.14) and it has the highest success_rate (57.14% vs 42.86% for codegraph/text). Additionally, rstan-to-pystan succeeds only under codecanvas (SUCCESS vs FAIL for others).
-
-### Claim (high confidence)
-> Higher token/tool/step consumption does not reliably translate into higher task success, indicating diminishing returns from unstructured exploration.
-
-**Evidence**: Text profile: avg_tokens 3342636.57 (highest), avg_steps 86.14 (highest), avg_tool_calls 53.57 (highest), avg_elapsed_sec 599.86 (highest), yet success_rate is 42.86 (tied lowest).
+**Evidence**: Success rates: text 57.14% (4/7) vs codegraph 42.86% (3/7) vs codecanvas 28.57% (2/7). Efficiency: text avg_tokens 1,774,353.14 vs codegraph 2,481,492.86 vs codecanvas 3,190,841.86; text avg_elapsed_sec 281.66 vs codegraph 508.47 vs codecanvas 479.90; text avg_steps 59.00 vs 76.29 vs 80.29.
 
 ### Claim (high confidence)
-> Some tasks are intrinsically hard for all profiles and require new domain-specific strategies rather than tool/profile tuning.
+> Some tasks form a clear 'unsolved set' across all profiles, indicating task-intrinsic difficulty dominates tooling differences.
 
-**Evidence**: sanitize-git-repo: FAIL for codecanvas/codegraph/text. db-wal-recovery: FAIL for codecanvas/codegraph/text despite differing analysis styles (hypothesis_driven vs trial_and_error).
+**Evidence**: sanitize-git-repo: all FAIL; db-wal-recovery: all FAIL; rstan-to-pystan: all FAIL (3 tasks × 3 profiles = 9/9 failures).
+
+### Claim (high confidence)
+> Tooling overhead can manifest as higher tokens and backtracking without improved success, especially in canvas-based MCP interaction.
+
+**Evidence**: codecanvas has lowest success_rate (28.57%) yet highest avg_tokens (3,190,841.86) and highest avg_backtrack_count (4.86) with 57.14% MCP usage rate and avg_mcp_calls 5.29.
 
 ### Claim (medium confidence)
-> The primary differentiator between profiles is not search behavior prior to edits, as pre-edit grepping is identical across profiles.
+> Strategy choice appears correlated with success on tasks requiring broader reasoning, while localized grep-and-fix is insufficient for globally constrained tasks.
 
-**Evidence**: grep_before_edit_rate is 42.86 for codecanvas, codegraph, and text.
-
-### Claim (medium confidence)
-> Lower backtracking and looping correlates with improved efficiency and may contribute to better overall outcomes.
-
-**Evidence**: Text shows higher avg_backtrack_count (4.57) and avg_loop_count (0.86) alongside the highest elapsed time (599.86s) and no success advantage (42.86%). Codecanvas shows lower backtracking/looping (2.14, 0.14) with higher success_rate (57.14%).
+**Evidence**: sanitize-git-repo labeled grep_and_fix across all profiles and all failed; fix-code-vulnerability succeeded for codegraph/text with systematic_exploration while codecanvas (grep_and_fix) failed.
 
 ## Limitations
 
-- Small sample size: only 7 runs per profile (21 total), limiting statistical power and making results sensitive to outliers.
-- Task set is heterogeneous (build, migration, security fix, recovery), so aggregate averages (tokens/steps/tool calls) may mix fundamentally different workflows.
-- Costs are reported as 0.00 for all profiles, preventing cost-effectiveness comparisons and suggesting missing/disabled accounting.
-- MCP usage occurs only in one profile (codecanvas), making it hard to isolate MCP effects from other profile differences.
-- Per-task outcomes are binary (SUCCESS/FAIL) without graded measures (partial correctness, time-to-first-fix), potentially obscuring meaningful improvements.
+- Small sample size per profile (n=7) and per task (single outcome per profile), preventing robust statistical inference and making results sensitive to run-to-run variability.
+- Outcomes are aggregated without per-run confidence intervals, error types, or partial-credit scoring; binary success may obscure meaningful progress differences.
+- MCP usage is measured coarsely (usage rate and call counts) without attributing causal impact (e.g., which specific MCP call changed the chosen edit).
+- Costs are reported as 0.00, so cost-effectiveness conclusions cannot be drawn; token counts may not be comparable if logging differs across profiles.
+- Task set mixes heterogeneous domains (security, builds, DB recovery, VCS history rewriting, statistical stack migration), limiting generalization about any single domain.
 
 ## Future Work
 
-- Run a larger repeated-measures study (multiple seeds per task/profile) to estimate variance and compute significance for success_rate differences.
-- Ablate MCP within codecanvas: compare codecanvas with MCP disabled vs enabled to isolate causal impact on success and efficiency.
-- Stratify tasks by archetype (grep_and_fix vs hypothesis_driven vs systematic_exploration) and test whether profile/tooling benefits are archetype-specific.
-- Introduce enforced workflow policies (e.g., mandatory grep/read-before-edit, bounded edit sizes, test-after-each-edit) and measure changes in backtrack_count, loop_count, and success_rate.
-- For the universally failing tasks (sanitize-git-repo, db-wal-recovery), develop domain-specific tool support (specialized git history rewrite checks; WAL forensic/recovery helpers) and re-evaluate performance.
+- Run a controlled ablation study within the same profile: identical prompts with MCP disabled vs enabled, holding strategy constant, to isolate MCP causal effects on success and efficiency.
+- Increase repetitions per (task, profile) to estimate variance and compute statistically meaningful differences in success_rate and time/tokens.
+- Add fine-grained outcome labeling (root-cause identified, fix implemented, tests passing, regression introduced) to move beyond binary success and better explain failures in the 'unsolved set'.
+- Instrument tool-level traces to measure redundancy (e.g., repeated Grep/Read cycles), and evaluate interventions like semantic search ranking, caching, and auto-generated minimal repro scripts.
+- Introduce task-specific expert baselines or scaffolds (e.g., guided WAL recovery checklist, git filter-repo playbook, Stan migration map) to determine whether failures are due to missing domain knowledge vs orchestration limitations.

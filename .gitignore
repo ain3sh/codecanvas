@@ -6,4 +6,4 @@ __pycache__/
 .canvas_state.json
 *.env
 node_modules/
-results/runs/*
+*/runs/*

@@ -2,46 +2,186 @@
   {
     "task_id": "sanitize-git-repo",
     "profile": "codecanvas",
-    "utilization_quality": 0.12,
+    "utilization_quality": 0.18,
     "init_timing": "never",
-    "init_quality": "No repository initialization was performed with MCP (e.g., no init_repository call), so the agent never established an indexed/structured view of the codebase via the available MCP interface.",
-    "dependency_leverage": 0.0,
-    "search_effectiveness": 0.35,
-    "structural_understanding": 0.25,
+    "init_quality": "No MCP repository initialization was performed (init_repository unused), so the agent did not ground its actions in MCP-provided repo context, indexing, or structured metadata.",
+    "dependency_leverage": 0.05,
+    "search_effectiveness": 0.55,
+    "structural_understanding": 0.35,
     "missed_opportunities": [
-      "init_repository: build a structured project index early, enabling more precise code-aware search and navigation instead of ad-hoc Grep/Bash.",
-      "search_code: perform targeted, repo-wide searches for credential assignment patterns (e.g., os.environ[...], YAML env blocks, CLI login commands) with path/language constraints rather than repeated regex greps.",
-      "get_code: retrieve full file contexts for suspect matches (instead of partial Read offsets) to reduce the risk of missing adjacent secrets or related config blocks.",
-      "get_symbol_info + find_references: identify where credential-related variables/functions are defined and propagated (e.g., where AWS/HF tokens are consumed), helping ensure sanitization is complete and consistent across call sites.",
-      "get_dependencies: detect use of SDKs (boto3, huggingface_hub, transformers, git credential helpers) and focus searches on the most likely credential entrypoints and config locations."
+      "init_repository: could have established a structured snapshot/index for subsequent MCP searches and code retrieval rather than relying on ad-hoc native Grep/Read.",
+      "search_code: could have replaced repeated native Grep calls with a single structured search pass (including file scoping, glob filters, and centralized results) and reduced step count.",
+      "get_code: could have been used to fetch full relevant file contexts consistently (instead of partial Read offsets) to avoid missing adjacent secrets or related config blocks.",
+      "find_references: for env vars like AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / HF_TOKEN, could have enumerated all callsites/usages to ensure sanitization was complete beyond the two edited files.",
+      "get_symbol_info: could have provided structured understanding of where credentials are set/used (e.g., config loaders, constants, helper functions), improving correctness and reducing risk of missing hidden flows.",
+      "get_dependencies: could have identified tooling/SDK usage (aws/huggingface/github) and their config entrypoints, guiding targeted searches (e.g., dotenv files, Ray job submission scripts, CI workflows).",
+      "Broader secret surface scanning: MCP search_code could have been used to scan common hotspots (.env*, secrets.*, *config*, GitHub Actions workflows, Helm charts, Terraform) with glob-aware queries."
     ],
     "effective_uses": [
-      "mcp__codecanvas__canvas was used to record intent/decisions (claim/decide) around sanitization, providing lightweight planning traceability."
+      "mcp__codecanvas__canvas(claim/decide/mark): used appropriately for lightweight planning state and marking files as addressed, providing some traceability of intent and edits."
     ],
-    "recommendation": "Start by calling init_repository, then use search_code to enumerate likely secret-bearing locations (CI configs, deployment YAMLs, notebooks, JSON artifacts) with path filters and fewer repetitive regex passes. Use get_dependencies to prioritize surfaces where secrets are commonly introduced. When a match is found, use get_code for full context and get_symbol_info/find_references to ensure token values and related variables aren\u2019t duplicated or reconstructed elsewhere. Reserve native Grep/Bash for edge cases (large data artifacts, generated files) or when MCP indexing intentionally excludes certain paths."
+    "recommendation": "Start with init_repository, then use search_code for systematic secret hunting (regex + glob scoping) and get_code to pull full contexts for each hit. After edits, use find_references on key variables/tokens and related config keys to ensure no alternate definitions/usages remain. Use get_dependencies to identify likely secret entrypoints (CI, deployment, SDK configs). Reserve native Grep/Read/Edit as a fallback only when MCP search or retrieval is insufficient, and consolidate verification searches through MCP to reduce redundant steps and improve coverage."
+  },
+  {
+    "task_id": "sanitize-git-repo",
+    "profile": "codegraph",
+    "utilization_quality": 0.36,
+    "init_timing": "early",
+    "init_quality": "Initialization happened near the start (before doing broad repo searches), which is the right timing. However, the agent did not appear to use any of the resulting codegraph capabilities beyond a single shallow dependency query and one keyword search, so the practical value of initialization was only partially realized.",
+    "dependency_leverage": 0.14,
+    "search_effectiveness": 0.46,
+    "structural_understanding": 0.3,
+    "missed_opportunities": [
+      "Use mcp__codegraph__search_code iteratively as the primary discovery mechanism (search for 'AKIA', 'hf_', 'ghp_', 'BEGIN PRIVATE KEY', 'Authorization: Bearer', 'x-api-key', 'client_secret', '-----BEGIN', etc.), instead of switching quickly to native Grep/Glob for most detection.",
+      "Use mcp__codegraph__search_code to enumerate all occurrences of the specific leaked token substrings after edits (verification sweep) rather than only doing native Grep checks.",
+      "Use mcp__codegraph__get_code to quickly retrieve full surrounding context (or multiple hits) for matches returned by search_code, reducing manual file-by-file Reads and offsets.",
+      "Use mcp__codegraph__get_symbol_info and mcp__codegraph__find_references when secrets appear to be set/propagated via variables (e.g., environment variable setters like AWS_ACCESS_KEY_ID) to find all assignment points and flows, not just literal strings.",
+      "Use get_dependencies targeted to key executables / pipelines (ray_processing, tools, CI scripts) rather than '/', to prioritize likely secret injection points and avoid missing less obvious locations.",
+      "If the JSON file contained a diff blob, use search_code to locate other diff artifacts or data dumps across the repo (e.g., searching for 'diff --git', 'index ', '+++ b/', '--- a/') to catch similar embedded secrets."
+    ],
+    "effective_uses": [
+      "mcp__codegraph__init_repository was invoked early, which is the correct setup step for enabling structural/code-aware queries.",
+      "mcp__codegraph__search_code was used to kick off an initial sweep for common secret keywords (AWS/HF/token terms), which is directionally correct for broad discovery.",
+      "mcp__codegraph__get_dependencies was attempted (even if not leveraged), indicating awareness that dependency structure could help scope the search."
+    ],
+    "recommendation": "Treat MCP as the primary discovery and navigation layer: (1) run multiple rounds of mcp__codegraph__search_code with both keyword and prefix-based queries ('AKIA', 'hf_', 'ghp_', 'BEGIN PRIVATE KEY', 'diff --git', 'Authorization') to enumerate candidate files; (2) use mcp__codegraph__get_code to pull consistent context for each hit and reduce manual Reads; (3) when a secret is set via code (env vars/config loaders), use get_symbol_info + find_references to locate all assignment sites and usage paths; (4) use get_dependencies on concrete entrypoints/deploy scripts to prioritize surfaces where secrets are most likely to appear. Keep native Grep as a secondary validation tool (spot-checking) rather than the main search engine."
+  },
+  {
+    "task_id": "build-cython-ext",
+    "profile": "codecanvas",
+    "utilization_quality": 0.26,
+    "init_timing": "early",
+    "init_quality": "Initialized CodeCanvas shortly after initial file discovery and before major debugging. Used it mainly as a lightweight decision log (claim/decide/mark) rather than as a full MCP-assisted codebase navigation and build triage workflow. The initialization itself was correct, but the tool was underutilized relative to the available MCP suite.",
+    "dependency_leverage": 0.12,
+    "search_effectiveness": 0.34,
+    "structural_understanding": 0.46,
+    "missed_opportunities": [
+      "Use get_dependencies to extract and validate build/runtime requirements (NumPy/Cython/setuptools, pinned versions, optional deps) before attempting compilation.",
+      "Use init_repository (if separate from CodeCanvas init) to register repository metadata and enable consistent code indexing for later symbol/reference queries.",
+      "Use search_code instead of native grep for semantic/structured searches (e.g., deprecated NumPy aliases, Cython directives, numpy cimports) and to reduce iterative grepping.",
+      "Use get_symbol_info on affected functions/classes (e.g., SpaceCurve, torus_knot) to understand signatures, types, and locations without manual offset reads.",
+      "Use find_references to ensure changes like replacing n.float or gcd imports don\u2019t break other call sites and to locate all impacted modules beyond the first grep hits.",
+      "Use get_code to pull complete surrounding context (functions/modules) when patching, rather than small Read offsets that risk missing nearby constraints/import patterns."
+    ],
+    "effective_uses": [
+      "CodeCanvas init was performed before substantive compatibility fixes, enabling later structured note-taking.",
+      "Used claim/decide/mark to capture a concrete compatibility issue (fractions.gcd -> math.gcd) and document the applied fix.",
+      "Used claim/decide to summarize the NumPy deprecation issue (n.float) and to record an intended global remediation strategy."
+    ],
+    "recommendation": "Adopt an MCP-first workflow: (1) run get_dependencies up front to map build/runtime requirements and detect NumPy/Cython constraints; (2) use search_code for deprecated APIs and Cython-related patterns; (3) use find_references before/after edits to ensure completeness of refactors (e.g., n.float replacements) and to prevent regressions; (4) use get_symbol_info/get_code to retrieve full symbol context when patching instead of offset-based reads; (5) keep CodeCanvas for decision logging, but pair it with systematic MCP-indexed navigation to reduce repeated native greps and trial-and-error builds."
+  },
+  {
+    "task_id": "custom-memory-heap-crash",
+    "profile": "codegraph",
+    "utilization_quality": 0.18,
+    "init_timing": "early",
+    "init_quality": "Repository initialization was performed promptly (step 7) and correctly pointed at /app, but the agent did not follow up by using any other codegraph capabilities (symbol lookup, cross-references, structured search) to exploit the initialized index.",
+    "dependency_leverage": 0.05,
+    "search_effectiveness": 0.22,
+    "structural_understanding": 0.6,
+    "missed_opportunities": [
+      "mcp__codegraph__search_code to locate operator new/delete overrides and all uses of g_custom_heap across /app without relying on multiple Grep/Read passes",
+      "mcp__codegraph__get_symbol_info on g_custom_heap, CustomHeapManager::deallocate, and global operator delete to quickly confirm signatures, linkage, and where they are defined",
+      "mcp__codegraph__find_references for g_custom_heap and CustomHeapManager to enumerate every allocation/deallocation site and validate the hypothesized lifetime mismatch",
+      "mcp__codegraph__get_code to retrieve the full definition of Application::init/shutdown (and any related helpers) in one structured call instead of piecemeal Read/Glob",
+      "mcp__codegraph__get_dependencies to separate \"app code\" from \"toolchain/libstdc++\" influence and to prioritize investigation on the actual reachable call graph in release mode"
+    ],
+    "effective_uses": [
+      "mcp__codegraph__init_repository was invoked early, establishing the opportunity for indexed structural queries"
+    ],
+    "recommendation": "Use MCP as the primary mechanism for understanding project structure: (1) run search_code for g_custom_heap/operator new/delete and CustomHeapManager to map the memory-management surface area; (2) use get_symbol_info to confirm exact overloads and ODR/linkage details; (3) use find_references to verify lifetime/order assumptions (where allocations occur vs where frees occur) and to quickly detect mismatched allocators; (4) use get_code to pull complete class/function bodies (Application init/shutdown paths) to avoid missed lines; and (5) use get_dependencies to focus on the minimal set of relevant files/symbols in /app before diving into toolchain internals."
+  },
+  {
+    "task_id": "modernize-scientific-stack",
+    "profile": "codecanvas",
+    "utilization_quality": 0.28,
+    "init_timing": "early",
+    "init_quality": "Initialized CodeCanvas at the start of exploration (before planning/implementation), which is appropriate. However, initialization was not followed by broader MCP-driven codebase interrogation (dependencies, symbols, references), so the init did not translate into deeper tool leverage.",
+    "dependency_leverage": 0.1,
+    "search_effectiveness": 0.12,
+    "structural_understanding": 0.42,
+    "missed_opportunities": [
+      "Use get_dependencies to inspect the repository's existing dependency declarations (requirements/setup/pyproject) and avoid guessing versions or adding redundant libraries.",
+      "Use search_code to locate Python 2.7 compatibility patterns across the repo (e.g., print statements, xrange, iteritems, unicode/str handling, ConfigParser usage) rather than only reading a single script.",
+      "Use get_symbol_info to understand entry points / main functions/classes and to choose the correct symbol name for marking (the agent had to retry mark due to symbol mismatch).",
+      "Use find_references to trace how analyze_climate.py is invoked (CLI entrypoint, imports, scripts) and ensure the modernization aligns with existing call sites.",
+      "Use get_code (or MCP-based file retrieval) to systematically review related modules beyond analyze_climate.py (e.g., package __init__, any helpers) to ensure modernization is complete and consistent."
+    ],
+    "effective_uses": [
+      "mcp__codecanvas__canvas(action=init) was executed early, establishing the session context before analysis and planning.",
+      "mcp__codecanvas__canvas(action=claim) captured key modernization observations (Python 2.7 idioms) in a structured way.",
+      "mcp__codecanvas__canvas(action=decide) documented an implementation decision (create a modern script and dependencies), providing traceability.",
+      "mcp__codecanvas__canvas(action=mark) was used to record verification/completion, though the symbol name confusion reduced its effectiveness."
+    ],
+    "recommendation": "After init, use MCP to map the repo systematically: (1) get_dependencies to ground dependency updates in existing constraints; (2) search_code to enumerate all Python-2-era patterns and affected files; (3) get_symbol_info + find_references to identify the real entrypoints and call graph so the modernization is integrated rather than parallel (a new standalone script). Then use canvas marks tied to validated symbols to avoid retrying marks and to ensure the recorded verification corresponds to the actual project interfaces."
+  },
+  {
+    "task_id": "modernize-scientific-stack",
+    "profile": "codegraph",
+    "utilization_quality": 0.32,
+    "init_timing": "early",
+    "init_quality": "Initialization happened near the start (step 7) and correctly pointed at /app. However, the agent did not appear to use any follow-on codegraph capabilities enabled by initialization (e.g., symbol, reference, or targeted code retrieval), so the benefit of init was mostly unrealized.",
+    "dependency_leverage": 0.28,
+    "search_effectiveness": 0.15,
+    "structural_understanding": 0.45,
+    "missed_opportunities": [
+      "Use mcp__codegraph__search_code to locate Python 2.7 constructs (print statements, xrange, iteritems, old-style exceptions) across the repo instead of reading only one script.",
+      "Use mcp__codegraph__get_code to pull the full module set implicated by analyze_climate.py (import closure) to ensure modernization covers all executed paths, not just the entry script.",
+      "Use mcp__codegraph__get_symbol_info to inspect key functions/classes (e.g., the main analysis routine) and understand signatures/callers before rewriting.",
+      "Use mcp__codegraph__find_references to check whether analyze_climate.py is invoked/imported elsewhere, preventing breaking changes and identifying additional modernization targets.",
+      "Use get_dependencies targeted to specific modules (e.g., climate_analyzer/analyze_climate.py) and deeper depth to distinguish internal modules vs external packages and to justify requirements.txt content.",
+      "Validate requirements against dependency graph output (instead of inferring matplotlib/pandas versions) and check for existing pinned versions or constraints.",
+      "Use search_code to find configuration usage patterns (config.ini consumers) and data schema assumptions (CSV columns) to confirm compatibility of the rewritten script."
+    ],
+    "effective_uses": [
+      "mcp__codegraph__init_repository was invoked early, which is the correct setup step before attempting any codegraph-based analysis.",
+      "mcp__codegraph__get_dependencies was used to attempt a structural overview rather than relying purely on manual file browsing."
+    ],
+    "recommendation": "After init, the agent should lean on codegraph for repository-wide understanding: (1) run search_code for Python2 patterns and for entrypoints; (2) run get_dependencies on the specific entry module with higher depth to separate internal vs external deps; (3) use get_symbol_info and find_references on key functions/modules to ensure all call sites and execution paths are covered; (4) derive requirements.txt from dependency evidence plus existing lock/pins. This would reduce assumption-driven modernization and increase coverage beyond the single file manually opened."
   },
   {
     "task_id": "fix-code-vulnerability",
     "profile": "codecanvas",
-    "utilization_quality": 0.32,
+    "utilization_quality": 0.22,
     "init_timing": "never",
-    "init_quality": "No repository initialization was performed with the available MCP tools (e.g., init_repository). As a result, the agent never established a tool-backed project model (file inventory, language/package context, symbol index) and mostly operated via ad-hoc file reads and greps.",
-    "dependency_leverage": 0.1,
-    "search_effectiveness": 0.55,
+    "init_quality": "No explicit repository initialization via MCP (init_repository) was performed. The agent inferred repo state from the environment and immediately used native Read/Grep/Bash instead of establishing an MCP-backed index/structure first.",
+    "dependency_leverage": 0.05,
+    "search_effectiveness": 0.45,
     "structural_understanding": 0.35,
     "missed_opportunities": [
-      "Use init_repository at the start to build an indexed view of the repo and reduce reliance on large-file scanning.",
-      "Use search_code instead of repeated native Grep to perform broader, indexed searches across the repository for security-sensitive patterns (e.g., pickle.loads, static file serving paths, realpath/abspath usage).",
-      "Use get_symbol_info on static_file and cookie_decode to retrieve signature, docstring, and surrounding context in a structured way rather than manual offset Reads.",
-      "Use find_references for cookie_decode/cookie_encode to confirm call sites (including indirect usage) before deciding on a fix strategy; the agent inferred \u201cno direct callers\u201d primarily from limited inspection.",
-      "Use get_code to pull exact function bodies/regions reliably (and avoid offset/limit truncation risks) when reasoning about security checks and edge cases.",
-      "Use get_dependencies to verify whether Bottle is vendored/standalone here, what test runner/version constraints exist, and whether proposed changes (e.g., behavior changes in cookie handling) align with declared support."
+      "Use init_repository early to enable MCP-aware navigation and consistent file/symbol access rather than relying on Bash for repo context.",
+      "Use search_code instead of repeated Grep/Bash patterns to perform scoped searches with better signal (e.g., locating all call sites of static_file/load/parse_auth across the repository).",
+      "Use get_symbol_info for static_file, load, and parse_auth to fetch full definitions, docstrings, and boundaries reliably rather than manual offset-based Read chunks.",
+      "Use find_references to identify all usages of load() and parse_auth() before changing behavior (e.g., raising ValueError), reducing risk of breaking callers and contributing to the observed overall task failure.",
+      "Use get_code to pull complete, canonical function bodies (and surrounding context) instead of partial reads that risk missing edge-case handling nearby.",
+      "Use get_dependencies to determine supported Python versions/feature flags that might constrain secure implementation choices (e.g., pathlib availability, importlib patterns)."
     ],
     "effective_uses": [
-      "Used mcp__codecanvas__canvas(action=impact, symbol=static_file) to focus attention on a high-risk surface (static file serving) and frame the analysis around likely vulnerability classes.",
-      "Used mcp__codecanvas__canvas(action=claim, ...) to record findings in a structured manner, which is helpful for later reporting and auditability.",
-      "Used mcp__codecanvas__canvas(action=impact, symbol=cookie_decode) to attempt to validate blast radius before changing a security-sensitive function."
+      "Used the MCP canvas tool to track work (claim/decide) and annotate changes (impact/mark), which supports auditability and makes the intended security rationale explicit.",
+      "Invoked canvas impact on specific symbols (static_file, load, parse_auth) to focus attention on high-risk functions and keep remediation organized."
     ],
-    "recommendation": "Initialize with init_repository immediately, then use search_code to locate all relevant patterns repo-wide (static file handlers, path normalization, deserialization, signing). For each candidate hotspot, use get_symbol_info/get_code to retrieve authoritative symbol context and find_references to validate call sites and behavioral impact before editing. Use get_dependencies to confirm compatibility constraints and to guide safe remediations (e.g., deprecation strategy, test expectations). Reserve native grep/read for spot checks, not as the main discovery workflow."
+    "recommendation": "Start with init_repository, then use search_code to enumerate security-relevant surfaces (static file serving, dynamic loading/eval, auth parsing). For each candidate, use get_symbol_info/get_code to retrieve complete definitions and nearby logic, and use find_references before behavior-changing fixes (especially exceptions/return types) to avoid breaking callers. Use get_dependencies to understand environment constraints and test expectations. Keep canvas for decision logging/annotation, but shift discovery and impact analysis to MCP structural tools rather than Grep/Bash to reduce missed call sites and improve fix correctness."
+  },
+  {
+    "task_id": "fix-code-vulnerability",
+    "profile": "codegraph",
+    "utilization_quality": 0.18,
+    "init_timing": "late",
+    "init_quality": "Repository initialization was performed only after substantial manual (native) file reading/grepping and after a preliminary vulnerability assessment. As a result, MCP initialization did not shape the investigation strategy, prioritize components, or reduce exploration cost.",
+    "dependency_leverage": 0.12,
+    "search_effectiveness": 0.25,
+    "structural_understanding": 0.3,
+    "missed_opportunities": [
+      "Use mcp__codegraph__search_code early to locate security-relevant primitives (cookie signing/verification, header parsing, redirect handling, template rendering, file serving) across the whole repo instead of line-oriented Grep confined to bottle.py.",
+      "Use mcp__codegraph__get_symbol_info on key symbols (e.g., static_file, template/render, cookie_encode/decode, parse_auth, HTTPResponse) to quickly understand definitions, docstrings, and signature contracts rather than repeated offset-based reads.",
+      "Use mcp__codegraph__find_references to trace where security-sensitive helpers are called (e.g., where user-controlled path reaches static_file, where cookies are set/decoded, where template variables are injected), improving vulnerability validation and exploitability assessment.",
+      "Use mcp__codegraph__get_code to retrieve complete function/class bodies in one call (or structured slices) instead of many partial Read calls with offsets that risk missing surrounding context and control flow.",
+      "Use dependencies (and/or symbol/reference graph) to distinguish framework/library code from application code, and to identify actual request handlers/routes as the primary attack surface rather than auditing a single file in isolation."
+    ],
+    "effective_uses": [
+      "mcp__codegraph__init_repository was correctly invoked with the repo root path, enabling later graph-based navigation (even though it was not leveraged much afterward).",
+      "mcp__codegraph__get_dependencies was a reasonable attempt to gain structural context, but the agent did not convert it into actionable exploration steps."
+    ],
+    "recommendation": "Initialize MCP immediately, then use codegraph to drive a top-down plan: (1) get_dependencies to map entrypoints/modules; (2) search_code for security sinks/sources and route/handler definitions; (3) get_symbol_info to understand key functions/classes; (4) find_references to trace user input to sinks and confirm exploitability; (5) use get_code to pull full implementations of prioritized symbols. Reserve native Grep/Read for quick spot checks or when MCP results need validation."
   }
 ]

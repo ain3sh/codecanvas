@@ -2,188 +2,207 @@
   {
     "task_id": "sanitize-git-repo",
     "profile": "codecanvas",
-    "root_cause": "tool_misuse",
-    "confidence": 0.83,
-    "critical_step": 17,
-    "critical_step_explanation": "At step 17 (and 18), the agent invoked the CodeCanvas tool (canvas claim/decide). This tooling typically persists its own workspace metadata into the repo (e.g., .codecanvas/state.json). That introduces an extra tracked file modification unrelated to sanitizing secrets. The failing test (test_no_other_files_changed) is consistent with an unintended change to tool-state/metadata rather than to secret-bearing source files.",
-    "missed_insight": "The agent should have anticipated that using an auxiliary planning/annotation tool can create/modify files inside the repository (especially under .codecanvas/), which will be counted as 'other files changed' by strict tests. For this task, any tool that writes state into the repo is risky unless that directory is already gitignored and untracked.",
-    "counterfactual": "If the agent had avoided calling CodeCanvas at step 17 (or immediately reverted/deleted any newly created/modified .codecanvas/* artifacts right after noticing them around step 32), then only the intended secret-containing files would have changed and test_no_other_files_changed would likely have passed.",
+    "root_cause": "incomplete_exploration",
+    "confidence": 0.72,
+    "critical_step": 8,
+    "critical_step_explanation": "The agent\u2019s search phase relied on a small set of literal environment-variable names (e.g., AWS_ACCESS_KEY_ID) and a couple of token regexes (hf_/ghp_/AKIA). It then only opened/edited two files. This is consistent with tests still detecting secret material elsewhere in the repo (or additional occurrences in other files) because the agent never performed a repository-wide, format-robust scan for secrets beyond those few patterns.",
+    "missed_insight": "Secrets often appear without canonical variable names (e.g., raw AWS secret keys, Bearer tokens, JSON credential blobs, .env files, example configs, notebooks). A robust sanitization needs broad pattern coverage and/or scanning of all likely configuration/documentation files, not just two located matches.",
+    "counterfactual": "If the agent had, at step 8, run broader repo-wide searches (e.g., for 'token', 'secret', 'api_key', 'Bearer ', '.env', and regexes for AWS secret keys and generic high-entropy strings) and then iterated through every hit, it would likely have found the remaining secrets and updated all required locations, causing both secret-removal and correct-replacement tests to pass.",
     "contributing_factors": [
-      "Strict evaluation criterion: tests enforce that only intended files change, so even benign metadata edits fail.",
-      "The agent explicitly observed secrets appearing in .codecanvas/state.json later, indicating the tool captured sensitive strings and modified a tracked file.",
-      "Over-focus on searching many additional locations (exp_data JSONs) increased the chance of touching or generating extra artifacts, even though the core replacement already passed secret-removal tests.",
-      "Early role confusion: the agent declared 'read-only mode' yet proceeded with edits; this mismatch can correlate with unplanned side effects from tools."
+      "Overly narrow grep patterns (searched for variable names rather than secret formats and contextual indicators)",
+      "Stopped exploration after finding the first couple of matches and assumed coverage was complete",
+      "No final comprehensive verification pass using broad regexes across the entire repo (verification only checked the specific secrets already found)",
+      "Potential mismatch with test expectations for what constitutes a 'correct replacement' (placeholders may need to be standardized/consistent across all secret types and locations)"
     ],
-    "task_specific_difficulty": "This task is hard for agents because success requires both (a) complete secret eradication across diverse file types and embedded diffs/logs, and (b) minimizing the git diff to only necessary replacements. Tooling and agent workflows often generate auxiliary files (state, caches, logs) that break 'no other files changed' constraints, and secrets can also appear in non-obvious places (datasets, serialized diffs) that tempt broad scanning and incidental modifications."
+    "task_specific_difficulty": "Secret detection is adversarially diverse: keys appear in many formats, files, and contexts (code, YAML, docs, env examples). Passing tests typically requires both (1) complete coverage of all occurrences and (2) using the specific placeholder conventions the evaluator expects, so partial scanning or token-specific verification can easily miss residual secrets."
   },
   {
     "task_id": "sanitize-git-repo",
     "profile": "codegraph",
-    "root_cause": "incomplete_exploration",
-    "confidence": 0.74,
-    "critical_step": 6,
-    "critical_step_explanation": "The agent\u2019s initial discovery phase relied mostly on searching for environment-variable names (e.g., AWS_ACCESS_KEY, HF_TOKEN) and a few specific GitHub token regexes, rather than scanning the repository for the *actual secret formats* (e.g., AKIA[0-9A-Z]{16}, aws secret key shape, hf_..., generic high-entropy tokens). This caused it to read/edit only 2 files and miss other secret occurrences elsewhere, leading to failing repo-wide tests for secret removal and correct replacement.",
-    "missed_insight": "Sanitization tasks require repo-wide detection using secret-shaped patterns (prefixes + length/charset) and/or a secret scanner, not just variable-name searches. A clean pass should include broad regexes for AWS access key IDs, AWS secret access keys, GitHub tokens (all variants), and HuggingFace tokens (hf_...) across all text-y files (yaml/json/toml/md/py/env), then verifying no matches remain.",
-    "counterfactual": "If the agent had, at step 6\u201320, added comprehensive regex searches (e.g., AKIA[0-9A-Z]{16}, (?i)aws(.{0,20})?(secret|access).{0,20}key, \\bhf_[A-Za-z0-9]{20,}\\b, and broader GitHub token forms) and/or run a secret scanner, it would have identified additional files containing secrets and replaced them with the expected placeholders, causing both secret-removal tests to pass.",
+    "root_cause": "correct_approach_poor_execution",
+    "confidence": 0.78,
+    "critical_step": 32,
+    "critical_step_explanation": "During the first sanitization edit (ray_processing/ray_cluster.yaml), the agent likely replaced a larger block of text than strictly necessary (e.g., surrounding comments/commands along with the credential string). That kind of broad edit can introduce unrelated diffs (whitespace, line wrapping, reordered lines, altered comments), causing the \"no other files changed\" test to fail even though secrets were removed/replaced correctly.",
+    "missed_insight": "The evaluation requires not only removing/replacing secrets, but also preserving files byte-for-byte except for the secret substrings themselves. Any incidental formatting or content changes in the touched files (or edits to a file that didn\u2019t actually contain a secret in the ground-truth fixture) will fail the \"no other files changed\" check.",
+    "counterfactual": "If the agent had, at step 32, performed the smallest-possible substitution (replace only the secret token characters in-place) and immediately reviewed `git diff` to confirm that the only changes were the exact secret strings, the repository would likely have passed the \"no other files changed\" test.",
     "contributing_factors": [
-      "Overconfidence/false completion signal: it declared success after editing only two files without proving repo-wide absence of secrets",
-      "Verification was anchored to the specific secrets it happened to replace (searching for those exact original strings) rather than checking for any remaining secret-shaped strings",
-      "Potential placeholder mismatch risk: it validated presence of \u201c<your-...>\u201d substrings rather than ensuring replacements match the test\u2019s required placeholder scheme"
+      "Edits appear to use large `old_string` spans, increasing the chance of accidental collateral modifications.",
+      "No explicit post-edit verification step focused on minimal diffs (e.g., `git diff` / checking that only expected substrings changed).",
+      "Secrets were present in documentation/config contexts where line wrapping or comment edits are easy to accidentally alter.",
+      "Backtracking suggests at least one attempt to fix something, but not systematically by diff-auditing and reverting unrelated changes."
     ],
-    "task_specific_difficulty": "Secrets can appear in many file types and in multiple syntactic forms (inline strings, URLs, YAML commands, env vars). Robust detection requires comprehensive pattern matching and careful replacement that preserves file syntax while meeting test-expected placeholder formats; superficial searches often miss secrets that aren\u2019t adjacent to obvious variable names."
+    "task_specific_difficulty": "This task is deceptively strict: it\u2019s not enough to remove secrets; agents must ensure the patch is minimal and deterministic. Secrets can appear in many file types (YAML, Python, Markdown, JSON-with-embedded-diff), and naive edits often change formatting or surrounding context, which breaks \"only secrets changed\" invariants."
   },
   {
     "task_id": "sanitize-git-repo",
     "profile": "text",
-    "root_cause": "correct_approach_poor_execution",
+    "root_cause": "incomplete_exploration",
     "confidence": 0.74,
-    "critical_step": 39,
-    "critical_step_explanation": "During verification the agent grepped for specific (apparently assumed) concrete strings like `hf_abcdefghijklmnopqrstuvwxyz123456`, `ghp_aBcDe...`, and `AKIA1234567890123456` rather than re-running broad secret-detection patterns (AKIA*, ghp_*, hf_*, AWS secret key formats, etc.) across the whole repo. This created a false sense of completion: the agent only proved that its *placeholder examples* weren't present, not that real secrets were removed. As a result, at least one secret remained and/or replacements did not match the expected placeholder scheme, causing both 'removal' and 'correct replacement' tests to fail.",
-    "missed_insight": "The agent had already surfaced multiple likely secret-bearing files early (e.g., `tools/sync_aws_hf2.py`, `tools/push_openlm_model_to_hf.py`, `tools/eval_expdb.py`, cluster YAMLs) but only edited 2 files. It should have assumed secrets could be present in any of those matches and systematically sanitize every match, then re-scan with format-based regexes to ensure zero remaining credentials.",
-    "counterfactual": "If the agent had, at step 29, enumerated every Grep hit and applied replacements file-by-file (and then at step 39 re-ran the original broad regex Greps repo-wide and checked tests/expected placeholder format), the remaining secret(s) and/or placeholder mismatches would have been caught and fixed, and the failing tests would likely have passed.",
+    "critical_step": 8,
+    "critical_step_explanation": "The agent\u2019s initial discovery phase relied mostly on searching for variable-name cues (e.g., AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) and a few token regexes, then it only read/edited the two files surfaced early. It did not do a comprehensive repo-wide scan for the *actual credential formats* (e.g., AKIA[0-9A-Z]{16} for AWS access keys, 40-char AWS secret key patterns, GitHub fine-grained tokens like github_pat_, etc.) and did not systematically enumerate and remediate every match. As a result, at least one secret remained somewhere in the repository (or was in a format not covered by their searches), causing the \u2018removal\u2019 test to fail.",
+    "missed_insight": "Sanitization tasks require searching by credential *shapes*, not just by nearby labels like \"AWS_SECRET_ACCESS_KEY\". Tests commonly look for residual secrets via broad regexes and may also require specific placeholder strings. The agent should have assumed there could be unlabeled raw keys (AWS secret key-like base64 strings), alternate GitHub token prefixes (github_pat_), or keys embedded in URLs/commands across files other than the two it inspected.",
+    "counterfactual": "If the agent had performed a repo-wide grep for credential formats (e.g., AKIA[0-9A-Z]{16}, (ghp_|ghs_|github_pat_)[A-Za-z0-9_]{20,}, hf_[A-Za-z0-9]{20,}, and a robust AWS secret-access-key regex) and then opened/remediated every matching file around step 8\u201312, all secrets would likely have been removed and replaced, and the two failing tests would have passed.",
     "contributing_factors": [
-      "Verification relied on searching for a few hand-picked strings instead of exhaustive pattern-based rescanning.",
-      "Only 2 files were edited despite multiple earlier indicators of sensitive content elsewhere.",
-      "Potential mismatch between the placeholders used (e.g., `<your-aws-access-key-id>`) and the test suite's required placeholder values/format.",
-      "Shallow reading (8 files) relative to repo size increased the chance of leaving additional secrets untouched."
+      "Overly narrow search patterns for AWS (searched mainly for env var names rather than key formats).",
+      "Only 2 files read suggests grep results were not exhaustively inspected or additional matches were missed/ignored.",
+      "Verification focused on checking the specific old values rather than re-running broad pattern-based scans equivalent to what tests likely use.",
+      "Potential placeholder mismatch risk: agent chose ad-hoc placeholders (e.g., <your-...>) which may not align with the test\u2019s expected placeholder values, contributing to the \u2018correct replacement\u2019 failure if tests assert exact placeholders."
     ],
-    "task_specific_difficulty": "Secret-sanitization is adversarial to 'spot checking': secrets appear in many file types (YAML, Python, docs), may be split across lines, embedded in URLs/CLI snippets, or use multiple provider-specific formats. Success requires exhaustive repo-wide pattern scanning, systematic replacement, and verification against both 'no secrets remain' and 'replacement matches a required placeholder schema'."
+    "task_specific_difficulty": "Secrets can appear in many syntactic forms (raw tokens, embedded in URLs, commented examples, config values, env files) and across many file types. Automated tests often use broad regexes and sometimes require exact placeholder conventions, so partial discovery or non-standard replacements can easily lead to failures even when the obvious instances were edited."
   },
   {
-    "task_id": "custom-memory-heap-crash",
-    "profile": "text",
-    "root_cause": "correct_approach_poor_execution",
-    "confidence": 0.74,
-    "critical_step": 29,
-    "critical_step_explanation": "After correctly identifying the real failure mode (libstdc++ facet/locale allocations happening while the custom heap is active, then being freed after the heap is torn down), the agent committed to an atexit-based strategy that relied on an incorrect/fragile assumption about termination order. This sent the trajectory into a long sequence of increasingly indirect workarounds (malloc/free interception, destructor-order tricks) rather than exploiting the simple controllable lever available in this task setup.",
-    "missed_insight": "Because `user_init()` runs BEFORE the custom heap is created/activated, the agent could force libstdc++ iostream/locale initialization (and facet registry allocations) to happen early using the system allocator (e.g., instantiate `std::ios_base::Init`, touch `std::locale`, perform a harmless `std::cout` operation). Then, when the custom heap becomes active later, the critical libstdc++ global/static objects are already allocated from the system heap and won\u2019t be freed via the custom allocator after it is destroyed.",
-    "counterfactual": "If at step 37 (when the agent noticed `user_init()` precedes heap creation) they had implemented an early iostream/locale initialization in `user_init()`\u2014instead of pivoting away at step 38\u2014the release build would likely stop allocating libstdc++ facet registry nodes from the custom heap, preventing the exit-time segfault without needing to modify `main.cpp` or access `g_custom_heap`.",
-    "contributing_factors": [
-      "Over-focus on post-main cleanup mechanisms (atexit, static destructor ordering) despite having a pre-heap initialization hook (`user_init()`).",
-      "Confusion/overgeneralization about atexit vs. static destructor sequencing (implementation-dependent and intertwined because static dtors are often registered via atexit).",
-      "Attempted malloc/free interposition despite static linking and without proving that the crashing allocations route through malloc/free rather than global operator new/delete.",
-      "Constraint mismanagement: only one editable file (user.cpp) encouraged indirect hacks; the agent didn\u2019t fully leverage the most direct thing user.cpp can do (trigger early standard library initialization).",
-      "Thrashing/backtracking once the initial atexit idea failed, leading to many low-probability approaches rather than a targeted minimal fix."
-    ],
-    "task_specific_difficulty": "Release-only allocator crashes often involve subtle lifetime/termination-order bugs: different codepaths under NDEBUG, static linking, libstdc++ internal singletons/facet registries, and the non-obvious ordering of heap teardown vs. C++ static object destruction. The additional constraint of only editing user.cpp makes the correct solution hinge on exploiting initialization timing rather than directly fixing the allocator or shutdown logic."
-  },
-  {
-    "task_id": "db-wal-recovery",
+    "task_id": "build-cython-ext",
     "profile": "codecanvas",
-    "root_cause": "tool_misuse",
-    "confidence": 0.78,
-    "critical_step": 10,
-    "critical_step_explanation": "The agent opened `main.db` with `sqlite3` (and then ran queries). In WAL mode, simply opening the DB can trigger an automatic checkpoint or recovery behavior that consumes/merges WAL content into the main DB (or truncates/removes the `-wal` file). Immediately afterward the agent observed the WAL file had \u201cdisappeared\u201d, meaning the primary artifact needed for recovery was altered before it was preserved. This made full recovery of the extra records impossible, leading to an incomplete JSON export and the completeness test failure.",
-    "missed_insight": "In WAL-recovery tasks, the first move must be to preserve evidence: copy `main.db`, `main.db-wal`, and `main.db-shm` (if present) to a safe location and operate only on the copies, ideally opening the DB in immutable/read-only mode (e.g., `sqlite3 'file:main.db?immutable=1'`) or parsing the WAL directly. Querying the live DB before copying risks checkpointing and destroying the WAL contents that contain the missing rows.",
-    "counterfactual": "If the agent had copied `/app/main.db*` to `/tmp/` at step 8 (before any `sqlite3` access) and then performed recovery against the copied trio (or used immutable mode), the WAL would likely have remained available for parsing/merging, enabling extraction of the additional records and passing `test_recovered_data_completeness`.",
+    "root_cause": "correct_approach_poor_execution",
+    "confidence": 0.67,
+    "critical_step": 22,
+    "critical_step_explanation": "After successfully compiling extensions via `python setup.py build_ext --inplace`, the agent concluded the core objective was met and shifted to fixing unrelated runtime issues (e.g., `fractions.gcd`, `numpy.float`). This missed the likely failing path: building/installing in an isolated/PEP517 environment where NumPy must be declared as a build requirement and where `setup.py`-only workflows can pass locally but fail in tests that build wheels/sdists.",
+    "missed_insight": "Passing `setup.py build_ext --inplace` is not sufficient for \u201cbuild Cython extensions with NumPy 2.x compatibility\u201d if the evaluation builds a wheel/sdist under PEP 517 build isolation. The project likely needed an explicit `pyproject.toml` (or equivalent) declaring build-system requirements (`numpy>=2`, `Cython`, `setuptools`, `wheel`) and/or setup logic that safely acquires NumPy headers during isolated builds.",
+    "counterfactual": "If the agent had run an isolated build check (e.g., `pip wheel .` or `python -m build`) at step 22 and then added/updated `pyproject.toml` build-system requirements (and ensured NumPy headers are available via `numpy.get_include()` during setup), the remaining test would likely have passed and reward would be non-zero.",
     "contributing_factors": [
-      "Assumed `sqlite3` queries were 'read-only' and would not mutate state; in WAL mode they can still trigger checkpoint/recovery effects",
-      "Delayed forensic preservation (no early snapshot of `main.db-wal`/`main.db-shm`)",
-      "Spent many steps searching for a WAL file after it was already checkpointed/removed, instead of switching to WAL reconstruction techniques on preserved copies",
-      "Overfocused on speculative 'encryption/corruption' hypotheses once the WAL vanished, rather than recognizing the likely auto-checkpoint side effect",
-      "No explicit use of `immutable=1`, `-readonly`, or other safeguards to prevent SQLite from changing WAL state"
+      "Relied on non-isolated commands (`setup.py build_ext --inplace`, `pip install -e .`) that can mask missing build-system metadata.",
+      "Declared success based on a local build instead of reproducing the evaluator\u2019s build/install pathway.",
+      "Spent effort on Python-level deprecations (gcd import, `numpy.float`) that were not central to the stated task and risked diverting time from packaging/build configuration.",
+      "No evidence of identifying which exact test failed (only partial pass list shown), reducing targeted debugging."
     ],
-    "task_specific_difficulty": "SQLite WAL recovery is adversarial for agents because standard 'inspect the DB with sqlite3' instincts can destroy the very evidence (WAL frames) needed to recover missing rows. Correct handling requires forensics-style workflow (copy first, immutable access), plus low-level knowledge of WAL frame structure/checkpointing and how corruption affects frame scanning and page reconstruction."
+    "task_specific_difficulty": "NumPy 2.x compatibility issues for Cython extensions often aren\u2019t in the Cython code itself but in build mechanics: header availability, deprecated distutils/setuptools behaviors, and PEP 517 build isolation. Agents frequently \u2018prove\u2019 success by compiling in-place (which uses the already-installed NumPy) while evaluators build wheels in clean environments where missing `pyproject.toml` requirements or incorrect setup-time NumPy discovery causes failures."
   },
   {
-    "task_id": "db-wal-recovery",
+    "task_id": "build-cython-ext",
     "profile": "codegraph",
     "root_cause": "misunderstood_task",
-    "confidence": 0.78,
-    "critical_step": 9,
-    "critical_step_explanation": "The agent immediately opened the database with the standard sqlite3 CLI to inspect tables/rows. In WAL-recovery tasks this is risky: opening the DB in a normal way can checkpoint, reconcile, or otherwise change/remove WAL state. After this, the agent concluded the WAL was \u201cmissing\u201d and pivoted into inventing/reconstructing data rather than performing forensic recovery of the provided corrupted WAL frames. That led to a JSON export that was structurally correct but incomplete (it reflected only what was easily queryable from the base DB).",
-    "missed_insight": "The goal was not to 'make the DB consistent' or 'recreate a WAL', but to recover additional committed rows that exist only in the corrupted WAL. The agent should have treated the WAL as an evidence artifact: copy it first, avoid normal SQLite opening/checkpointing, and extract frames/pages from the WAL (or use recovery tooling) to recover rows beyond the 5 visible in the main DB.",
-    "counterfactual": "If the agent had, at step 9, first duplicated the database artifacts (main.db, main.db-wal, main.db-shm if present) and then analyzed the WAL copy offline (e.g., parse WAL header/frames or use SQLite recovery techniques without checkpointing), the recovered JSON would likely include the additional rows required by the completeness test and pass 7/7 tests.",
+    "confidence": 0.72,
+    "critical_step": 24,
+    "critical_step_explanation": "After `python setup.py build_ext --inplace` succeeded, the agent treated this as evidence the task goal was met and shifted effort to fixing runtime/import issues (e.g., `fractions.gcd`, `np.float` aliases). This likely missed the actual failure mode the benchmark cares about: whether the Cython extensions can be built reproducibly under modern pip/PEP517 build isolation with NumPy 2.x headers available, not merely whether they build in-place in the already-prepared environment.",
+    "missed_insight": "A successful in-place build in an environment that already has NumPy/Cython installed does not prove NumPy-2-compatible *packaging/build configuration*. Hidden evaluation commonly installs/builds in a fresh isolated environment (e.g., `pip install .`), where absence/mis-specification of `pyproject.toml` build-system requirements (numpy, cython, setuptools, wheel) or missing generated C sources causes extension build failures even though local `setup.py build_ext --inplace` works.",
+    "counterfactual": "If the agent had, at step 14\u201318, recognized there was no (or insufficient) `pyproject.toml` and added proper PEP517 build-system requirements (and/or ensured generated C files are shipped so Cython is not required at install time), then rerun `pip install .` (or `pip wheel .`) in a clean env at step 24\u201325, the build would likely succeed under the evaluator and the hidden failing test would pass.",
     "contributing_factors": [
-      "Evidence contamination risk: using sqlite3 directly on a WAL-mode DB can change WAL state and confuse subsequent forensics.",
-      "Premature conclusion that the WAL was missing, followed by time spent on broad filesystem searches instead of recovery.",
-      "Creation of new WAL content ('reconstructing' or generating a WAL) deviated from task requirements and risks overwriting/obscuring original state.",
-      "No focused validation loop against expected row count/contents; agent optimized for producing a valid/sorted JSON rather than verifying completeness."
+      "Validated the build only via `setup.py build_ext --inplace`, which bypasses the most common failure mode (PEP517 build isolation missing NumPy headers).",
+      "Spent many steps on unrelated Python 3.13/runtime deprecations (fractions.gcd, numpy scalar aliases) instead of hardening the extension build pipeline.",
+      "Did not include an explicit end-to-end check that mirrors evaluation (e.g., `pip install .` / `pip wheel .` from a clean environment).",
+      "Potential overfitting to visible tests: extension import tests passed in the current environment, masking packaging/build isolation issues."
     ],
-    "task_specific_difficulty": "SQLite WAL recovery is brittle because normal database access can checkpoint/merge/truncate WAL files, corrupted WALs require low-level frame/page parsing or specialized recovery approaches, and tests often require exact completeness (recovering rows that are not visible via standard SQL queries). Agents must preserve artifacts, avoid mutating tools, and perform forensic extraction rather than conventional querying."
+    "task_specific_difficulty": "This task is hard for agents because extension builds can succeed locally yet fail in the actual grading setup due to PEP517 build isolation, NumPy header availability, and sdist/wheel differences. Passing import tests doesn\u2019t guarantee the build is reproducible, and the required fix is often in packaging metadata rather than in the extension code itself."
+  },
+  {
+    "task_id": "db-wal-recovery",
+    "profile": "codecanvas",
+    "root_cause": "tool_misuse",
+    "confidence": 0.82,
+    "critical_step": 13,
+    "critical_step_explanation": "The agent opened the live database with `sqlite3 /app/main.db ...` before safeguarding `/app/main.db-wal`. Opening a WAL-mode SQLite DB can trigger auto-checkpointing and/or WAL reset/truncation, especially when the connection closes, causing the WAL file (the only source of the missing rows) to disappear or be overwritten. After this, the agent no longer had the original corrupted WAL content needed for complete recovery, so the final JSON could only reflect the remaining 5 visible rows, failing completeness.",
+    "missed_insight": "In WAL recovery tasks you must treat the WAL as ephemeral evidence: copy `main.db-wal` (and `main.db-shm` if present) to a safe location and operate only on the copies, ideally opening the DB in a way that prevents checkpointing/truncation (e.g., avoid `sqlite3` on the original, use `immutable=1`, or parse the WAL directly).",
+    "counterfactual": "If the agent had copied `/app/main.db-wal` to `/tmp/main.db-wal.bak` (and avoided opening `main.db` normally) at step 7 or step 9, they could have decrypted/decoded and parsed the original WAL frames to reconstruct all rows and would likely have passed `test_recovered_data_completeness`.",
+    "contributing_factors": [
+      "Assumed read-only exploration but executed commands that can mutate SQLite state (checkpoint/WAL truncation).",
+      "Failed to snapshot all relevant artifacts (WAL/SHM/DB) before any inspection.",
+      "Chased a speculative XOR-encryption theory after losing the WAL rather than validating against the preserved bytes.",
+      "No files read/edited in the metrics suggests the eventual solution was generated without a robust on-disk recovery pipeline, increasing the chance of missing records.",
+      "Time/attention spent searching the filesystem for a vanished WAL instead of preventing the disappearance in the first place."
+    ],
+    "task_specific_difficulty": "SQLite WAL recovery is brittle: simply opening the DB can checkpoint/truncate the WAL; corrupted/encrypted WALs require low-level frame parsing and careful validation; and completeness tests demand reconstructing *all* committed transactions, not just what the current main DB exposes."
+  },
+  {
+    "task_id": "db-wal-recovery",
+    "profile": "codegraph",
+    "root_cause": "tool_misuse",
+    "confidence": 0.78,
+    "critical_step": 11,
+    "critical_step_explanation": "The agent queried `main.db` with `sqlite3` before making a byte-for-byte copy of `main.db-wal` (and `main.db-shm`) or opening the database in an immutable/read-only way. Opening the DB in the normal way can trigger SQLite behaviors (auto-checkpointing, recovery attempts, deletion/renaming of WAL artifacts depending on mode and environment). Immediately after these accesses, the WAL file 'disappeared', removing the only source of the missing 6 records, so the agent could only export the 5 rows present in the main database.",
+    "missed_insight": "In WAL-recovery tasks, the first move must be to preserve evidence: copy `main.db`, `main.db-wal`, and `main.db-shm` to a safe location and operate only on copies (or use `file:...?...immutable=1`). Any normal connection to SQLite can mutate or checkpoint WAL state and destroy the very data you need to recover.",
+    "counterfactual": "If the agent had copied `/app/main.db-wal` (and shm) immediately after step 7 (or opened `/app/main.db` via `sqlite3 'file:/app/main.db?immutable=1'`), the WAL contents would have remained available for parsing/replay, enabling recovery of the missing 6 rows and passing `test_recovered_data_completeness`.",
+    "contributing_factors": [
+      "No 'forensic' workflow: the agent interacted with the live DB instead of working on backups/copies.",
+      "Over-indexed on the mystery of the missing WAL file and pivoted into speculative 'encryption/embedded data' searches rather than validating whether SQLite access had checkpointed/removed the WAL.",
+      "Did not check for accompanying `main.db-shm`, which often coexists with WAL and can indicate WAL state/health.",
+      "Read the binary `main.db` using a text-oriented file read tool, increasing noise and reducing signal in analysis.",
+      "Lack of a concrete WAL parsing/replay plan once WAL access became unreliable (e.g., using `sqlite3` recovery tools on copies, or low-level frame parsing)."
+    ],
+    "task_specific_difficulty": "WAL recovery is fragile: simply opening the database can change or delete WAL files; corruption can prevent standard tooling from loading; and recovering requires careful preservation plus specialized knowledge of WAL frames/checkpointing or use of SQLite recovery/immutable modes. Agents often fail by doing 'normal' inspection steps that inadvertently destroy the needed WAL evidence."
   },
   {
     "task_id": "db-wal-recovery",
     "profile": "text",
     "root_cause": "tool_misuse",
-    "confidence": 0.83,
+    "confidence": 0.84,
     "critical_step": 9,
-    "critical_step_explanation": "At step 9 (and continuing through steps 10\u201311), the agent opened `/app/main.db` with `sqlite3` and executed queries before preserving the WAL. In SQLite, simply opening a database (especially with the CLI) can trigger WAL-related behaviors (auto-checkpointing, recovery, or cleanup depending on settings), which can cause a `*-wal` file to be truncated or deleted. The trajectory shows the WAL existed initially (step 8) and then 'disappeared' afterward, consistent with the agent inadvertently causing state changes that removed the very artifact needed for recovery. Once the WAL was gone, the agent could only recover the 5 base records, leading to the data completeness failure.",
-    "missed_insight": "The agent should have treated the WAL as volatile evidence and immediately copied it (and the DB) to a safe location and/or opened the DB in immutable/read-only mode. The repeated confusion about the WAL 'missing' was a key signal that earlier actions had altered the environment. They also missed that their later deep binary inspection of the DB was unlikely to find WAL-only rows if the WAL had been checkpointed away.",
-    "counterfactual": "If the agent had copied `/app/main.db-wal` (and `/app/main.db-shm` if present) immediately after step 8, and then interacted only with the copies (or used `sqlite3 'file:/app/main.db?immutable=1'` / `-readonly` where applicable), the WAL contents would have remained available. They could then parse frames from the preserved WAL and reconstruct the missing rows, resulting in a complete JSON export and passing `test_recovered_data_completeness`.",
+    "critical_step_explanation": "The agent opened and queried `/app/main.db` with `sqlite3` before safeguarding `/app/main.db-wal`. Opening a WAL-mode DB can trigger recovery/checkpoint behavior that truncates or deletes the WAL (especially if SQLite decides it can checkpoint). This destroyed the only artifact containing the missing rows, making full recovery impossible and leading to an incomplete JSON export (5 rows instead of the expected full set).",
+    "missed_insight": "In WAL-recovery tasks, the WAL is the primary evidence. The first action should be to copy `main.db`, `main.db-wal`, and `main.db-shm` to a safe location (or operate on filesystem-level snapshots) and only then open the copies with settings that avoid checkpointing (e.g., `immutable=1`, read-only URI, or tools that never write). Querying the live DB first is unsafe because it can modify/consume the WAL.",
+    "counterfactual": "If the agent had immediately copied `/app/main.db-wal` (and `-shm`) at step 7 (or before step 9) and then ran recovery against the copies (or parsed the saved WAL frames directly), the original 16512-byte WAL contents would have been preserved and the recovered JSON would likely have included the missing records, passing the completeness test.",
     "contributing_factors": [
-      "Assuming 'read-only mode' meant commands were non-mutating; SQLite reads can still trigger recovery/checkpoint behaviors that mutate WAL files.",
-      "No explicit forensic workflow (copy artifacts first, then analyze copies).",
-      "Premature pivot to searching for 'hidden/embedded WAL data' in the DB file instead of explaining and addressing why the WAL vanished.",
-      "Lack of disciplined verification of completeness against the expected record set (likely 11 rows) early on."
+      "Incorrect assumption that read-only intent (not editing files) implies SQLite won't write/checkpoint when opened",
+      "Delayed prioritization of artifact preservation; investigation began by running `sqlite3` queries instead of securing WAL/shm",
+      "Lack of a controlled access method (no `immutable=1`/read-only URI on a copied DB set)",
+      "After WAL truncation, the agent spent many steps searching the filesystem rather than switching to alternative recovery sources (e.g., carving from the DB file or using a pre-copied WAL snapshot\u2014none existed due to earlier mistake)"
     ],
-    "task_specific_difficulty": "Corrupted/encrypted SQLite WAL recovery is fragile because (1) WAL files can be auto-checkpointed or deleted upon access, (2) recovery may require low-level WAL frame parsing and page reconstruction rather than SQL queries, and (3) agents must maintain a forensic workflow (preserve artifacts first) despite tooling that can unintentionally change database state."
+    "task_specific_difficulty": "SQLite WAL recovery is fragile because normal database access can mutate the state (auto-recovery/checkpoint) and destroy the very evidence needed. Agents must know to snapshot/copy artifacts first and use non-mutating access patterns. Additionally, WAL corruption/encryption claims often require low-level frame parsing/carving rather than standard `sqlite3` queries, making the task both operationally sensitive and technically specialized."
+  },
+  {
+    "task_id": "rstan-to-pystan",
+    "profile": "codecanvas",
+    "root_cause": "correct_approach_poor_execution",
+    "confidence": 0.72,
+    "critical_step": 20,
+    "critical_step_explanation": "At the point the agent created `/app/pystan_analysis.py`, it implemented a plausible PyStan workflow but did not align the script with the evaluation harness\u2019s required interface: expected output filenames/locations and (likely) the exact parameter summaries to write. As a result, the required output artifacts were not produced (or not where/under what names the tests look), leading to `test_output_files_exist` failing and downstream accuracy assertions failing as well.",
+    "missed_insight": "The agent should have treated the unit tests (or `meta_public.json` if it specifies required artifacts) as the contract: discover exactly which files must be created, with what columns/format, and ensure the conversion script is the entry point executed by the grader (or that outputs are generated at import/run time as expected). Instead it focused on getting sampling API calls working and never validated the produced artifacts against the test expectations.",
+    "counterfactual": "If the agent had inspected `test_outputs.py` (or fully used `meta_public.json`) before writing the script at step 20, it could have implemented the exact required outputs (correct filenames, paths, schema) and then rerun the tests after the final API fix (step 38). The output existence test would have passed, and the agent could then iterate on model/priors/post-processing to meet alpha/sigma/rho accuracy thresholds.",
+    "contributing_factors": [
+      "Did not read the test suite to learn the required output contract (filenames, directory, schema).",
+      "Focused on PyStan 3 API parameter naming issues rather than end-to-end task acceptance criteria.",
+      "No evidence of running the full unit tests after changes; the last edit was not followed by an execution/test cycle.",
+      "Potential mismatch between RStan model semantics and PyStan post-processing (e.g., extracting posterior means/medians, constraints, transformed parameters) which can easily cause accuracy failures even if sampling runs."
+    ],
+    "task_specific_difficulty": "This task is tricky because success depends on more than translating Stan syntax: PyStan 3\u2019s API differs from RStan (build/sample signatures, data handling, fit extraction), and the grader typically enforces a strict artifact contract (specific output files/format) plus quantitative accuracy thresholds that are sensitive to priors, parameterization, and how summaries are computed and written."
   },
   {
     "task_id": "rstan-to-pystan",
     "profile": "codegraph",
-    "root_cause": "incomplete_exploration",
-    "confidence": 0.72,
-    "critical_step": 21,
-    "critical_step_explanation": "The agent wrote /app/pystan_analysis.py without first inspecting the task\u2019s expected deliverables (e.g., the unit tests/output-contract). As a result, the script likely did not create the required output files (causing `test_output_files_exist` to fail) and/or did not compute and export the specific parameter summaries (alpha, sigma, rho) in the required format/paths, leading to the downstream accuracy test failures.",
-    "missed_insight": "The agent should have noticed that this benchmark is primarily graded on a strict output contract (file existence + accurate alpha/sigma/rho estimates), which is typically encoded in `test_outputs.py` (and sometimes README/meta). Without reading those tests, it\u2019s easy to produce a plausible PyStan script that runs but fails the expected filenames, columns, locations, and summary statistics used for scoring.",
-    "counterfactual": "If the agent had read `test_outputs.py` (and any referenced config) before writing the Python conversion at step 20\u201321, it could have matched the exact output paths/filenames and computed the exact summaries the tests check (e.g., posterior means/medians for alpha/sigma/rho), which would likely have made `test_output_files_exist` pass and provided a clear target for tuning sampling settings to satisfy the accuracy thresholds.",
+    "root_cause": "correct_approach_poor_execution",
+    "confidence": 0.73,
+    "critical_step": 22,
+    "critical_step_explanation": "When writing the PyStan/Stan translation, the agent likely implemented the GP covariance using an incorrect parameterization of the length-scale vector `rho` (e.g., dividing by `rho` vs `rho^2`, using the inverse length-scale, or otherwise mismatching the ARD squared-exponential kernel from the original RStan model). This kind of kernel mismatch can still yield reasonable `alpha` and `sigma` estimates while systematically biasing `rho`, which matches the observed test pattern (alpha/sigma pass; rho fails).",
+    "missed_insight": "Passing tests for `alpha` and `sigma` does not validate the kernel; `rho` is the most sensitive parameter to any discrepancy in (1) squared-distance computation, (2) ARD scaling across dimensions, and (3) any preprocessing/standardization of X. The agent should have explicitly cross-checked the exact RStan covariance expression against the PyStan Stan code (including whether `rho` is a length-scale, inverse length-scale, or squared length-scale) and verified by computing the covariance matrix numerically on a small subset in both implementations.",
+    "counterfactual": "If the agent had, at step 22, reproduced the covariance function exactly as in the RStan code (including the precise role of `rho` in the exponent and any per-dimension scaling) and validated it by comparing a small K(x,x) computed from both versions, the posterior for `rho` would likely have aligned and the `test_rho_estimation_accuracy` would have passed.",
     "contributing_factors": [
-      "Likely mismatch between PyStan 3 API usage and what was needed (build/sample vs older interfaces), increasing risk of silent differences in sampling/output objects",
-      "Potentially insufficient sampling configuration (iterations/chains/seed/adapt settings), which can easily fail parameter-accuracy assertions even if the model is correct",
-      "No verification step comparing produced CSV schema/paths against what the grader expects",
-      "Focus on installing packages and running the script rather than validating outputs against the evaluation contract"
+      "Insufficient validation of the translated Stan model beyond 'it runs' (no targeted check that the GP kernel matches RStan numerically).",
+      "Time spent debugging PyStan API/output-shape issues (means vs raw draws) diverted effort from checking model correctness; those issues were mostly orthogonal to rho accuracy.",
+      "GP ARD kernels are easy to mistranslate because multiple equivalent-looking formulas exist (rho vs rho^2 vs 1/rho^2), and Stan has built-ins for the non-ARD case that can mislead implementations.",
+      "Potential preprocessing mismatch (e.g., scaling/centering of X and/or y in the R pipeline) that would primarily manifest as a change in inferred length-scales."
     ],
-    "task_specific_difficulty": "This task mixes (1) Stan model translation fidelity, (2) PyStan 3 API details, (3) MCMC tuning for accurate hyperparameter recovery, and (4) strict autograder output contracts (file names/locations + specific summary statistics). Agents often fail by producing a working script that doesn\u2019t match the grader\u2019s expected artifacts or uses sampling settings that are too weak to meet accuracy thresholds."
+    "task_specific_difficulty": "RStan-to-PyStan conversion for GP models is brittle because correctness depends on exact kernel math and data preprocessing, not just syntax. Length-scale parameters are especially prone to subtle reparameterization errors (rho vs l vs 1/l^2), and small discrepancies can still produce plausible fits while failing strict parameter-accuracy tests."
   },
   {
     "task_id": "rstan-to-pystan",
     "profile": "text",
-    "root_cause": "premature_termination",
-    "confidence": 0.72,
-    "critical_step": 20,
-    "critical_step_explanation": "At step 20 the agent committed to a full MCMC run (4 chains, substantial sampling) to generate the required estimates, and then spent the remaining steps just trying to get the run to proceed/finish. The trajectory ends while sampling is still running, so the required deliverables (the specific CSV output files containing alpha/sigma/rho estimates) were never reliably produced for the test harness, leading to missing files and downstream accuracy failures.",
-    "missed_insight": "The tests are structured around existence and correctness of specific output CSVs; this typically requires a fast, deterministic (or tightly-controlled) estimation path and exact file naming/format. The agent should have inspected the tests to learn the required output filenames/shape and should have avoided a long, fragile MCMC workflow that risks not completing within evaluation constraints.",
-    "counterfactual": "If the agent had read `test_outputs.py` early (before writing/running the script) and then, at step 18\u201320, implemented a fast estimation approach (e.g., fewer iterations/chains or an optimization-based point estimate) that writes exactly the expected `alpha_est.csv`, `sigma_est.csv`, and `rho_est.csv` files in the required format, the output-files test would pass and the accuracy tests would have had valid inputs (and likely passed after minor model/parameterization tuning).",
+    "root_cause": "incomplete_exploration",
+    "confidence": 0.74,
+    "critical_step": 19,
+    "critical_step_explanation": "At the point the agent wrote `/app/pystan_analysis.py`, it implemented a conversion without first inspecting the unit tests (or any explicit output contract) to learn which output files must be produced, their exact filenames/locations, and the required schema/parameter names. As a result, the produced artifacts did not match what the evaluator expected (triggering `test_output_files_exist`), and the statistical outputs did not line up with the target parameterization/priors/data handling expected by the tests (leading to alpha/sigma/rho accuracy failures).",
+    "missed_insight": "For these benchmark tasks, the interface contract is encoded in the tests: expected output file names, columns, and often the exact definitions of parameters (e.g., whether `alpha` is variance vs. amplitude, whether `rho` is lengthscale vs. inverse-lengthscale, whether data are standardized). Without reading tests, a \"reasonable\" PyStan GP implementation can still be judged completely wrong.",
+    "counterfactual": "If the agent had opened and followed `/app/test_outputs.py` (and any referenced spec) before writing code at step 19, it could have (1) written outputs to the exact required filenames/paths and columns, and (2) matched the evaluator\u2019s parameterization (alpha/sigma/rho definitions, priors, transformations, and any centering/scaling). This would likely have flipped `test_output_files_exist` and substantially improved the parameter estimation accuracy tests.",
     "contributing_factors": [
-      "Did not inspect the unit tests to learn exact required output filenames, locations, and CSV schema",
-      "Chose a slow, high-variance inference method (full MCMC) instead of a quick deterministic estimate suitable for an autograder",
-      "Implementation churn on PyStan API details (init/seed) consumed remaining budget without validating intermediate artifacts (files created, contents)",
-      "Only one file edited/created; no evidence of adding the required output artifacts to the repository state expected by tests"
+      "Did not inspect the evaluation tests to infer the required output contract (files, naming, schema).",
+      "Likely parameterization mismatch between RStan model and the PyStan translation (common in GP kernels: amplitude vs variance, lengthscale vs inverse-lengthscale, log/exp transforms).",
+      "Potential differences in preprocessing relative to the original R pipeline (standardization of X/y, adding jitter, distance computation details).",
+      "PyStan 3 API differences (async `build`, `sample` arguments, seed/initialization) increased implementation risk; edits focused on API mechanics rather than matching the reference model.",
+      "No evidence of running `pytest` locally to see concrete failures and iterate; the agent mainly ran the script and looked at logs."
     ],
-    "task_specific_difficulty": "Stan-to-PyStan conversion is brittle because small differences in parameterization, priors, constraints, and API usage can change inferred hyperparameters (alpha/sigma/rho). Autograders also tend to require exact output filenames/formats and fast runtimes, which clashes with naive full MCMC sampling for Gaussian processes that can be computationally heavy."
+    "task_specific_difficulty": "Stan-to-PyStan conversion is not just syntax translation: GP models are highly sensitive to kernel parameterization, priors, numerical stabilization (jitter), and data scaling. Benchmarks typically grade against a very specific contract (exact output artifacts and parameter definitions). Small mismatches (e.g., interpreting `alpha` as variance instead of amplitude, or using squared distances vs. distances) can cause large accuracy-test failures even if the model runs."
   },
   {
     "task_id": "fix-code-vulnerability",
     "profile": "codecanvas",
     "root_cause": "correct_approach_poor_execution",
-    "confidence": 0.86,
-    "critical_step": 41,
-    "critical_step_explanation": "At step 41 the agent wrote `report.jsonl` with `\"cwe_id\": [\"cwe-502\"]`. The failing test is `test_cwe_id`, which typically enforces a specific CWE identifier (often exact value and/or formatting). The agent had already noted that CWE-502 likely wasn't acceptable for this benchmark (and even suggested mapping it to another CWE), but still emitted `cwe-502`, causing the assertion failure even though the code changes didn\u2019t break other tests.",
-    "missed_insight": "The benchmark likely expects the report to name the intended/allowed CWE for the actual target vulnerability (and in the expected canonical format, e.g., `CWE-22` or `cwe-22`, and usually a single correct CWE). The agent should have aligned the reported CWE with the suite\u2019s expected CWE ID rather than reporting an additional/unsupported finding (pickle/CWE-502) or using the wrong normalization.",
-    "counterfactual": "If the agent had validated the expected CWE ID format/value before writing `report.jsonl` (or had followed its own reasoning and reported the mapped/expected CWE instead of `cwe-502`) at step 41, `test_cwe_id` would likely have passed and the overall run would have been 6/6.",
-    "contributing_factors": [
-      "Report-generation step wasn\u2019t cross-checked against the test contract (allowed CWE set and formatting).",
-      "Scope creep: agent introduced an extra vulnerability (unsafe deserialization) that may not be the benchmark\u2019s intended CWE target.",
-      "Overconfidence in CWE mapping: it recognized a mismatch (\"CWE-502 is not in the list\") but didn\u2019t act on it.",
-      "No final verification loop specifically for output schema/fields (even though unit tests for code behavior were mostly satisfied)."
-    ],
-    "task_specific_difficulty": "These tasks couple code remediation with a strict output-spec contract (metadata like `cwe_id`), where success depends as much on matching the harness\u2019s expected CWE identifier/format as on fixing the underlying bug. Agents often correctly find real vulnerabilities but fail by reporting the \u201cwrong\u201d CWE for the benchmark, reporting multiple CWEs, or using non-canonical casing/representation."
-  },
-  {
-    "task_id": "fix-code-vulnerability",
-    "profile": "codegraph",
-    "root_cause": "correct_approach_poor_execution",
     "confidence": 0.78,
-    "critical_step": 39,
-    "critical_step_explanation": "The agent wrote `/app/report.jsonl` with CWE information in a form that likely did not match the required schema for `test_cwe_id` (e.g., using a list field like `cwe_ids` or including multiple CWEs instead of the single expected `cwe_id`). The code changes were sufficient to pass functional tests, but the output metadata used for evaluation was malformed or semantically inconsistent with the task\u2019s expected single CWE classification.",
-    "missed_insight": "The evaluation hinges not only on fixing code but also on emitting a report entry with the exact expected CWE identifier and field name/shape. Since only `test_cwe_id` failed while other output-file existence and content tests passed, the report format/contents (specifically CWE ID) was the actual blocker\u2014not the vulnerability fix itself.",
-    "counterfactual": "If the agent had opened `test_outputs.py` and mirrored its expected JSONL schema before writing the report at step 39 (e.g., emitting exactly one `cwe_id` string matching the intended fix), the `test_cwe_id` assertion would have passed and the overall reward would likely be non-zero.",
+    "critical_step": 36,
+    "critical_step_explanation": "At step 36 the agent wrote report.jsonl with an incorrectly formatted/structured CWE field (e.g., using lowercase like \"cwe-20\" and/or using a list for cwe_id). The code changes were mostly fine (5/6 tests passed), but the output contract for the report file did not match what test_outputs.py::test_cwe_id asserts (likely expecting an uppercase \"CWE-<number>\" string, not a list and not lowercase).",
+    "missed_insight": "The report.jsonl schema is part of the task requirements and is validated by tests; the agent should have inspected test_outputs.py::test_cwe_id (or inferred from existing examples) to match the exact expected format (string vs list, casing, numeric format like \"CWE-22\" vs \"CWE-022\").",
+    "counterfactual": "If the agent had opened /app/test_outputs.py (or the example report) before writing report.jsonl at step 36, it would have matched the exact cwe_id format (e.g., \"CWE-22\") and the final failing test would have passed, yielding 6/6.",
     "contributing_factors": [
-      "Focused on identifying multiple vulnerabilities (CWE-20 and CWE-502), increasing the chance of reporting multiple CWEs when the benchmark expects one",
-      "Did not validate `report.jsonl` against the harness expectations (apparently didn\u2019t run the full `test_outputs.py` suite after generating the report)",
-      "Prematurely committed to a report before finishing/confirming the final vulnerability scope and required output schema"
+      "Focused on code vulnerabilities (static_file/load/parse_auth) but under-validated the reporting output contract",
+      "Did not consult the specific unit test that failed (test_cwe_id) before finalizing report.jsonl",
+      "Potential schema confusion: treated cwe_id as a list and used lowercase identifiers, which is a common mismatch against strict test expectations"
     ],
-    "task_specific_difficulty": "These tasks couple a code patch with strict, brittle reporting requirements (exact CWE ID and exact JSONL schema). Agents can successfully fix behavior yet still fail due to minor schema mismatches or reporting the 'wrong' CWE when multiple plausible issues exist in the same area."
+    "task_specific_difficulty": "These tasks couple two success conditions: (1) making semantically correct security fixes and (2) producing an exactly-specified machine-readable report. Agents often solve the security part but fail on strict schema/details (field name/type/casing/format) because the report requirements are implicit in tests rather than fully described in the prompt."
   }
 ]
