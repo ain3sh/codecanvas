@@ -541,3 +541,38 @@ uv run python -m locagent.server
 - Implemented graph/index caching
 - Renamed agent-facing server to `codegraph` for semantic clarity
 - Simplified state management for single-repo focus
+
+---
+
+## Pyright Analysis Notes
+
+### Static Type Checking Status
+
+The locagent codebase has **~100+ pyright errors**, but analysis shows these are primarily in **dead code paths** or due to **incomplete type stubs**. The live functionality is unaffected.
+
+### Error Categories
+
+| Category | Files | Verdict |
+|----------|-------|---------|
+| **DEAD CODE** (original SWE-bench benchmark infrastructure) | `repo_ops.py` lines 53-100, 772 (`set_current_issue`, `setup_repo`, `get_meta_data` calls) | Don't fix - never executed in refactored codebase |
+| **PEDANTIC** (libcst/tree-sitter type stubs incomplete) | `compress_file.py`, `parser/parser.py`, `codeblocks.py` | Ignore - runtime behavior correct |
+| **POTENTIALLY LIVE** (None checks on globals) | `bm25_retriever.py:177,183`, `fuzzy_retriever.py:32,34` | Safe - `init_repository()` always initializes searchers before retrieval |
+
+### Why Dead Code Exists
+
+The original LocAgent paper code used this workflow:
+1. `set_current_issue(instance_id=...)` - fetch SWE-bench metadata
+2. `get_meta_data()` - load benchmark instance data
+3. `setup_repo()` - clone repository at specific commit
+4. Build graph from cloned repo
+
+Our refactored MCP version uses `locagent/state.py:init_repository()` which:
+1. Takes a local `repo_path` directly
+2. Builds/loads cached graph
+3. Sets globals directly, bypassing all SWE-bench infrastructure
+
+The comment at `state.py:82` confirms: *"Build BM25 content index so setup_repo() path is never hit"*
+
+### Recommendation
+
+No fixes needed. If cleaner pyright output is desired, add `pyrightconfig.json` with exclusions for dead code paths.

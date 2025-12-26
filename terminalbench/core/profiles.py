@@ -49,7 +49,7 @@ def get_available_servers(config_path: Path) -> List[str]:
     return list(config.get("mcpServers", {}).keys())
 
 
-def discover_mcp_usage_prompts(server_names: List[str], search_dir: Path = None) -> Optional[str]:
+def discover_mcp_usage_prompts(server_names: List[str], search_dir: Optional[Path] = None) -> Optional[str]:
     """Discover and combine USAGE.md files for enabled MCP servers.
     
     Looks for <server_name>/USAGE.md in the search directory (defaults to cwd).

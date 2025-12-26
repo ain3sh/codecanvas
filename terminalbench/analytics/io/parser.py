@@ -377,8 +377,8 @@ class TrajectoryParser:
     
     def get_unique_tasks(self) -> List[str]:
         """Get list of unique task IDs."""
-        return list(set(r.get("task_id") for r in self.list_runs()))
+        return list(set(tid for r in self.list_runs() if (tid := r.get("task_id")) is not None))
     
     def get_unique_profiles(self) -> List[str]:
         """Get list of unique profile keys."""
-        return list(set(r.get("agent_key") for r in self.list_runs()))
+        return list(set(key for r in self.list_runs() if (key := r.get("agent_key")) is not None))

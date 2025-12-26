@@ -12,10 +12,11 @@ try:
 
     RICH_AVAILABLE = True
 except ImportError:
+    Console = None  # type: ignore[misc,assignment]
+    Table = None  # type: ignore[misc,assignment]
     RICH_AVAILABLE = False
 
-
-console = Console() if RICH_AVAILABLE else None
+console = Console() if RICH_AVAILABLE else None  # type: ignore[misc]
 
 
 def print_rich_summary(results: list["RunResult"]) -> None:
@@ -29,7 +30,7 @@ def print_rich_summary(results: list["RunResult"]) -> None:
     for r in results:
         by_agent[r.agent_key].append(r)
 
-    table = Table(title="Results Summary", show_header=True, header_style="bold cyan")
+    table = Table(title="Results Summary", show_header=True, header_style="bold cyan")  # type: ignore[misc]
     table.add_column("Agent", style="dim")
     table.add_column("Passed", justify="right", style="green")
     table.add_column("Failed", justify="right", style="red")
@@ -54,6 +55,7 @@ def print_rich_summary(results: list["RunResult"]) -> None:
             f"{avg_time:.1f}s",
         )
 
+    assert console is not None
     console.print()
     console.print(table)
 
@@ -75,7 +77,7 @@ def print_task_matrix(results: list["RunResult"]) -> None:
     if len(all_agents) <= 1:
         return
 
-    table = Table(title="Task Results Matrix", show_header=True, header_style="bold")
+    table = Table(title="Task Results Matrix", show_header=True, header_style="bold")  # type: ignore[misc]
     table.add_column("Task", style="dim")
     for agent in all_agents:
         table.add_column(agent, justify="center")
@@ -93,6 +95,7 @@ def print_task_matrix(results: list["RunResult"]) -> None:
                 row.append("-")
         table.add_row(*row)
 
+    assert console is not None
     console.print()
     console.print(table)
 

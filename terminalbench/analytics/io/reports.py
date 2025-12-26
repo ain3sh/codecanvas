@@ -222,7 +222,10 @@ class ReportGenerator:
         for profile, mlist in metrics_by_profile.items():
             cc = [m for m in mlist if m.codecanvas_informed_editing_score is not None]
             if cc:
-                lines.append(f"| {profile} | {len(cc)} | {sum(m.codecanvas_informed_editing_score for m in cc)/len(cc):.3f} | {sum(m.codecanvas_blast_radius_edit_rate or 0 for m in cc)/len(cc):.3f} | {sum(m.codecanvas_deliberation_depth or 0 for m in cc)/len(cc):.1f} |")
+                avg_score = sum(m.codecanvas_informed_editing_score for m in cc if m.codecanvas_informed_editing_score is not None) / len(cc)
+                avg_blast = sum(m.codecanvas_blast_radius_edit_rate or 0 for m in cc) / len(cc)
+                avg_depth = sum(m.codecanvas_deliberation_depth or 0 for m in cc) / len(cc)
+                lines.append(f"| {profile} | {len(cc)} | {avg_score:.3f} | {avg_blast:.3f} | {avg_depth:.1f} |")
             else:
                 lines.append(f"| {profile} | {len(mlist)} | N/A | N/A | N/A |")
         
