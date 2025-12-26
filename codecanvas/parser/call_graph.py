@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..core.models import EdgeType, GraphEdge, GraphNode, NodeKind
-from .config import LANGUAGE_SERVERS, detect_language, has_lsp_support, is_language_server_installed
+from .config import detect_language, has_lsp_support
 from .lsp import LSPError, get_lsp_runtime, get_lsp_session_manager, path_to_uri, uri_to_path
 from .treesitter import TsCallSite, extract_call_sites
 from .utils import find_workspace_root
@@ -172,7 +172,7 @@ def build_call_graph_edges(
         lang = _lang_key(file_path)
         if lang not in {"py", "ts"}:
             continue
-        if not has_lsp_support(lang) or not is_language_server_installed(lang):
+        if not has_lsp_support(lang):
             continue
 
         try:

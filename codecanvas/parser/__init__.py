@@ -24,7 +24,7 @@ from ..core.models import (
     make_func_id,
     make_module_id,
 )
-from .config import detect_language, has_lsp_support, has_treesitter_support, is_language_server_installed
+from .config import detect_language, has_lsp_support, has_treesitter_support
 from .treesitter import definitions_from_parsed, import_specs_from_parsed, parse_source
 from .utils import normalize_path, resolve_import_label, strip_strings_and_comments
 
@@ -229,7 +229,7 @@ class Parser:
             from .config import LANGUAGE_SERVERS
             from .lsp import LSPError
 
-            if not is_language_server_installed(lang):
+            if not has_lsp_support(lang):
                 cmd0 = (LANGUAGE_SERVERS.get(lang) or {}).get("cmd")
                 self.last_summary.add_lsp_fallback(
                     file_path,

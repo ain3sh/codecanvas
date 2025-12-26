@@ -29,9 +29,9 @@ codecanvas = [
     # Parsing
     "tree-sitter>=0.24.0",
     "tree-sitter-language-pack>=0.13.0",
-    # LSP
+    # LSP (multilspy for 10 languages + fallback deps)
+    "multilspy>=0.0.15",
     "lsprotocol>=2024.0.0",
-    "basedpyright>=1.36.1",
     # Visualization
     "CairoSVG>=2.7.1",
 ]
@@ -87,3 +87,9 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.uv]
+override-dependencies = [
+    # multilspy pins old lsprotocol but newer version is compatible
+    "lsprotocol>=2024.0.0",
+]

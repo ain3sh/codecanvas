@@ -1,7 +1,7 @@
 """LSP backend for CodeCanvas parser.
 
-Provides language server protocol client, session management, background async runtime,
-and protocol utilities for LSP communication.
+Uses multilspy for 10 languages (Python, TypeScript, Go, Rust, Java, Ruby, C/C++,
+C#, Kotlin, Dart) with fallback to custom LSP client for Bash and R.
 """
 
 from __future__ import annotations
@@ -16,11 +16,17 @@ from concurrent.futures import Future
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Coroutine, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, Coroutine, Dict, List, Optional, Protocol, Tuple, TypeVar
 from urllib.parse import unquote, urlparse
 
 from lsprotocol import types as lsp
 from lsprotocol.converters import get_converter
+
+from .config import (
+    LANGUAGE_SERVERS,
+    MULTILSPY_LANGUAGES,
+    get_multilspy_language,
+)
 
 T = TypeVar("T")
 FileSig = Tuple[int, int]  # (mtime_ns, size)
@@ -87,6 +93,10 @@ def _guess_language_id(path: str) -> str:
         ".rb": "ruby",
         ".c": "c", ".h": "c", ".cc": "c", ".hh": "c", ".cpp": "c", ".hpp": "c",
         ".sh": "shellscript", ".bash": "shellscript",
+        ".r": "r", ".R": "r",
+        ".cs": "csharp",
+        ".kt": "kotlin", ".kts": "kotlin",
+        ".dart": "dart",
     }
     return mapping.get(ext, "plaintext")
 
@@ -163,11 +173,7 @@ def _json_clean(obj: Any) -> Any:
 
 
 class LspRuntime:
-    """Background asyncio runtime for running LSP coroutines.
-
-    Runs a dedicated event loop in a daemon thread, providing a sync bridge
-    for running coroutines without asyncio.run().
-    """
+    """Background asyncio runtime for running LSP coroutines."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -218,21 +224,109 @@ def get_lsp_runtime() -> LspRuntime:
 
 
 # =============================================================================
-# LSP Client
+# LSP Backend Protocol
+# =============================================================================
+
+
+class LspBackend(Protocol):
+    """Protocol for LSP backend implementations."""
+
+    async def document_symbols(self, uri_or_path: str) -> List[lsp.DocumentSymbol]: ...
+    async def definition(self, uri_or_path: str, *, line: int, char: int) -> List[Dict[str, Any]]: ...
+    async def shutdown(self) -> None: ...
+
+
+# =============================================================================
+# Multilspy Backend (Primary - 10 languages)
+# =============================================================================
+
+
+class MultilspyBackend:
+    """LSP backend using Microsoft's multilspy library."""
+
+    def __init__(self, lang: str, workspace_root: str):
+        self.lang = lang
+        self.workspace_root = os.path.abspath(workspace_root)
+        self._lsp = None
+        self._lock = asyncio.Lock()
+
+    async def _ensure_started(self):
+        """Lazily initialize the multilspy server."""
+        if self._lsp is not None:
+            return
+
+        async with self._lock:
+            if self._lsp is not None:
+                return
+
+            multilspy_lang = get_multilspy_language(self.lang)
+            if not multilspy_lang:
+                raise LSPError(f"Language {self.lang} not supported by multilspy")
+
+            try:
+                from multilspy import SyncLanguageServer
+                from multilspy.multilspy_config import MultilspyConfig
+
+                config = MultilspyConfig.from_dict({"code_language": multilspy_lang})
+                self._lsp = SyncLanguageServer.create(config, None, self.workspace_root)
+                self._lsp.start_server().__enter__()
+            except Exception as e:
+                raise LSPError(f"Failed to start multilspy for {self.lang}: {e}") from e
+
+    async def document_symbols(self, uri_or_path: str) -> List[lsp.DocumentSymbol]:
+        """Get document symbols via multilspy."""
+        await self._ensure_started()
+
+        path = uri_to_path(uri_or_path) if uri_or_path.startswith("file://") else uri_or_path
+        rel_path = os.path.relpath(path, self.workspace_root)
+
+        try:
+            result = self._lsp.request_document_symbols(rel_path)
+            if not result:
+                return []
+            return [_parse_document_symbol(s) for s in result]
+        except Exception:
+            return []
+
+    async def definition(self, uri_or_path: str, *, line: int, char: int) -> List[Dict[str, Any]]:
+        """Get definition locations via multilspy."""
+        await self._ensure_started()
+
+        path = uri_to_path(uri_or_path) if uri_or_path.startswith("file://") else uri_or_path
+        rel_path = os.path.relpath(path, self.workspace_root)
+
+        try:
+            result = self._lsp.request_definition(rel_path, line, char)
+            return _parse_definition_locations(result)
+        except Exception:
+            return []
+
+    async def shutdown(self) -> None:
+        """Shutdown the multilspy server."""
+        if self._lsp is not None:
+            try:
+                self._lsp.stop_server()
+            except Exception:
+                pass
+            self._lsp = None
+
+
+# =============================================================================
+# Custom LSP Backend (Fallback - Bash, R)
 # =============================================================================
 
 
 @dataclass
 class LSPConfig:
-    """Configuration for LSP client."""
+    """Configuration for custom LSP client."""
 
     retry_attempts: int = 3
     retry_delay_ms: int = 100
     request_timeout: float = 30.0
 
 
-class LSPClient:
-    """Async LSP client with subprocess-based JSON-RPC communication."""
+class CustomLSPClient:
+    """Async LSP client with subprocess-based JSON-RPC for fallback languages."""
 
     def __init__(self, cmd: List[str], workspace: str, config: Optional[LSPConfig] = None):
         self.cmd = cmd
@@ -247,13 +341,6 @@ class LSPClient:
         self._send_lock = asyncio.Lock()
         self._initialized = False
         self._open_documents: Dict[str, int] = {}
-
-    async def __aenter__(self) -> "LSPClient":
-        await self.start()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        await self.stop()
 
     async def start(self) -> None:
         """Start the language server process and initialize."""
@@ -415,7 +502,7 @@ class LSPClient:
                 continue
 
     async def _drain_stderr(self) -> None:
-        """Continuously drain stderr to avoid subprocess backpressure/deadlocks."""
+        """Continuously drain stderr to avoid subprocess backpressure."""
         if not self._process or not self._process.stderr:
             return
         try:
@@ -426,17 +513,6 @@ class LSPClient:
         except (asyncio.CancelledError, Exception):
             return
 
-    async def open_document(self, uri: str, text: str, *, language_id: str | None = None, version: int | None = None) -> None:
-        """Open a document on the server (textDocument/didOpen)."""
-        if uri in self._open_documents:
-            return
-        lang = language_id or _guess_language_id(uri_to_path(uri)) if not language_id else language_id
-        params = lsp.DidOpenTextDocumentParams(
-            text_document=lsp.TextDocumentItem(uri=uri, language_id=lang or "plaintext", version=version or 1, text=text)
-        )
-        await self._notify("textDocument/didOpen", _to_dict(params))
-        self._open_documents[uri] = version or 1
-
     async def _ensure_document_open(self, uri: str) -> None:
         """Ensure the document is opened on the server."""
         if uri in self._open_documents:
@@ -444,53 +520,30 @@ class LSPClient:
         try:
             path = uri_to_path(uri)
             text = Path(path).read_text(encoding="utf-8")
-            await self.open_document(uri, text, language_id=_guess_language_id(path), version=1)
+            lang = _guess_language_id(path)
+            params = lsp.DidOpenTextDocumentParams(
+                text_document=lsp.TextDocumentItem(uri=uri, language_id=lang, version=1, text=text)
+            )
+            await self._notify("textDocument/didOpen", _to_dict(params))
+            self._open_documents[uri] = 1
         except Exception:
             pass
 
 
-# =============================================================================
-# LSP Session Management
-# =============================================================================
+class CustomLspBackend:
+    """LSP backend for languages not supported by multilspy (Bash, R)."""
 
-
-@dataclass
-class _CachedSymbols:
-    sig: FileSig
-    symbols: List[Any]
-
-
-class LspSession:
-    """A persistent language server session for a single (lang, workspace_root)."""
-
-    def __init__(self, *, lang: str, workspace_root: str, cmd: List[str], config: Optional[LSPConfig] = None, max_concurrency: int = 4):
+    def __init__(self, lang: str, workspace_root: str, cmd: List[str]):
         self.lang = lang
         self.workspace_root = os.path.abspath(workspace_root)
         self.cmd = cmd
-        self.config = config or LSPConfig()
+        self._client: Optional[CustomLSPClient] = None
+        self._lock = asyncio.Lock()
+        self._disabled_reason: Optional[str] = None
 
-        self._client: Optional[LSPClient] = None
-        self._semaphore = asyncio.Semaphore(max_concurrency)
-        self._disabled_reason: str | None = None
-        self._doc_symbol_cache: Dict[str, _CachedSymbols] = {}
-        self._definition_cache: Dict[tuple[str, int, int, Optional[FileSig]], List[Any]] = {}
-        self._last_used = time.monotonic()
-
-    @property
-    def last_used(self) -> float:
-        return self._last_used
-
-    async def ensure_started(self) -> LSPClient:
-        """Ensure the LSP client is started and return it."""
-        self._last_used = time.monotonic()
-
+    async def _ensure_started(self) -> CustomLSPClient:
+        """Ensure the LSP client is started."""
         if self._disabled_reason is not None:
-            raise LSPError(self._disabled_reason)
-        if not self.cmd:
-            self._disabled_reason = "Missing language server command"
-            raise LSPError(self._disabled_reason)
-        if shutil.which(self.cmd[0]) is None:
-            self._disabled_reason = f"Missing language server: {self.cmd[0]}"
             raise LSPError(self._disabled_reason)
 
         if self._client is not None:
@@ -503,25 +556,82 @@ class LspSession:
                 pass
             self._client = None
 
-        try:
-            self._client = LSPClient(self.cmd, workspace=self.workspace_root, config=self.config)
-            await self._client.start()
-            return self._client
-        except Exception as e:
-            self._client = None
-            self._disabled_reason = f"Language server failed to start: {type(e).__name__}"
-            raise LSPError(self._disabled_reason) from e
+        async with self._lock:
+            if self._client is not None:
+                return self._client
+
+            if not self.cmd:
+                self._disabled_reason = "Missing language server command"
+                raise LSPError(self._disabled_reason)
+            if shutil.which(self.cmd[0]) is None:
+                self._disabled_reason = f"Missing language server: {self.cmd[0]}"
+                raise LSPError(self._disabled_reason)
+
+            try:
+                self._client = CustomLSPClient(self.cmd, self.workspace_root)
+                await self._client.start()
+                return self._client
+            except Exception as e:
+                self._client = None
+                self._disabled_reason = f"Language server failed to start: {type(e).__name__}"
+                raise LSPError(self._disabled_reason) from e
+
+    async def document_symbols(self, uri_or_path: str) -> List[lsp.DocumentSymbol]:
+        """Get document symbols."""
+        client = await self._ensure_started()
+        return await client.document_symbols(uri_or_path)
+
+    async def definition(self, uri_or_path: str, *, line: int, char: int) -> List[Dict[str, Any]]:
+        """Get definition locations."""
+        client = await self._ensure_started()
+        return await client.definition(uri_or_path, line=line, character=char)
 
     async def shutdown(self) -> None:
         """Shutdown the LSP client."""
-        if self._client is None:
-            return
-        try:
-            await self._client.stop()
-        finally:
+        if self._client is not None:
+            try:
+                await self._client.stop()
+            except Exception:
+                pass
             self._client = None
-            self._doc_symbol_cache.clear()
-            self._definition_cache.clear()
+
+
+# =============================================================================
+# Unified LSP Session (routes to appropriate backend)
+# =============================================================================
+
+
+@dataclass
+class _CachedSymbols:
+    sig: FileSig
+    symbols: List[Any]
+
+
+class LspSession:
+    """A persistent language server session for a single (lang, workspace_root)."""
+
+    def __init__(self, *, lang: str, workspace_root: str, cmd: Optional[List[str]] = None, max_concurrency: int = 4):
+        self.lang = lang
+        self.workspace_root = os.path.abspath(workspace_root)
+
+        self._backend: Optional[LspBackend] = None
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._doc_symbol_cache: Dict[str, _CachedSymbols] = {}
+        self._definition_cache: Dict[tuple[str, int, int, Optional[FileSig]], List[Any]] = {}
+        self._last_used = time.monotonic()
+
+        # Determine which backend to use
+        if lang in MULTILSPY_LANGUAGES:
+            self._backend = MultilspyBackend(lang, workspace_root)
+        elif lang in LANGUAGE_SERVERS:
+            cfg = LANGUAGE_SERVERS[lang]
+            self._backend = CustomLspBackend(lang, workspace_root, cfg["cmd"])
+        else:
+            raise LSPError(f"No LSP support for language: {lang}")
+
+    @property
+    def last_used(self) -> float:
+        return self._last_used
 
     def _file_sig(self, uri_or_path: str) -> Optional[FileSig]:
         """Get file signature (mtime, size) for cache invalidation."""
@@ -533,7 +643,7 @@ class LspSession:
             return None
 
     async def document_symbols(self, uri_or_path: str, *, text: str | None = None) -> List[Any]:
-        """Get document symbols with caching keyed by file (mtime, size)."""
+        """Get document symbols with caching."""
         self._last_used = time.monotonic()
         sig = self._file_sig(uri_or_path)
 
@@ -543,13 +653,7 @@ class LspSession:
                 return cached.symbols
 
         async with self._semaphore:
-            client = await self.ensure_started()
-            if text is not None:
-                try:
-                    await client.open_document(_coerce_file_uri(uri_or_path), text)
-                except Exception:
-                    pass
-            symbols = await client.document_symbols(uri_or_path)
+            symbols = await self._backend.document_symbols(uri_or_path)
 
         if sig is not None:
             self._doc_symbol_cache[uri_or_path] = _CachedSymbols(sig=sig, symbols=symbols)
@@ -565,13 +669,7 @@ class LspSession:
             return cached
 
         async with self._semaphore:
-            client = await self.ensure_started()
-            if text is not None:
-                try:
-                    await client.open_document(_coerce_file_uri(uri_or_path), text)
-                except Exception:
-                    pass
-            locations = await client.definition(uri_or_path, line=int(line), character=int(char))
+            locations = await self._backend.definition(uri_or_path, line=int(line), char=int(char))
 
         if sig is not None:
             self._definition_cache[key] = locations
@@ -601,13 +699,7 @@ class LspSession:
             return out
 
         async with self._semaphore:
-            client = await self.ensure_started()
-            if text is not None:
-                try:
-                    await client.open_document(_coerce_file_uri(uri_or_path), text)
-                except Exception:
-                    pass
-            tasks = [client.definition(uri_or_path, line=line, character=char) for (_, line, char) in missing]
+            tasks = [self._backend.definition(uri_or_path, line=line, char=char) for (_, line, char) in missing]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for (idx, line, char), res in zip(missing, results):
@@ -619,9 +711,16 @@ class LspSession:
                 out[idx] = res
         return out
 
+    async def shutdown(self) -> None:
+        """Shutdown the backend."""
+        if self._backend is not None:
+            await self._backend.shutdown()
+        self._doc_symbol_cache.clear()
+        self._definition_cache.clear()
+
 
 class LspSessionManager:
-    """Owns multiple persistent LSP sessions and evicts idle ones."""
+    """Manages multiple persistent LSP sessions and evicts idle ones."""
 
     def __init__(self, *, max_sessions: int = 8, idle_ttl_s: float = 300.0):
         self.max_sessions = max_sessions
@@ -629,12 +728,12 @@ class LspSessionManager:
         self._sessions: Dict[tuple[str, str], LspSession] = {}
         self._lock = asyncio.Lock()
 
-    async def get(self, *, lang: str, workspace_root: str, cmd: List[str], config: Optional[LSPConfig] = None) -> LspSession:
+    async def get(self, *, lang: str, workspace_root: str, cmd: Optional[List[str]] = None, config: Optional[Any] = None) -> LspSession:
         """Get or create an LSP session for the given language and workspace."""
         async with self._lock:
             key = (lang, os.path.abspath(workspace_root))
             if (sess := self._sessions.get(key)) is None:
-                sess = LspSession(lang=lang, workspace_root=key[1], cmd=cmd, config=config)
+                sess = LspSession(lang=lang, workspace_root=key[1], cmd=cmd)
                 self._sessions[key] = sess
             await self._evict_if_needed()
             return sess

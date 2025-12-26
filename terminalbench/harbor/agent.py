@@ -123,10 +123,9 @@ class ClaudeCodeMCP(ClaudeCode):
         # Write MCP config to file if provided
         if self.mcp_config:
             mcp_file = "/tmp/mcp-config.json"
-            escaped_mcp = shlex.quote(self.mcp_config)
             setup_cmds.append(
                 ExecInput(
-                    command=f"echo {escaped_mcp} > {mcp_file}",
+                    command=f"cat << 'MCPEOF' > {mcp_file}\n{self.mcp_config}\nMCPEOF",
                     env=env,
                 )
             )
@@ -151,10 +150,10 @@ class ClaudeCodeMCP(ClaudeCode):
                 permissions["allow"].append(f"mcp__{server_name}")
 
         settings_file = "/tmp/claude-settings.json"
-        escaped_settings = shlex.quote(json.dumps(settings))
+        settings_json = json.dumps(settings)
         setup_cmds.append(
             ExecInput(
-                command=f"echo {escaped_settings} > {settings_file}",
+                command=f"cat << 'SETTINGSEOF' > {settings_file}\n{settings_json}\nSETTINGSEOF",
                 env=env,
             )
         )

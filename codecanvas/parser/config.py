@@ -10,39 +10,29 @@ import shutil
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
-# Language server configurations
+# Languages supported by multilspy (auto-downloads LSP binaries)
+MULTILSPY_LANGUAGES: Dict[str, str] = {
+    "py": "python",
+    "ts": "typescript",
+    "go": "go",
+    "rs": "rust",
+    "java": "java",
+    "rb": "ruby",
+    "c": "cpp",
+    "cs": "csharp",
+    "kotlin": "kotlin",
+    "dart": "dart",
+}
+
+# Fallback language server configurations (languages not supported by multilspy)
 # Maps language key -> server command and initialization options
 LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
-    "py": {
-        "cmd": ["basedpyright-langserver", "--stdio"],
-        "init_options": {},
-    },
-    "ts": {
-        "cmd": ["typescript-language-server", "--stdio"],
-        "init_options": {},
-    },
-    "go": {
-        "cmd": ["gopls", "serve"],
-        "init_options": {},
-    },
-    "rs": {
-        "cmd": ["rust-analyzer"],
-        "init_options": {},
-    },
-    "java": {
-        "cmd": ["jdtls"],
-        "init_options": {},
-    },
-    "rb": {
-        "cmd": ["solargraph", "stdio"],
-        "init_options": {},
-    },
-    "c": {
-        "cmd": ["clangd"],
-        "init_options": {},
-    },
     "sh": {
         "cmd": ["bash-language-server", "start"],
+        "init_options": {},
+    },
+    "r": {
+        "cmd": ["R", "--slave", "-e", "languageserver::run()"],
         "init_options": {},
     },
 }
@@ -73,6 +63,16 @@ EXTENSION_TO_LANG: Dict[str, str] = {
     # Shell
     ".sh": "sh",
     ".bash": "sh",
+    # R
+    ".R": "r",
+    ".r": "r",
+    # C#
+    ".cs": "cs",
+    # Kotlin
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    # Dart
+    ".dart": "dart",
 }
 
 # Languages with tree-sitter support
@@ -94,19 +94,21 @@ def detect_language(path: str) -> Optional[str]:
     return EXTENSION_TO_LANG.get(ext)
 
 
-def has_lsp_support(lang: str) -> bool:
-    """Check if a language has LSP server configured."""
-    return lang in LANGUAGE_SERVERS
-
-
 def has_treesitter_support(lang: str) -> bool:
     """Check if a language has tree-sitter support."""
     return lang in TREESITTER_LANGUAGES
 
 
+def get_multilspy_language(lang: str) -> Optional[str]:
+    """Get multilspy code_language identifier for our language key."""
+    return MULTILSPY_LANGUAGES.get(lang)
+
+
 @lru_cache
-def is_language_server_installed(lang: str) -> bool:
-    """Check if the LSP binary is available on PATH."""
+def has_lsp_support(lang: str) -> bool:
+    """Check if LSP is available for a language (multilspy or fallback)."""
+    if lang in MULTILSPY_LANGUAGES:
+        return True
     cfg = LANGUAGE_SERVERS.get(lang)
     if not cfg:
         return False
@@ -116,8 +118,8 @@ def is_language_server_installed(lang: str) -> bool:
     return shutil.which(cmd[0]) is not None
 
 
-def get_lsp_command(lang: str) -> Optional[List[str]]:
-    """Get LSP server command for a language."""
+def get_fallback_lsp_command(lang: str) -> Optional[List[str]]:
+    """Get fallback LSP server command for a language."""
     cfg = LANGUAGE_SERVERS.get(lang)
     if not cfg:
         return None

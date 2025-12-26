@@ -23,7 +23,7 @@ def test_call_graph_builds_edges_from_definition(monkeypatch, tmp_path: Path):
     caller_id = make_func_id("a.py", "caller", 3)
     callee_id = make_func_id("a.py", "callee", 0)
 
-    monkeypatch.setattr(cg, "is_language_server_installed", lambda _lang: True)
+    monkeypatch.setattr(cg, "has_lsp_support", lambda _lang: True)
 
     class _StubRuntime:
         def run(self, coro, timeout=None):
