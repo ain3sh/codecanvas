@@ -209,19 +209,13 @@ class Parser:
         module_id = make_module_id(normalize_path(file_label))
         graph.add_node(GraphNode(id=module_id, kind=NodeKind.MODULE, label=file_label, fsPath=str(file_path)))
 
-        # Plain module import detection for non-LSP languages.
+        # Plain module import detection for languages not handled by `resolve_import_label()`.
         if lang == "c":
             self._detect_includes_c(text, module_id, file_label, graph)
-            self.last_summary.parsed_files += 1
-            return
-        if lang == "sh":
+        elif lang == "sh":
             self._detect_sources_sh(text, module_id, file_label, graph)
-            self.last_summary.parsed_files += 1
-            return
-        if lang == "r":
+        elif lang == "r":
             self._detect_sources_r(text, module_id, file_label, graph)
-            self.last_summary.parsed_files += 1
-            return
 
         used_lsp = False
 

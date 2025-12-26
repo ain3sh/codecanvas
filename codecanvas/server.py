@@ -472,7 +472,8 @@ def _action_mark_skip(state: CanvasState, *, symbol: str, mode: str, text: str |
         )
 
     with _graph_lock:
-        label = _graph.get_node(node_id).label if _graph and _graph.get_node(node_id) else symbol
+        node = _graph.get_node(node_id) if _graph else None
+        label = node.label if node is not None else symbol
     updated = False
     for a in state.analyses.values():
         if node_id in a.affected_ids:

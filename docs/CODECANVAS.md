@@ -101,26 +101,38 @@ The current symbol being analyzed. Set automatically by `impact`, used to track 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         MCP Server                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │   canvas    │  │   canvas    │  │   canvas    │             │
-│  │ action=init │  │action=impact│  │ action=...  │             │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
-│         │                │                │                     │
-│         ▼                ▼                ▼                     │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                    State Manager                         │   │
-│  │  - CanvasState (evidence, claims, decisions, focus)     │   │
-│  │  - Persistence to .codecanvas/state.json                │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│         │                │                │                     │
-│         ▼                ▼                ▼                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
-│  │   Parser    │  │  Analyzer   │  │    Views    │             │
-│  │  (LSP/TS)   │  │ (Slicing)   │  │  (SVG/PNG)  │             │
-│  └─────────────┘  └─────────────┘  └─────────────┘             │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              MCP Server                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                     │
+│  │   canvas    │  │   canvas    │  │   canvas    │                     │
+│  │ action=init │  │action=impact│  │ action=...  │                     │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                     │
+│         │                │                │                             │
+│         ▼                ▼                ▼                             │
+│  ┌─────────────────────────────────────────────────────────────────┐   │
+│  │                       State Manager                              │   │
+│  │  - CanvasState (evidence, claims, decisions, focus)             │   │
+│  │  - Persistence to .codecanvas/state.json                        │   │
+│  └─────────────────────────────────────────────────────────────────┘   │
+│         │                │                │                             │
+│         ▼                ▼                ▼                             │
+│  ┌────────────────────────────┐  ┌─────────────┐  ┌─────────────┐      │
+│  │          Parser            │  │  Analyzer   │  │    Views    │      │
+│  │  ┌───────────────────────┐ │  │ (Slicing)   │  │  (SVG/PNG)  │      │
+│  │  │      LspSession       │ │  └─────────────┘  └─────────────┘      │
+│  │  │  ┌─────────────────┐  │ │                                        │
+│  │  │  │ MultilspyBackend│  │ │  (10 languages, auto-download)        │
+│  │  │  └─────────────────┘  │ │                                        │
+│  │  │  ┌─────────────────┐  │ │                                        │
+│  │  │  │ CustomLspBackend│  │ │  (extensible via LANGUAGE_SERVERS)    │
+│  │  │  └─────────────────┘  │ │                                        │
+│  │  └───────────────────────┘ │                                        │
+│  │  ┌───────────────────────┐ │                                        │
+│  │  │   treesitter.py +     │ │  (declarative .scm queries)           │
+│  │  │   schemas/*.scm       │ │                                        │
+│  │  └───────────────────────┘ │                                        │
+│  └────────────────────────────┘                                        │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Components
@@ -129,9 +141,10 @@ The current symbol being analyzed. Set automatically by `impact`, used to track 
 |-----------|----------------|
 | **MCP Server** | Tool registration, request routing, response formatting |
 | **State Manager** | Evidence board state, persistence, focus tracking |
-| **Parser** | Code parsing, graph construction, call edge inference |
+| **Parser** | Code parsing (multilspy LSP + tree-sitter fallback), graph construction, call edge inference |
 | **Analyzer** | Impact slicing, neighborhood extraction, symbol search |
 | **Views** | SVG rendering, PNG conversion, layout algorithms |
+| **Schemas** | Declarative `.scm` query files for tree-sitter extraction |
 
 ---
 
@@ -184,49 +197,129 @@ class GraphEdge:
 
 CodeCanvas uses a two-phase parsing strategy: LSP-first with tree-sitter fallback.
 
-### Phase 1: LSP Parsing
+### Phase 1: LSP Parsing (Dual-Backend Architecture)
 
-The Language Server Protocol provides accurate symbol information:
+The Language Server Protocol provides accurate symbol information. CodeCanvas uses a **dual-backend architecture** that routes requests to the appropriate LSP implementation:
 
+```python
+# LspSession routes to appropriate backend based on language
+if lang in MULTILSPY_LANGUAGES:
+    backend = MultilspyBackend(lang, workspace_root)    # 10 languages, auto-download
+elif lang in LANGUAGE_SERVERS:
+    backend = CustomLspBackend(lang, workspace_root, cmd)  # Extensible fallback
 ```
-1. Start language server (basedpyright, typescript-language-server, etc.)
-2. Initialize with workspace root
-3. Request textDocument/documentSymbol for each file
-4. Build nodes from symbol hierarchy
-5. Infer CONTAINS edges from parent-child relationships
+
+**Backend 1: MultilspyBackend (Primary)**
+- Uses Microsoft's `multilspy` library for 10 languages
+- Auto-downloads and manages LSP binaries (first run only)
+- Languages: Python, TypeScript, Go, Rust, Java, Ruby, C/C++, C#, Kotlin, Dart
+
+**Backend 2: CustomLspBackend (Fallback/Extension)**
+- Full JSON-RPC LSP client for languages not in multilspy
+- Configured via `LANGUAGE_SERVERS` dict in `parser/config.py`
+- Currently configured: Bash (`bash-language-server`), R (`languageserver`)
+- **Extensible**: Add any LSP server by adding to `LANGUAGE_SERVERS`
+
+```python
+# parser/config.py - Extension point for custom LSP servers
+LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
+    "sh": {"cmd": ["bash-language-server", "start"]},
+    "r": {"cmd": ["R", "--slave", "-e", "languageserver::run()"]},
+    # Add more languages here...
+}
+```
+
+**Both backends implement the same protocol:**
+```
+1. Initialize with workspace root
+2. Request textDocument/documentSymbol for each file
+3. Build nodes from symbol hierarchy
+4. Infer CONTAINS edges from parent-child relationships
 ```
 
 **Advantages:**
 - Semantically accurate (understands imports, types, scopes)
-- Language-agnostic (any LSP server works)
+- Zero-config for multilspy languages (auto-download)
+- Extensible to any language with an LSP server
 - Handles complex patterns (decorators, metaclasses, generics)
 
 **Limitations:**
 - Slower startup (server initialization)
 - May fail on malformed code
-- Requires language server installation
 
-### Phase 2: Tree-Sitter Fallback
+### Phase 2: Tree-Sitter Fallback (Three-Tier Extraction)
 
-When LSP fails or is unavailable, tree-sitter provides AST-based parsing:
+When LSP fails or is unavailable, tree-sitter provides AST-based parsing with a **three-tier extraction strategy**:
+
+**Tier 1: Custom Schemas (Full Extraction)**
+For languages with `.scm` schema files, full extraction of definitions, imports, and call sites:
 
 ```
-1. Load tree-sitter grammar for language
+1. Load tree-sitter grammar via tree-sitter-language-pack
 2. Parse file into syntax tree
-3. Walk tree for class/function definitions
-4. Build nodes from AST positions
-5. Infer containment from tree structure
+3. Execute .scm query against AST (declarative pattern matching)
+4. Extract captures: @cc.def.class.*, @cc.def.func.*, @cc.import.*, @cc.call.*
+5. Build nodes from captured positions
 ```
+
+**Tier 2: Generic Fallback (Basic Definitions)**
+For ANY language in tree-sitter-language-pack (~50+ languages) without a custom schema:
+
+```python
+_GENERIC_DEF_QUERY = "(_ name: (_) @name) @node"
+# Matches any AST node with a "name" field, then classifies:
+# - Node type contains "class/struct/interface/enum/trait/module" → class
+# - Node type contains "function/method/constructor" → func
+```
+
+This provides basic definition extraction for languages like Scala, Elixir, Haskell, OCaml, Lua, etc. - no schema required!
+
+**Tier 3: Unsupported**
+Languages not in tree-sitter-language-pack return no tree-sitter results (LSP-only or skip).
+
+**Architecture:**
+```
+codecanvas/parser/
+  treesitter.py          # Unified extraction engine (~500 lines)
+  schemas/               # Custom query schemas (Tier 1)
+    python.scm
+    typescript.scm
+    tsx.scm
+    javascript.scm
+    go.scm
+    rust.scm
+    java.scm
+    ruby.scm
+    c.scm
+    cpp.scm
+    bash.scm
+```
+
+**Query Capture Names (standardized across custom schemas):**
+- `@cc.def.class.node` / `@cc.def.class.name` - Class definitions
+- `@cc.def.func.node` / `@cc.def.func.name` - Function definitions
+- `@cc.import.spec` - Import paths
+- `@cc.call.target` - Call site targets
+
+**Extraction Capabilities by Tier:**
+| Tier | Definitions | Imports | Call Sites | Languages |
+|------|-------------|---------|------------|-----------|
+| Custom Schema | ✓ Full | ✓ | ✓ | 8 lang keys (11 schema files) |
+| Generic Fallback | ✓ Basic | ✗ | ✗ | ~50+ (any in tree-sitter-language-pack) |
+| Unsupported | ✗ | ✗ | ✗ | Others |
 
 **Advantages:**
-- Fast (native parsing)
+- Fast (native parsing via tree-sitter-language-pack)
 - Robust (handles partial/broken code)
-- No external dependencies
+- Declarative (language variation is data, not code)
+- Easy to extend (add a `.scm` file for full support)
+- Wide coverage (generic fallback works for ~50+ languages)
 
-**Limitations:**
-- Less semantic accuracy
-- No cross-file analysis
-- Pattern-based (may miss edge cases)
+**Language-Specific Helpers:**
+Some languages require minimal post-processing:
+- Go: `_extract_go_receiver_type()` for method receivers
+- Rust: `_rust_impl_target_for()` for impl block targets
+- C/C++: `_c_func_name_for()` for declarator unwrapping
 
 ### Call Graph Construction
 
@@ -245,16 +338,33 @@ This produces accurate call graphs by leveraging the language server's semantic 
 
 ### Supported Languages
 
-| Language | LSP Server | Tree-Sitter |
-|----------|------------|-------------|
-| Python | basedpyright-langserver | python |
-| TypeScript/JavaScript | typescript-language-server | typescript/tsx/javascript |
-| Go | gopls | go |
-| Rust | rust-analyzer | rust |
-| Java | jdtls | java |
-| Ruby | solargraph | ruby |
-| C/C++ | clangd | c/cpp |
-| Shell | bash-language-server | bash |
+| Language | LSP Backend | LSP Server | Tree-Sitter Schema |
+|----------|-------------|------------|-------------------|
+| Python | multilspy | jedi-language-server | python.scm |
+| TypeScript | multilspy | tsserver | typescript.scm |
+| TSX/JSX | multilspy | tsserver | tsx.scm |
+| JavaScript | multilspy | tsserver | javascript.scm |
+| Go | multilspy | gopls | go.scm |
+| Rust | multilspy | rust-analyzer | rust.scm |
+| Java | multilspy | Eclipse JDTLS | java.scm |
+| Ruby | multilspy | Solargraph | ruby.scm |
+| C/C++ | multilspy | clangd | c.scm / cpp.scm |
+| C# | multilspy | OmniSharp | - |
+| Kotlin | multilspy | kotlin-language-server | - |
+| Dart | multilspy | dart analysis_server | - |
+| Shell | custom | bash-language-server | bash.scm |
+| R | custom | languageserver | - |
+
+**Language Configuration** (`parser/config.py`):
+- `MULTILSPY_LANGUAGES`: Maps lang key → multilspy code_language (10 languages, auto-download)
+- `LANGUAGE_SERVERS`: Extension point for custom LSP servers (currently `sh`, `r`)
+- `TREESITTER_LANGUAGES`: Set of lang keys with `.scm` schemas (8 languages)
+- `EXTENSION_TO_LANG`: File extension → lang key mapping
+
+**Adding a new language:**
+1. For multilspy-supported languages: Add to `MULTILSPY_LANGUAGES` with the multilspy code_language
+2. For custom LSP: Add to `LANGUAGE_SERVERS` with the server command
+3. For tree-sitter: Add a `.scm` schema to `parser/schemas/` and update `TREESITTER_LANGUAGES`
 
 Tree-sitter parsing uses `tree-sitter-language-pack` which bundles grammars for all supported languages.
 
@@ -580,7 +690,7 @@ CodeCanvas uses hooks to **automatically run** init and impact analysis. The age
         "matcher": "startup",
         "hooks": [{
           "type": "command",
-          "command": "python3 -c \"from codecanvas.hooks.session_init import main; main()\"",
+          "command": "uv run python -c \"from codecanvas.hooks.session_init import main; main()\"",
           "timeout": 30
         }]
       }
@@ -590,7 +700,7 @@ CodeCanvas uses hooks to **automatically run** init and impact analysis. The age
         "matcher": "Read",
         "hooks": [{
           "type": "command",
-          "command": "python3 -c \"from codecanvas.hooks.post_read import main; main()\"",
+          "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
           "timeout": 10
         }]
       }
@@ -606,9 +716,10 @@ CodeCanvas uses hooks to **automatically run** init and impact analysis. The age
 
 ### Why Module Import?
 
-Hook commands use `python3 -c "from codecanvas.hooks.X import main; main()"` because:
-1. In Harbor containers, source files are deleted after pip install
-2. Module import works with installed packages regardless of location
+Hook commands use `uv run python -c "from codecanvas.hooks.X import main; main()"` because:
+1. `uv run` ensures the correct virtual environment and dependencies are available
+2. In Harbor containers, source files are deleted after pip install
+3. Module import works with installed packages regardless of location
 
 ---
 
@@ -684,11 +795,21 @@ All state is saved to `.codecanvas/` in the task repository:
 
 **Rationale**: This is an implementation detail. LSP-first with tree-sitter fallback is always the right choice. Exposing it confuses agents and invites suboptimal usage.
 
-### 3. LSP-First Parsing
+### 3. Dual-Backend LSP Architecture
 
-**Decision**: Use LSP as primary parser, tree-sitter as fallback.
+**Decision**: Use a dual-backend LSP architecture: multilspy (primary) for 10 languages with auto-download, plus CustomLspBackend (extension point) for additional languages.
 
-**Rationale**: LSP provides semantic accuracy (correct call edges, proper scoping). The speed cost (1-2s) is acceptable for the accuracy gain. Fallback ensures robustness on malformed code.
+**Rationale**: 
+- **multilspy** provides zero-config LSP for Python, TypeScript, Go, Rust, Java, Ruby, C/C++, C#, Kotlin, and Dart via auto-download binaries.
+- **CustomLspBackend** enables extending to any language with an LSP server by adding to `LANGUAGE_SERVERS` in `parser/config.py`.
+- Both backends implement the same `LspBackend` protocol; `LspSession` routes based on language.
+- This architecture balances convenience (auto-download for common languages) with extensibility (any LSP server for edge cases).
+
+### 3a. Declarative Tree-Sitter Queries
+
+**Decision**: Use tree-sitter's native query system with `.scm` schema files for extraction patterns.
+
+**Rationale**: Tree-sitter queries (`Query` + `QueryCursor`) express "definitions/imports/calls" declaratively. Language-specific patterns are data (`.scm` files), not code. Adding a language with full extraction = add a schema file. Languages without schemas still get basic definition extraction via the generic fallback query.
 
 ### 4. Inline Image Delivery
 

@@ -121,15 +121,21 @@ def _parse_definition_locations(result: Any) -> List[Dict[str, Any]]:
     return [loc] if loc is not None else []
 
 
-def _parse_document_symbol(data: Dict[str, Any]) -> lsp.DocumentSymbol:
+def _parse_document_symbol(data: Any) -> lsp.DocumentSymbol:
     """Parse DocumentSymbol from JSON response."""
-    children = [_parse_document_symbol(c) for c in data.get("children", [])]
+    d = data if isinstance(data, dict) else _to_dict(data)
+    children_raw = d.get("children", [])
+    children = (
+        [_parse_document_symbol(c) for c in children_raw]
+        if isinstance(children_raw, list)
+        else []
+    )
     return lsp.DocumentSymbol(
-        name=data["name"],
-        kind=lsp.SymbolKind(data["kind"]),
-        range=_parse_range(data["range"]),
-        selection_range=_parse_range(data["selectionRange"]),
-        detail=data.get("detail"),
+        name=d["name"],
+        kind=lsp.SymbolKind(d["kind"]),
+        range=_parse_range(d["range"]),
+        selection_range=_parse_range(d["selectionRange"]),
+        detail=d.get("detail"),
         children=children or None,
     )
 
@@ -247,7 +253,7 @@ class MultilspyBackend:
     def __init__(self, lang: str, workspace_root: str):
         self.lang = lang
         self.workspace_root = os.path.abspath(workspace_root)
-        self._lsp = None
+        self._lsp: Any = None
         self._lock = asyncio.Lock()
 
     async def _ensure_started(self):
@@ -268,7 +274,8 @@ class MultilspyBackend:
                 from multilspy.multilspy_config import MultilspyConfig
 
                 config = MultilspyConfig.from_dict({"code_language": multilspy_lang})
-                self._lsp = SyncLanguageServer.create(config, None, self.workspace_root)
+                logger: Any = None
+                self._lsp = SyncLanguageServer.create(config, logger, self.workspace_root)
                 self._lsp.start_server().__enter__()
             except Exception as e:
                 raise LSPError(f"Failed to start multilspy for {self.lang}: {e}") from e
@@ -614,7 +621,7 @@ class LspSession:
         self.lang = lang
         self.workspace_root = os.path.abspath(workspace_root)
 
-        self._backend: Optional[LspBackend] = None
+        self._backend: LspBackend
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._doc_symbol_cache: Dict[str, _CachedSymbols] = {}
         self._definition_cache: Dict[tuple[str, int, int, Optional[FileSig]], List[Any]] = {}
@@ -675,7 +682,13 @@ class LspSession:
             self._definition_cache[key] = locations
         return locations
 
-    async def definitions(self, uri_or_path: str, *, positions: List[tuple[int, int]], text: str | None = None) -> List[Any]:
+    async def definitions(
+        self,
+        uri_or_path: str,
+        *,
+        positions: List[tuple[int, int]],
+        text: str | None = None,
+    ) -> List[Any]:
         """Get many definition lookups for a single file."""
         self._last_used = time.monotonic()
         if not positions:
@@ -703,7 +716,7 @@ class LspSession:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
         for (idx, line, char), res in zip(missing, results):
-            if isinstance(res, Exception):
+            if isinstance(res, BaseException):
                 out[idx] = res
             else:
                 if sig is not None:
@@ -713,8 +726,7 @@ class LspSession:
 
     async def shutdown(self) -> None:
         """Shutdown the backend."""
-        if self._backend is not None:
-            await self._backend.shutdown()
+        await self._backend.shutdown()
         self._doc_symbol_cache.clear()
         self._definition_cache.clear()
 
@@ -728,7 +740,14 @@ class LspSessionManager:
         self._sessions: Dict[tuple[str, str], LspSession] = {}
         self._lock = asyncio.Lock()
 
-    async def get(self, *, lang: str, workspace_root: str, cmd: Optional[List[str]] = None, config: Optional[Any] = None) -> LspSession:
+    async def get(
+        self,
+        *,
+        lang: str,
+        workspace_root: str,
+        cmd: Optional[List[str]] = None,
+        config: Optional[Any] = None,
+    ) -> LspSession:
         """Get or create an LSP session for the given language and workspace."""
         async with self._lock:
             key = (lang, os.path.abspath(workspace_root))

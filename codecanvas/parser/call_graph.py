@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..core.models import EdgeType, GraphEdge, GraphNode, NodeKind
-from .config import detect_language, has_lsp_support
+from .config import LANGUAGE_SERVERS, detect_language, has_lsp_support
 from .lsp import LSPError, get_lsp_runtime, get_lsp_session_manager, path_to_uri, uri_to_path
 from .treesitter import TsCallSite, extract_call_sites
 from .utils import find_workspace_root
@@ -84,6 +84,19 @@ def _lang_key(file_path: Path) -> Optional[str]:
     return ext or None
 
 
+def _safe_int(value: object) -> int | None:
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _node_contains(node: GraphNode, *, line: int, char: int) -> bool:
     if node.start_line is None or node.end_line is None:
         return False
@@ -122,7 +135,7 @@ async def _resolve_definitions_for_callsites(
         raise LSPError(f"No LSP server for {lang}")
 
     workspace_root = find_workspace_root(file_path)
-    sess = await mgr.get(lang=lang, workspace_root=workspace_root, cmd=server_config["cmd"])
+    sess = await mgr.get(lang=lang, workspace_root=str(workspace_root), cmd=server_config["cmd"])
 
     uri = path_to_uri(str(file_path))
     positions = [(cs.line, cs.char) for cs in callsites]
@@ -240,15 +253,22 @@ def build_call_graph_edges(
                 res.skipped_no_definition += 1
                 continue
 
-            locations = def_result
-            if not locations:
+            if isinstance(def_result, dict):
+                locations_iter: List[object] = [def_result]
+            elif isinstance(def_result, list):
+                locations_iter = def_result
+            else:
+                res.skipped_no_definition += 1
+                continue
+
+            if not locations_iter:
                 res.skipped_no_definition += 1
                 continue
 
             res.resolved_callsites += 1
 
             added = False
-            for loc in locations:
+            for loc in locations_iter:
                 if not isinstance(loc, dict):
                     continue
                 target_uri = loc.get("uri")
@@ -261,10 +281,12 @@ def build_call_graph_edges(
 
                 r = loc.get("range") or {}
                 start_pos = (r.get("start") or {}) if isinstance(r, dict) else {}
-                try:
-                    dl = int(start_pos.get("line"))
-                    dc = int(start_pos.get("character"))
-                except Exception:
+                if not isinstance(start_pos, dict):
+                    continue
+
+                dl = _safe_int(start_pos.get("line"))
+                dc = _safe_int(start_pos.get("character"))
+                if dl is None or dc is None:
                     continue
 
                 callee = target_index.find_enclosing_func(line=dl, char=dc)

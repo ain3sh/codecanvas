@@ -79,7 +79,12 @@ def _segment_intersects_rect(p1: Point, p2: Point, r: Rect) -> bool:
     return False
 
 
-def _polyline_intersects_any_rect(pts: List[Point], rects: Iterable[Rect], *, ignore: Optional[Iterable[Rect]] = None) -> bool:
+def _polyline_intersects_any_rect(
+    pts: List[Point],
+    rects: Iterable[Rect],
+    *,
+    ignore: Optional[Iterable[Rect]] = None,
+) -> bool:
     ignore_set = set(ignore or [])
     rs = [r for r in rects if r not in ignore_set]
     for i in range(len(pts) - 1):
@@ -169,7 +174,7 @@ class ArchitectureView:
     def __init__(self, graph: Graph):
         self.graph = graph
 
-    def render(self, output_path: str = None) -> str:
+    def render(self, output_path: str | None = None) -> str:
         """Render architecture overview as SVG (PNG conversion happens upstream)."""
         modules, import_edges = _module_graph(self.graph)
         if not modules:
@@ -500,16 +505,16 @@ def _scc_kosaraju(nodes: List[str], edges: List[Tuple[str, str]]) -> Tuple[List[
         if start in visited:
             continue
         acc: List[str] = []
-        stack = [start]
-        while stack:
-            node = stack.pop()
+        stack_nodes: List[str] = [start]
+        while stack_nodes:
+            node = stack_nodes.pop()
             if node in visited:
                 continue
             visited.add(node)
             acc.append(node)
             for nxt in rev.get(node, []):
                 if nxt not in visited:
-                    stack.append(nxt)
+                    stack_nodes.append(nxt)
         comps.append(acc)
 
     node_to_comp: Dict[str, int] = {}
@@ -701,9 +706,15 @@ def _build_districts(
     for (band, cl), mids in tmp.items():
         total_mass = sum(module_mass.get(mid, 0.0) for mid in mids)
         # Name by common path prefix if possible (fallback to top module when prefix is too generic).
-        labels = [graph.get_node(mid).label for mid in mids if graph.get_node(mid)]
+        labels: List[str] = []
+        for mid in mids:
+            if (node := graph.get_node(mid)) is not None:
+                labels.append(node.label)
         top = sorted(mids, key=lambda mid: module_mass.get(mid, 0.0), reverse=True)
-        top_labels = [graph.get_node(mid).label for mid in top[:3] if graph.get_node(mid)]
+        top_labels: List[str] = []
+        for mid in top[:3]:
+            if (node := graph.get_node(mid)) is not None:
+                top_labels.append(node.label)
         name = _cluster_name(labels, top_labels[0] if top_labels else None)
         districts.append(
             _District(
@@ -778,7 +789,10 @@ def _add_other_districts(
 
         total_mass = sum(module_mass.get(mid, 0.0) for mid in mids)
         top = sorted(mids, key=lambda mid: module_mass.get(mid, 0.0), reverse=True)
-        top_labels = [graph.get_node(mid).label for mid in top[:3] if graph.get_node(mid)]
+        top_labels: List[str] = []
+        for mid in top[:3]:
+            if (node := graph.get_node(mid)) is not None:
+                top_labels.append(node.label)
         out.append(
             _District(
                 district_id=other_id,

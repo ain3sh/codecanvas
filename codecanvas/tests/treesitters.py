@@ -7,38 +7,28 @@ from textwrap import dedent
 
 
 def _imports():
-    """Import tree-sitter modules with a robust fallback."""
+    """Import tree-sitter module with a robust fallback."""
     try:
         from parser.treesitter import (  # type: ignore[import-not-found]
-            c,
-            go,
-            java,
+            call_sites_from_parsed,
+            definitions_from_parsed,
+            import_specs_from_parsed,
             parse_source,
-            python,
-            ruby,
-            rust,
-            shell,
-            typescript,
         )
 
-        return parse_source, python, typescript, go, rust, java, ruby, c, shell
+        return parse_source, definitions_from_parsed, import_specs_from_parsed, call_sites_from_parsed
     except Exception:
         from codecanvas.parser.treesitter import (  # type: ignore[import-not-found]
-            c,
-            go,
-            java,
+            call_sites_from_parsed,
+            definitions_from_parsed,
+            import_specs_from_parsed,
             parse_source,
-            python,
-            ruby,
-            rust,
-            shell,
-            typescript,
         )
 
-        return parse_source, python, typescript, go, rust, java, ruby, c, shell
+        return parse_source, definitions_from_parsed, import_specs_from_parsed, call_sites_from_parsed
 
 
-parse_source, py_ts, ts_ts, go_ts, rs_ts, java_ts, rb_ts, c_ts, sh_ts = _imports()
+parse_source, definitions_from_parsed, import_specs_from_parsed, call_sites_from_parsed = _imports()
 
 
 def _parse(text: str, *, file_path: str, lang_key: str):
@@ -90,7 +80,7 @@ def test_python_extracts_definitions_imports_and_calls():
         lang_key="py",
     )
 
-    defs = py_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Foo" in defs_map and defs_map["Foo"].kind == "class"
@@ -100,10 +90,10 @@ def test_python_extracts_definitions_imports_and_calls():
     assert "top" in defs_map and defs_map["top"].kind == "func"
     assert all(d.bare_name != "nested" for d in defs)
 
-    imports = py_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"os", "sys", "pkg.mod", "."}.issubset(set(imports))
 
-    sites = _call_tuples(py_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="helper_call()", needle="helper_call") in sites
     assert _lc(text, line_contains="self.baz_call()", needle="baz_call") in sites
     assert _lc(text, line_contains="self.baz_call()", needle="qux_call") in sites
@@ -147,7 +137,7 @@ def test_typescript_extracts_definitions_imports_and_calls():
         lang_key="ts",
     )
 
-    defs = ts_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Foo" in defs_map and defs_map["Foo"].kind == "class"
@@ -158,10 +148,10 @@ def test_typescript_extracts_definitions_imports_and_calls():
     assert "exprFn" in defs_map and defs_map["exprFn"].kind == "func"
     assert all(d.bare_name != "nestedInner" for d in defs)
 
-    imports = ts_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"fs", "path", "lodash"}.issubset(set(imports))
 
-    sites = _call_tuples(ts_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="helperCall()", needle="helperCall") in sites
     assert _lc(text, line_contains="this.bazMethod()", needle="bazMethod") in sites
     assert _lc(text, line_contains="this.bazMethod()", needle="quxCall") in sites
@@ -209,7 +199,7 @@ def test_go_extracts_definitions_imports_and_calls():
         lang_key="go",
     )
 
-    defs = go_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Foo" in defs_map and defs_map["Foo"].kind == "class"
@@ -219,10 +209,10 @@ def test_go_extracts_definitions_imports_and_calls():
     assert "Top" in defs_map and defs_map["Top"].kind == "func"
     assert "Local" in defs_map and defs_map["Local"].kind == "class"
 
-    imports = go_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"fmt", "io", "strings"}.issubset(set(imports))
 
-    sites = _call_tuples(go_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="fmt.Println", needle="Println") in sites
     assert _lc(text, line_contains="f.Helper()", needle="Helper") in sites
     assert _lc(text, line_contains="Foo{}.Helper()", needle="Helper") in sites
@@ -262,7 +252,7 @@ def test_rust_extracts_definitions_imports_and_calls():
         lang_key="rs",
     )
 
-    defs = rs_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Foo" in defs_map and defs_map["Foo"].kind == "class"
@@ -272,10 +262,10 @@ def test_rust_extracts_definitions_imports_and_calls():
     assert "Foo.other" in defs_map and defs_map["Foo.other"].parent_class == "Foo"
     assert "helper" in defs_map and defs_map["helper"].kind == "func"
 
-    imports = rs_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"std::io", "crate::mod1::Thing", "super"}.issubset(set(imports))
 
-    sites = _call_tuples(rs_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="helper()", needle="helper") in sites
     assert _lc(text, line_contains="self.other()", needle="other") in sites
     assert _lc(text, line_contains="self.other()", needle="chain") in sites
@@ -315,7 +305,7 @@ def test_java_extracts_definitions_imports_and_calls():
         lang_key="java",
     )
 
-    defs = java_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Foo" in defs_map and defs_map["Foo"].kind == "class"
@@ -328,10 +318,10 @@ def test_java_extracts_definitions_imports_and_calls():
     assert "Top" in defs_map and defs_map["Top"].kind == "class"
     assert "Top.helper" in defs_map and defs_map["Top.helper"].parent_class == "Top"
 
-    imports = java_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"java.util.List", "java.lang.Math.max"}.issubset(set(imports))
 
-    sites = _call_tuples(java_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="Top.helper()", needle="helper") in sites
     assert _lc(text, line_contains="this.baz()", needle="baz") in sites
     assert _lc(text, line_contains="this.baz()", needle="qux") in sites
@@ -366,7 +356,7 @@ def test_ruby_extracts_definitions_imports_and_calls():
         lang_key="rb",
     )
 
-    defs = rb_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Outer" in defs_map and defs_map["Outer"].kind == "class"
@@ -375,10 +365,10 @@ def test_ruby_extracts_definitions_imports_and_calls():
     assert "Foo.baz_call" in defs_map and defs_map["Foo.baz_call"].parent_class == "Foo"
     assert "Foo.singleton_call" in defs_map and defs_map["Foo.singleton_call"].parent_class == "Foo"
 
-    imports = rb_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"json", "utils/helpers", "extra.rb"}.issubset(set(imports))
 
-    sites = _call_tuples(rb_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="helper_call()", needle="helper_call") in sites
     assert _lc(text, line_contains="self.baz_call()", needle="baz_call") in sites
     assert _lc(text, line_contains="self.baz_call()", needle="qux_call") in sites
@@ -426,7 +416,7 @@ def test_c_cpp_extracts_definitions_imports_and_calls():
         lang_key="c",
     )
 
-    defs = c_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "Outer" in defs_map and defs_map["Outer"].kind == "class"
@@ -436,10 +426,10 @@ def test_c_cpp_extracts_definitions_imports_and_calls():
     assert "helper" in defs_map and defs_map["helper"].kind == "func"
     assert "main" in defs_map and defs_map["main"].kind == "func"
 
-    imports = c_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"vector", "my.h"}.issubset(set(imports))
 
-    sites = _call_tuples(c_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="helper();", needle="helper") in sites
     assert _lc(text, line_contains="i.inner_method()", needle="inner_method") in sites
     assert _lc(text, line_contains="o.method()", needle="method") in sites
@@ -469,16 +459,16 @@ def test_shell_extracts_definitions_imports_and_calls():
         lang_key="sh",
     )
 
-    defs = sh_ts.extract_definitions(parsed.src, parsed.root)
+    defs = definitions_from_parsed(parsed)
     defs_map = _defs_by_name(defs)
 
     assert "foo" in defs_map and defs_map["foo"].kind == "func"
     assert "bar" in defs_map and defs_map["bar"].kind == "func"
 
-    imports = sh_ts.extract_import_specs(parsed.src, parsed.root)
+    imports = import_specs_from_parsed(parsed)
     assert {"./env.sh", "./lib.sh"}.issubset(set(imports))
 
-    sites = _call_tuples(sh_ts.extract_call_sites(parsed.src, parsed.root))
+    sites = _call_tuples(call_sites_from_parsed(parsed))
     assert _lc(text, line_contains="source", needle="source") in sites
     assert _lc(text, line_contains=". ./lib.sh", needle=".") in sites
     assert _lc(text, line_contains="echo", needle="echo") in sites

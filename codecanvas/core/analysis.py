@@ -124,10 +124,15 @@ class Analyzer:
                 continue
 
             if node.kind == NodeKind.FUNC:
+                if node.parent is None:
+                    continue
+
                 parent = self.graph.get_node(node.parent)
                 if parent:
                     if parent.kind == NodeKind.CLASS:
                         to_add.append(parent.id)
+                        if parent.parent is None:
+                            continue
                         grandparent = self.graph.get_node(parent.parent)
                         if grandparent and grandparent.kind == NodeKind.MODULE:
                             to_add.append(grandparent.id)
@@ -135,6 +140,9 @@ class Analyzer:
                         to_add.append(parent.id)
 
             elif node.kind == NodeKind.CLASS:
+                if node.parent is None:
+                    continue
+
                 parent = self.graph.get_node(node.parent)
                 if parent and parent.kind == NodeKind.MODULE:
                     to_add.append(parent.id)
@@ -206,7 +214,11 @@ class Analyzer:
             visited = set(visited_list[:max_nodes])
 
         # Collect nodes and edges
-        nodes = [self.graph.get_node(nid) for nid in visited if self.graph.get_node(nid)]
+        nodes: List[GraphNode] = []
+        for nid in visited:
+            node = self.graph.get_node(nid)
+            if node is not None:
+                nodes.append(node)
         edges = [e for e in self.graph.edges if e.from_id in visited and e.to_id in visited]
 
         return nodes, edges

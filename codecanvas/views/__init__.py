@@ -10,7 +10,7 @@ import html
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, Any, List, Optional
 
 import cairosvg
 
@@ -114,17 +114,40 @@ class SVGCanvas:
         attrs = self._style_to_attrs(style or Style())
         self.elements.append(f'<text x="{x}" y="{y}" {attrs}>{html.escape(str(text))}</text>')
 
-    def add_text_lines(self, x: float, y: float, lines: List[str], style: Style | None = None, line_height: Optional[float] = None):
+    def add_text_lines(
+        self,
+        x: float,
+        y: float,
+        lines: List[str],
+        style: Style | None = None,
+        line_height: Optional[float] = None,
+    ):
         if not lines:
             return
         s = style or Style()
         attrs = self._style_to_attrs(s)
         lh = line_height if line_height is not None else (s.font_size * 1.25)
-        tspans = "".join(f'<tspan x="{x}" dy="{0 if i == 0 else lh}">{html.escape(str(line))}</tspan>' for i, line in enumerate(lines))
+        tspans = "".join(
+            f'<tspan x="{x}" dy="{0 if i == 0 else lh}">{html.escape(str(line))}</tspan>'
+            for i, line in enumerate(lines)
+        )
         self.elements.append(f'<text x="{x}" y="{y}" {attrs}>{tspans}</text>')
 
-    def add_image(self, x: float, y: float, w: float, h: float, href: str, opacity: float = 1.0, preserve_aspect_ratio: str = "xMidYMid meet"):
-        self.elements.append(f'<image x="{x}" y="{y}" width="{w}" height="{h}" href="{html.escape(str(href), quote=True)}" opacity="{opacity}" preserveAspectRatio="{preserve_aspect_ratio}" />')
+    def add_image(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        href: str,
+        opacity: float = 1.0,
+        preserve_aspect_ratio: str = "xMidYMid meet",
+    ):
+        escaped_href = html.escape(str(href), quote=True)
+        self.elements.append(
+            f'<image x="{x}" y="{y}" width="{w}" height="{h}" href="{escaped_href}" '
+            f'opacity="{opacity}" preserveAspectRatio="{preserve_aspect_ratio}" />'
+        )
 
     def add_path(self, d: str, style: Style | None = None, marker_end: str | None = None):
         attrs = self._style_to_attrs(style or Style())
@@ -169,7 +192,10 @@ class SVGCanvas:
 
 def svg_string_to_png_bytes(svg: str) -> bytes:
     """Convert an SVG string to PNG bytes."""
-    return cairosvg.svg2png(bytestring=svg.encode("utf-8"))
+    out = cairosvg.svg2png(bytestring=svg.encode("utf-8"))
+    if out is None:
+        raise ValueError("cairosvg.svg2png returned None")
+    return out
 
 
 def _get_extraction_dir() -> Path:
@@ -202,9 +228,26 @@ def save_png(svg: str, png_path: str | Path) -> bytes:
 # View Exports
 # =============================================================================
 
-from .architecture import ArchitectureView
-from .impact import ImpactView
-from .task import TaskView
+if TYPE_CHECKING:
+    from .architecture import ArchitectureView
+    from .impact import ImpactView
+    from .task import TaskView
+
+
+def __getattr__(name: str) -> Any:
+    if name == "ArchitectureView":
+        from .architecture import ArchitectureView as _ArchitectureView
+
+        return _ArchitectureView
+    if name == "ImpactView":
+        from .impact import ImpactView as _ImpactView
+
+        return _ImpactView
+    if name == "TaskView":
+        from .task import TaskView as _TaskView
+
+        return _TaskView
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "ArchitectureView",

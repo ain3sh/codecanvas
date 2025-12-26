@@ -75,6 +75,7 @@ include = ["codecanvas*", "locagent*"]
 
 [tool.setuptools.package-data]
 "locagent.core.repo_index.codeblocks.parser.queries" = ["*.scm"]
+"codecanvas.parser.schemas" = ["*.scm"]
 
 [tool.pytest.ini_options]
 testpaths = ["codecanvas/tests"]

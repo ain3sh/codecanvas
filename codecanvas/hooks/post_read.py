@@ -38,8 +38,8 @@ def extract_main_symbol(file_path: str) -> str | None:
 def ensure_canvas_loaded() -> bool:
     """Ensure canvas state and graph are loaded. Returns True if successful."""
     try:
-        from codecanvas.server import canvas_action
         from codecanvas.core.state import load_state
+        from codecanvas.server import canvas_action
         
         state = load_state()
         if not state.initialized:
@@ -51,8 +51,6 @@ def ensure_canvas_loaded() -> bool:
         return True
     except Exception as e:
         # Output error as JSON so hook doesn't fail silently
-        import sys
-        import json
         error_result = {
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUse",
@@ -83,23 +81,21 @@ def run_impact_analysis(symbol: str) -> str | None:
 def find_symbols_in_file(file_path: str, cwd: str) -> list[str]:
     """Find top-level symbols defined in file using the graph."""
     try:
+        from codecanvas.core.models import NodeKind
         from codecanvas.server import _graph
         
         if _graph is None:
             return []
         
-        # Get relative path
-        try:
-            rel_path = Path(file_path).relative_to(cwd)
-        except ValueError:
-            rel_path = Path(file_path)
-        
+        target_path = os.path.abspath(file_path)
+
         # Find nodes in this file
         symbols = []
-        for node_id, node in _graph.nodes.items():
-            if node.file and Path(node.file) == rel_path:
-                if node.kind in ("func", "class"):
-                    symbols.append(node.name)
+        for node in _graph.nodes:
+            if os.path.abspath(node.fsPath) != target_path:
+                continue
+            if node.kind in (NodeKind.FUNC, NodeKind.CLASS):
+                symbols.append(node.label)
         
         return symbols[:3]  # Limit to top 3
     except Exception:

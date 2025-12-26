@@ -24,7 +24,7 @@ class ImpactView:
         target_id: str,
         neighborhood_nodes: List[GraphNode],
         neighborhood_edges: List[Any],
-        output_path: str = None,
+        output_path: str | None = None,
     ) -> str:
         """Render the impact view."""
 
