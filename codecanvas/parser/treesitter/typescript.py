@@ -9,7 +9,7 @@ from typing import List, Optional
 
 from tree_sitter import Node
 
-from . import TsCallSite, TsDefinition, TsRange, iter_named_nodes, node_text, node_range
+from . import TsCallSite, TsDefinition, iter_named_nodes, node_range, node_text
 
 
 def extract_definitions(src: bytes, root: Node) -> List[TsDefinition]:
@@ -157,13 +157,13 @@ def extract_call_sites(src: bytes, root: Node) -> List[TsCallSite]:
         if fn is None:
             continue
 
-        site = _call_site_from_target(src, fn)
+        site = _call_site_from_target(fn)
         if site is not None:
             sites.append(site)
     return sites
 
 
-def _call_site_from_target(src: bytes, target: Node) -> Optional[TsCallSite]:
+def _call_site_from_target(target: Node) -> Optional[TsCallSite]:
     """Extract call site location from call target node."""
     # Prefer the final identifier in a member/attribute expression
     for field in ("attribute", "property", "name"):
