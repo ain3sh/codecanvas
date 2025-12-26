@@ -6,8 +6,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
-RESULTS_DIR="${PROJECT_ROOT}/results/runs"
-LOGFILE="${PROJECT_ROOT}/results/experiment_$(date +%Y%m%d_%H%M%S).log"
+
+# Batch directory management - auto-increment to next available batch ID
+RESULTS_BASE="${PROJECT_ROOT}/results"
+mkdir -p "$RESULTS_BASE"
+BATCH_ID=$(find "$RESULTS_BASE" -maxdepth 1 -type d -regex '.*/[0-9]+' 2>/dev/null | wc -l)
+BATCH_DIR="${RESULTS_BASE}/${BATCH_ID}"
+mkdir -p "$BATCH_DIR"/{runs,analytics,canvas}
+
+RESULTS_DIR="${BATCH_DIR}/runs"
+LOGFILE="${BATCH_DIR}/experiment_$(date +%Y%m%d_%H%M%S).log"
 
 # Redirect all output to log file
 exec > >(tee -a "$LOGFILE") 2>&1
@@ -32,6 +40,7 @@ TASKS=(
 echo "=============================================="
 echo "TerminalBench Experiment Runner"
 echo "=============================================="
+echo "Batch: $BATCH_ID"
 echo "Model: $MODEL"
 echo "Reasoning: $REASONING"
 echo "MCP Source: $MCP_GIT_SOURCE"
@@ -44,15 +53,6 @@ echo ""
 echo "Pruning unused Docker networks..."
 docker network prune -f
 echo "Done."
-
-# Clear previous results
-if [[ -d "$RESULTS_DIR" ]]; then
-    echo ""
-    echo "Clearing previous results in $RESULTS_DIR..."
-    rm -rf "$RESULTS_DIR"
-    echo "Done."
-fi
-mkdir -p "$RESULTS_DIR"
 
 cd "$PROJECT_ROOT"
 
@@ -69,6 +69,7 @@ for i in "${!TASKS[@]}"; do
     python3 -m terminalbench.ui.cli \
         --manifest tasks.yaml \
         --tasks "$TASK" \
+        --batch "$BATCH_ID" \
         --model "$MODEL" \
         --reasoning "$REASONING" \
         --profiles-parallel "$PROFILES_PARALLEL" \
@@ -83,8 +84,8 @@ done
 echo ""
 echo "=============================================="
 echo "All tasks completed!"
-echo "Results in: $RESULTS_DIR"
+echo "Batch $BATCH_ID results in: $BATCH_DIR"
 echo ""
 echo "Run analytics with:"
-echo "  python3 -m terminalbench.analytics $RESULTS_DIR --output results/analytics/"
+echo "  python3 -m terminalbench.analytics $RESULTS_DIR --output $BATCH_DIR/analytics/"
 echo "=============================================="

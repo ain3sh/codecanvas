@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable, List, Tuple
 
 from terminalbench.core.profiles import build_profile, get_available_servers, discover_mcp_usage_prompts, AgentProfile
+from terminalbench.core.config import get_batch_dir
 from terminalbench.harbor.runner import HarborRunner, RunResult
 from terminalbench.core.tasks import load_manifest, Task, DEFAULT_ENV_FILE
 from terminalbench.ui.display import print_summary
@@ -65,7 +66,8 @@ def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, L
     parser.add_argument("--manifest", type=Path, help="path to tasks manifest (yaml)")
 
     # Output and execution
-    parser.add_argument("--output-dir", type=Path, default=cfg.output_dir)
+    parser.add_argument("--output-dir", type=Path, default=cfg.output_dir, help="base results directory")
+    parser.add_argument("--batch", type=int, default=None, help="batch ID (default: auto-increment to next available)")
     parser.add_argument("--attempts", type=int, default=1, help="number of attempts per task (-k)")
     parser.add_argument("--retries", type=int, default=0, help="number of retries on failure")
     parser.add_argument("--dry-run", action="store_true", help="do not execute harbor, just emit commands")
@@ -278,9 +280,13 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         default_key = "nomcp" if args.no_mcp else ("-".join(args.mcp_servers) if args.mcp_servers else "claude-code")
         profiles.append(build_profile_from_set(None, default_key))
 
+    # Resolve batch directory
+    batch_dir = get_batch_dir(args.output_dir, args.batch)
+    runs_dir = batch_dir / "runs"
+
     runner = HarborRunner(
         harbor_bin=args.harbor_bin,
-        output_root=args.output_dir,
+        output_root=runs_dir,
         attempts=args.attempts,
         retries=args.retries,
         parallel=args.parallel,

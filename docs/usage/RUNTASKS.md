@@ -174,7 +174,8 @@ tasks:
 ### Execution Options
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--output-dir DIR` | Output directory | `./results/runs` |
+| `--output-dir DIR` | Base results directory | `./results` |
+| `--batch N` | Batch ID (default: auto-increment) | auto |
 | `--attempts N` | Attempts per task | `1` |
 | `--retries N` | Retries on failure | `0` |
 | `--parallel`, `-n` | Parallel workers | `0` |
@@ -199,20 +200,31 @@ tasks:
 
 ## Output Structure
 
+Results are organized by batch (auto-incrementing ID):
+
 ```
-results/runs/
-├── index.json                              # Run index
-└── {timestamp}__{profile_key}/             # Unique per profile
-    ├── config.json                         # Job configuration
-    ├── result.json                         # Aggregate results
-    └── {task_id}__{hash}/
-        └── agent/
-            ├── trajectory.json             # Agent trace (ATIF format)
-            ├── claude-code.txt             # Raw Claude output
-            └── sessions/                   # Claude Code session logs
+results/
+├── 0/                                      # Batch 0
+│   ├── runs/
+│   │   ├── index.json                      # Run index
+│   │   └── {timestamp}__{profile_key}/     # Unique per profile
+│   │       ├── config.json                 # Job configuration
+│   │       ├── result.json                 # Aggregate results
+│   │       └── {task_id}__{hash}/
+│   │           └── agent/
+│   │               ├── trajectory.json     # Agent trace (ATIF format)
+│   │               ├── claude-code.txt     # Raw Claude output
+│   │               └── sessions/           # Claude Code session logs
+│   ├── analytics/                          # Analytics outputs
+│   ├── canvas/                             # CodeCanvas state copies
+│   └── experiment_*.log                    # Experiment log
+├── 1/                                      # Batch 1
+└── 2/                                      # Batch 2 (etc.)
 ```
 
 When running multiple profiles in parallel (`--profiles-parallel`), each profile gets its own timestamped directory with the profile key appended (e.g., `2025-12-21__14-30-00__text`, `2025-12-21__14-30-00__codegraph`).
+
+Use `--batch N` to target a specific batch, or omit to auto-create the next batch.
 
 ## Common Workflows
 

@@ -4,7 +4,8 @@ Hybrid evaluation framework for LLM agent trajectories. Combines deterministic m
 
 **Quick start:**
 ```bash
-python -m terminalbench.analytics results/runs/ --output results/analytics/
+# Analyze batch 0 (output auto-derives to results/0/analytics/)
+python -m terminalbench.analytics results/0/runs/
 ```
 
 ---
@@ -131,23 +132,31 @@ terminalbench/analytics/
 
 ### Run Directory Structure
 
+Results are organized by batch:
+
 ```
-results/runs/
-├── index.json                           # Run manifest
-└── 2025-01-15__14-30-00__codecanvas/    # Timestamp + profile
-    └── sanitize-git-repo/               # Task ID
-        ├── agent/
-        │   ├── trajectory.json          # ATIF-format trace
-        │   └── sessions/
-        │       └── codecanvas/          # CodeCanvas artifacts
-        │           ├── state.json       # Evidence, claims, decisions
-        │           ├── architecture.png # Init visualization
-        │           ├── impact_*.png     # Blast radius visualizations
-        │           └── board.png        # Evidence Board snapshot
-        ├── verifier/
-        │   ├── ctrf.json               # Test results (CTRF format)
-        │   └── reward.txt              # Binary reward (0 or 1)
-        └── result.json                  # Timing, metadata
+results/
+├── 0/                                   # Batch 0
+│   ├── runs/
+│   │   ├── index.json                   # Run manifest
+│   │   └── 2025-01-15__14-30-00__codecanvas/
+│   │       └── sanitize-git-repo/       # Task ID
+│   │           ├── agent/
+│   │           │   ├── trajectory.json  # ATIF-format trace
+│   │           │   └── sessions/
+│   │           │       └── codecanvas/  # CodeCanvas artifacts
+│   │           │           ├── state.json
+│   │           │           ├── architecture.png
+│   │           │           ├── impact_*.png
+│   │           │           └── board.png
+│   │           ├── verifier/
+│   │           │   ├── ctrf.json        # Test results (CTRF format)
+│   │           │   └── reward.txt       # Binary reward (0 or 1)
+│   │           └── result.json          # Timing, metadata
+│   ├── analytics/                       # Analytics outputs (auto-derived)
+│   └── canvas/                          # CodeCanvas state copies
+├── 1/                                   # Batch 1
+└── ...
 ```
 
 ### File Contents
@@ -480,7 +489,7 @@ Higher score = more informed, deliberate editing behavior.
 
 ## Outputs
 
-All outputs written to `--output` directory (default: `results/analytics/`).
+All outputs written to `--output` directory. If omitted, output auto-derives to sibling `analytics/` directory (e.g., `results/0/runs/` → `results/0/analytics/`).
 
 ### Layer 1 Outputs
 
@@ -545,7 +554,7 @@ The analytics module auto-loads `terminalbench/.env` if it exists.
 
 Before running full analysis, estimate costs:
 ```bash
-python -m terminalbench.analytics results/runs/ --estimate-cost
+python -m terminalbench.analytics results/0/runs/ --estimate-cost
 ```
 
 Typical costs:
@@ -595,35 +604,35 @@ python -m terminalbench.analytics <runs_dir> [options]
 
 | Flag | Description |
 |------|-------------|
-| `--output, -o DIR` | Output directory (default: `results/analytics/`) |
+| `--output, -o DIR` | Output directory (default: sibling `analytics/` dir) |
 | `--quiet, -q` | Suppress progress output |
 
 ### Example Workflows
 
 ```bash
-# 1. Preview available data
-python -m terminalbench.analytics results/runs/ --list
+# 1. Preview available data (batch 0)
+python -m terminalbench.analytics results/0/runs/ --list
 
 # 2. Quick test (deterministic only, no API cost)
-python -m terminalbench.analytics results/runs/ --limit 3 --no-llm -o results/test/
+python -m terminalbench.analytics results/0/runs/ --limit 3 --no-llm
 
 # 3. Estimate LLM cost before committing
-python -m terminalbench.analytics results/runs/ --estimate-cost
+python -m terminalbench.analytics results/0/runs/ --estimate-cost
 
-# 4. Full analysis
-python -m terminalbench.analytics results/runs/ -o results/analytics/
+# 4. Full analysis (output auto-derives to results/0/analytics/)
+python -m terminalbench.analytics results/0/runs/
 
 # 5. Compare specific profiles
-python -m terminalbench.analytics results/runs/ --compare text codecanvas
+python -m terminalbench.analytics results/0/runs/ --compare text codecanvas
 
-# 6. Failure-focused analysis
-python -m terminalbench.analytics results/runs/ --failed -o results/failures/
+# 6. Failure-focused analysis (explicit output)
+python -m terminalbench.analytics results/0/runs/ --failed -o results/0/failures/
 
 # 7. Filter to specific tasks
-python -m terminalbench.analytics results/runs/ --tasks sanitize-git-repo build-cython-ext
+python -m terminalbench.analytics results/0/runs/ --tasks sanitize-git-repo build-cython-ext
 
 # 8. CodeCanvas runs only
-python -m terminalbench.analytics results/runs/ --profiles codecanvas --succeeded
+python -m terminalbench.analytics results/0/runs/ --profiles codecanvas --succeeded
 ```
 
 ---

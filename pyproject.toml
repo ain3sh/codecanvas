@@ -41,6 +41,7 @@ mcp = [
 ]
 terminalbench = [
     "rich>=13.0",
+    "litellm>=1.0.0",
 ]
 
 # Optional deps for running LocAgent MCP in the top-level venv.

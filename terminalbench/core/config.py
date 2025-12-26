@@ -17,6 +17,34 @@ CONFIG_DIR = Path.home() / ".terminalbench"
 CONFIG_FILE = CONFIG_DIR / "config.yaml"
 
 
+def get_batch_dir(base: Path, batch_id: int | None = None) -> Path:
+    """Get or create a batch directory within the results base.
+    
+    Args:
+        base: Base results directory (e.g., ./results)
+        batch_id: Explicit batch ID, or None to auto-detect next available
+        
+    Returns:
+        Path to batch directory (e.g., ./results/3/)
+    """
+    base = Path(base).resolve()
+    
+    if batch_id is None:
+        # Auto-detect: find max existing batch ID + 1
+        existing = [int(d.name) for d in base.iterdir() 
+                    if d.is_dir() and d.name.isdigit()]
+        batch_id = max(existing, default=-1) + 1
+    
+    batch_dir = base / str(batch_id)
+    
+    # Create subdirectory structure
+    (batch_dir / "runs").mkdir(parents=True, exist_ok=True)
+    (batch_dir / "analytics").mkdir(parents=True, exist_ok=True)
+    (batch_dir / "canvas").mkdir(parents=True, exist_ok=True)
+    
+    return batch_dir
+
+
 @dataclass
 class TBConfig:
     """Terminal-Bench configuration."""
@@ -25,7 +53,7 @@ class TBConfig:
     reasoning: str = "medium"
     mcp_config: Optional[str] = None  # Path to .mcp.json
     hooks: Optional[str] = None  # Path to hooks settings
-    output_dir: Path = Path("./results/runs")
+    output_dir: Path = Path("./results")
     harbor_bin: Optional[str] = None  # None = use uvx (auto-installs)
     container_env: str = "docker"
     env_file: Optional[str] = None

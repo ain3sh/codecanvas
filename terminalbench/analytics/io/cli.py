@@ -27,8 +27,8 @@ from ..extensions.codecanvas import (
 
 def main():
     parser = argparse.ArgumentParser(description="TerminalBench Analytics - Hybrid SOTA Agent Evaluation")
-    parser.add_argument("runs_dir", type=Path, help="Path to runs/ directory")
-    parser.add_argument("--output", "-o", type=Path, default=Path("results/analytics"), help="Output directory")
+    parser.add_argument("runs_dir", type=Path, help="Path to runs/ directory (e.g., results/3/runs)")
+    parser.add_argument("--output", "-o", type=Path, default=None, help="Output directory (default: sibling analytics/ dir)")
     parser.add_argument("--no-llm", action="store_true", help="Skip LLM-powered analysis (deterministic only)")
     parser.add_argument("--llm-only", action="store_true", help="Run only LLM analysis")
     parser.add_argument("--compare", nargs=2, metavar=("PROFILE_A", "PROFILE_B"), help="Compare two profiles")
@@ -47,6 +47,11 @@ def main():
     if not args.runs_dir.exists():
         print(f"Error: Runs directory not found: {args.runs_dir}", file=sys.stderr)
         sys.exit(1)
+    
+    # Auto-derive output from runs_dir parent (batch directory)
+    if args.output is None:
+        args.output = args.runs_dir.parent / "analytics"
+    args.output.mkdir(parents=True, exist_ok=True)
     
     if not args.quiet:
         print(f"Parsing trajectories from {args.runs_dir}...")
