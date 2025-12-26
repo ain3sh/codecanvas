@@ -2,28 +2,109 @@
 set -e
 
 # =============================================================================
-# Install Claude Code with MCP support
+# Install Claude Code with MCP support + Multi-Language LSP Servers
+# Optimized: parallel downloads, batched installs, minimal image size
 # =============================================================================
 
 echo "=== Installing system dependencies ==="
 apt-get update
-apt-get install -y curl git build-essential libcairo2-dev
+apt-get install -y --no-install-recommends \
+    curl git build-essential libcairo2-dev ca-certificates \
+    clangd \
+    ruby ruby-dev \
+    openjdk-21-jdk-headless
+rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
-# Install Node.js and Claude Code
+# Start parallel downloads in background (while other installs proceed)
+# =============================================================================
+echo "=== Starting parallel downloads ==="
+DOWNLOAD_DIR="/tmp/lsp-downloads"
+mkdir -p "$DOWNLOAD_DIR"
+
+curl -fsSL -o "$DOWNLOAD_DIR/rust-analyzer.gz" \
+    https://github.com/rust-lang/rust-analyzer/releases/latest/download/rust-analyzer-x86_64-unknown-linux-gnu.gz &
+PID_RUST=$!
+
+curl -fsSL -o "$DOWNLOAD_DIR/go.tar.gz" \
+    https://go.dev/dl/go1.23.4.linux-amd64.tar.gz &
+PID_GO=$!
+
+JDTLS_VERSION="1.54.0-202511200503"
+curl -fsSL -o "$DOWNLOAD_DIR/jdtls.tar.gz" \
+    "https://download.eclipse.org/jdtls/snapshots/jdt-language-server-${JDTLS_VERSION}.tar.gz" &
+PID_JDTLS=$!
+
+# =============================================================================
+# Install Node.js (while downloads proceed)
 # =============================================================================
 echo "=== Installing Node.js via nvm ==="
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash
 source "$HOME/.nvm/nvm.sh"
 nvm install 22
-npm -v
 
-echo "=== Installing Claude Code ==="
+# =============================================================================
+# Batch all npm global installs (claude-code + LSPs in single command)
+# =============================================================================
+echo "=== Installing Claude Code and npm-based Language Servers ==="
 {% if claude_version %}
-npm install -g @anthropic-ai/claude-code@{{ claude_version }}
+npm install -g @anthropic-ai/claude-code@{{ claude_version }} \
+    typescript-language-server typescript bash-language-server
 {% else %}
-npm install -g @anthropic-ai/claude-code@latest
+npm install -g @anthropic-ai/claude-code@latest \
+    typescript-language-server typescript bash-language-server
 {% endif %}
+
+# =============================================================================
+# Install solargraph in background while waiting for downloads
+# =============================================================================
+echo "=== Installing solargraph ==="
+gem install solargraph --no-document &
+PID_SOLAR=$!
+
+# =============================================================================
+# Wait for downloads and install (rust-analyzer, Go+gopls, jdtls)
+# =============================================================================
+echo "=== Installing rust-analyzer ==="
+wait $PID_RUST
+gunzip -c "$DOWNLOAD_DIR/rust-analyzer.gz" > /usr/local/bin/rust-analyzer
+chmod +x /usr/local/bin/rust-analyzer
+
+echo "=== Installing Go and gopls ==="
+wait $PID_GO
+tar -C /usr/local -xzf "$DOWNLOAD_DIR/go.tar.gz"
+export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"
+/usr/local/go/bin/go install golang.org/x/tools/gopls@latest
+echo 'export PATH="/usr/local/go/bin:$HOME/go/bin:$PATH"' > /etc/profile.d/go-path.sh
+
+echo "=== Installing jdtls ==="
+wait $PID_JDTLS
+mkdir -p /opt/jdtls
+tar -C /opt/jdtls -xzf "$DOWNLOAD_DIR/jdtls.tar.gz"
+
+# Pre-resolve launcher path at install time (avoids find on every invocation)
+JDTLS_LAUNCHER=$(find /opt/jdtls/plugins -name 'org.eclipse.equinox.launcher_*.jar' | head -1)
+cat > /usr/local/bin/jdtls << EOF
+#!/bin/bash
+exec /usr/bin/java \\
+    -Declipse.application=org.eclipse.jdt.ls.core.id1 \\
+    -Dosgi.bundles.defaultStartLevel=4 \\
+    -Declipse.product=org.eclipse.jdt.ls.core.product \\
+    -Xmx1g \\
+    --add-modules=ALL-SYSTEM \\
+    --add-opens java.base/java.util=ALL-UNNAMED \\
+    --add-opens java.base/java.lang=ALL-UNNAMED \\
+    -jar "$JDTLS_LAUNCHER" \\
+    -configuration /opt/jdtls/config_linux \\
+    "\$@"
+EOF
+chmod +x /usr/local/bin/jdtls
+
+# Wait for solargraph to finish
+wait $PID_SOLAR
+
+# Cleanup temp downloads
+rm -rf "$DOWNLOAD_DIR"
 
 # =============================================================================
 # Install Python and uv for MCP servers
@@ -49,9 +130,13 @@ git clone {{ mcp_git_source }} mcp-repo
 {% endif %}
 cd mcp-repo
 
-# Create isolated venv and install MCP packages (avoids PEP 668 issues on Ubuntu 24.04+)
-uv venv /opt/mcp-venv --python 3.13
-uv pip install --python /opt/mcp-venv/bin/python ".[locagent,mcp]"
+# Create isolated venv and install packages (avoids PEP 668 issues on Ubuntu 24.04+)
+uv venv /opt/venv --python 3.13
+uv pip install --python /opt/venv/bin/python ".[codecanvas,locagent]"
+
+# Add venv bin to PATH so LSP binaries (basedpyright-langserver) are discoverable
+export PATH="/opt/venv/bin:$PATH"
+echo 'export PATH="/opt/venv/bin:$PATH"' >> /etc/profile.d/venv-path.sh
 cd /
 rm -rf /tmp/mcp-repo
 {% else %}

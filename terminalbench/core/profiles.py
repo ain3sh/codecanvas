@@ -11,7 +11,7 @@ DEFAULT_MODEL = "anthropic/claude-sonnet-4-5-20250929"
 DEFAULT_REASONING = "medium"
 
 # Path to Python in the MCP venv created by install-claude-code-mcp.sh
-MCP_VENV_PYTHON = "/opt/mcp-venv/bin/python"
+MCP_VENV_PYTHON = "/opt/venv/bin/python"
 
 # Aliases for MCP server names -> source directory names (for USAGE.md discovery)
 MCP_USAGE_ALIASES = {
@@ -125,12 +125,12 @@ def adapt_mcp_config_for_harbor(config: Dict[str, Any]) -> Dict[str, Any]:
     """Adapt MCP config for Harbor container environment.
     
     Local .mcp.json uses 'uv run python -m ...' but Harbor containers
-    have packages installed in /opt/mcp-venv, so we convert to use that venv's Python.
+    have packages installed in /opt/venv, so we convert to use that venv's Python.
     """
     adapted = {"mcpServers": {}}
     for name, server_cfg in config.get("mcpServers", {}).items():
         new_cfg = dict(server_cfg)
-        # Convert 'uv run python -m X' to '/opt/mcp-venv/bin/python -m X'
+        # Convert 'uv run python -m X' to '/opt/venv/bin/python -m X'
         if new_cfg.get("command") == "uv" and new_cfg.get("args", [])[:2] == ["run", "python"]:
             new_cfg["command"] = MCP_VENV_PYTHON
             new_cfg["args"] = new_cfg["args"][2:]  # Remove 'run', 'python'
@@ -142,7 +142,7 @@ def adapt_hooks_for_harbor(hooks_json: str) -> str:
     """Adapt hooks config for Harbor container environment.
     
     Local hooks.json uses 'uv run python' but Harbor containers
-    have packages installed in /opt/mcp-venv, so we convert to use that venv's Python.
+    have packages installed in /opt/venv, so we convert to use that venv's Python.
     """
     return hooks_json.replace("uv run python", MCP_VENV_PYTHON)
 

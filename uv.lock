@@ -498,16 +498,21 @@ name = "codecanvas"
 version = "0.7.0"
 source = { editable = "." }
 dependencies = [
-    { name = "basedpyright" },
-    { name = "cairosvg" },
-    { name = "lsprotocol" },
     { name = "pyyaml" },
-    { name = "tree-sitter" },
-    { name = "tree-sitter-language-pack" },
 ]
 
 [package.optional-dependencies]
+codecanvas = [
+    { name = "basedpyright" },
+    { name = "cairosvg" },
+    { name = "lsprotocol" },
+    { name = "mcp" },
+    { name = "pydantic" },
+    { name = "tree-sitter" },
+    { name = "tree-sitter-language-pack" },
+]
 dev = [
+    { name = "pyright" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -525,63 +530,50 @@ locagent = [
     { name = "pydot" },
     { name = "pystemmer" },
     { name = "python-dotenv" },
-    { name = "pyyaml" },
     { name = "rapidfuzz" },
     { name = "tqdm" },
     { name = "tree-sitter" },
     { name = "tree-sitter-language-pack" },
-]
-mcp = [
-    { name = "mcp" },
-    { name = "pydantic" },
 ]
 terminalbench = [
     { name = "litellm" },
     { name = "rich" },
 ]
 
-[package.dev-dependencies]
-dev = [
-    { name = "pyright" },
-]
-
 [package.metadata]
 requires-dist = [
-    { name = "basedpyright", specifier = ">=1.36.1" },
+    { name = "basedpyright", marker = "extra == 'codecanvas'", specifier = ">=1.36.1" },
     { name = "bm25s", marker = "extra == 'locagent'", specifier = ">=0.2.0" },
-    { name = "cairosvg", specifier = ">=2.7.1" },
+    { name = "cairosvg", marker = "extra == 'codecanvas'", specifier = ">=2.7.1" },
     { name = "click", marker = "extra == 'locagent'", specifier = ">=8.0.0" },
     { name = "libcst", marker = "extra == 'locagent'", specifier = ">=1.0.0" },
     { name = "litellm", marker = "extra == 'terminalbench'", specifier = ">=1.0.0" },
     { name = "llama-index-core", marker = "extra == 'locagent'", specifier = ">=0.11.0" },
     { name = "llama-index-readers-file", marker = "extra == 'locagent'", specifier = ">=0.4.0" },
     { name = "llama-index-retrievers-bm25", marker = "extra == 'locagent'", specifier = ">=0.4.0" },
-    { name = "lsprotocol", specifier = ">=2024.0.0" },
+    { name = "lsprotocol", marker = "extra == 'codecanvas'", specifier = ">=2024.0.0" },
     { name = "matplotlib", marker = "extra == 'locagent'", specifier = ">=3.0.0" },
+    { name = "mcp", marker = "extra == 'codecanvas'", specifier = ">=1.0.0" },
     { name = "mcp", marker = "extra == 'locagent'", specifier = ">=1.0.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
     { name = "networkx", marker = "extra == 'locagent'", specifier = ">=3.0.0" },
+    { name = "pydantic", marker = "extra == 'codecanvas'", specifier = ">=2.0.0" },
     { name = "pydantic", marker = "extra == 'locagent'", specifier = ">=2.0.0" },
-    { name = "pydantic", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
     { name = "pydot", marker = "extra == 'locagent'", specifier = ">=2.0.0" },
+    { name = "pyright", marker = "extra == 'dev'", specifier = ">=1.1.407" },
     { name = "pystemmer", marker = "extra == 'locagent'", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", marker = "extra == 'locagent'", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "pyyaml", marker = "extra == 'locagent'", specifier = ">=6.0.0" },
     { name = "rapidfuzz", marker = "extra == 'locagent'", specifier = ">=3.0.0" },
     { name = "rich", marker = "extra == 'terminalbench'", specifier = ">=13.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
     { name = "tqdm", marker = "extra == 'locagent'", specifier = ">=4.60.0" },
-    { name = "tree-sitter", specifier = ">=0.24.0" },
+    { name = "tree-sitter", marker = "extra == 'codecanvas'", specifier = ">=0.24.0" },
     { name = "tree-sitter", marker = "extra == 'locagent'", specifier = ">=0.24.0" },
-    { name = "tree-sitter-language-pack", specifier = ">=0.13.0" },
+    { name = "tree-sitter-language-pack", marker = "extra == 'codecanvas'", specifier = ">=0.13.0" },
     { name = "tree-sitter-language-pack", marker = "extra == 'locagent'", specifier = ">=0.13.0" },
 ]
-provides-extras = ["dev", "mcp", "terminalbench", "locagent"]
-
-[package.metadata.requires-dev]
-dev = [{ name = "pyright", specifier = ">=1.1.407" }]
+provides-extras = ["codecanvas", "locagent", "terminalbench", "dev"]
 
 [[package]]
 name = "colorama"

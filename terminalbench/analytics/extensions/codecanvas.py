@@ -275,12 +275,18 @@ def compute_codecanvas_metrics(
         m.total_addressed_symbols += len(analysis.addressed_ids)
         m.total_skipped_symbols += len(analysis.skipped_ids)
     
-    # Parse summary
+    # Parse summary - correct keys from state.json structure
     ps = state.parse_summary
-    m.files_parsed = ps.get("files", 0)
-    m.functions_parsed = ps.get("functions", 0)
-    m.classes_parsed = ps.get("classes", 0)
-    m.call_edges = ps.get("call_edges", 0)
+    m.files_parsed = ps.get("parsed_files", 0)
+    
+    # Functions/classes come from architecture evidence metrics, not parse_summary
+    arch_evidence = next((e for e in state.evidence if e.kind == "architecture"), None)
+    if arch_evidence and arch_evidence.metrics:
+        m.functions_parsed = arch_evidence.metrics.get("funcs", 0)
+        m.classes_parsed = arch_evidence.metrics.get("classes", 0)
+    
+    # call_edges not stored in parse_summary; could be computed from graph but not persisted
+    m.call_edges = 0
     
     # Blast radius files
     blast_radius_files: Set[str] = set()

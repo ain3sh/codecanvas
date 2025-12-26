@@ -8,7 +8,7 @@ from typing import List, Optional
 
 from ..core.models import Graph
 from ..core.state import CanvasState, Claim, Decision, Evidence, TaskSpec, pick_task
-from .svg import COLORS, Style, SVGCanvas
+from . import COLORS, Style, SVGCanvas
 
 
 class TaskView:

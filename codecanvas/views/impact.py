@@ -12,7 +12,7 @@ import math
 from typing import Any, Dict, List, Tuple
 
 from ..core.models import Graph, GraphNode
-from .svg import COLORS, Style, SVGCanvas
+from . import COLORS, Style, SVGCanvas
 
 
 class ImpactView:

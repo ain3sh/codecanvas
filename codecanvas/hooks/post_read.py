@@ -98,7 +98,7 @@ def find_symbols_in_file(file_path: str, cwd: str) -> list[str]:
         symbols = []
         for node_id, node in _graph.nodes.items():
             if node.file and Path(node.file) == rel_path:
-                if node.kind in ("FUNCTION", "CLASS", "METHOD"):
+                if node.kind in ("func", "class"):
                     symbols.append(node.name)
         
         return symbols[:3]  # Limit to top 3

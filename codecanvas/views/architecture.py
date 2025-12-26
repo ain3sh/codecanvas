@@ -13,11 +13,130 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 from ..core.models import EdgeType, Graph, GraphNode, NodeKind
-from .geometry import Rect, rounded_path_d, route_via_outer_lane
-from .svg import COLORS, Style, SVGCanvas
+from . import COLORS, Style, SVGCanvas
+
+Point = Tuple[float, float]
+
+
+# =============================================================================
+# Geometry Primitives
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class Rect:
+    x: float
+    y: float
+    w: float
+    h: float
+
+    @property
+    def left(self) -> float:
+        return self.x
+
+    @property
+    def right(self) -> float:
+        return self.x + self.w
+
+    @property
+    def top(self) -> float:
+        return self.y
+
+    @property
+    def bottom(self) -> float:
+        return self.y + self.h
+
+    @property
+    def cx(self) -> float:
+        return self.x + self.w / 2
+
+    @property
+    def cy(self) -> float:
+        return self.y + self.h / 2
+
+
+def _ports(r: Rect) -> Dict[str, Point]:
+    return {"N": (r.cx, r.top), "S": (r.cx, r.bottom), "W": (r.left, r.cy), "E": (r.right, r.cy)}
+
+
+def _segment_intersects_rect(p1: Point, p2: Point, r: Rect) -> bool:
+    """Axis-aligned segment intersection with a rectangle."""
+    x1, y1 = p1
+    x2, y2 = p2
+    if x1 == x2:
+        if x1 < r.left or x1 > r.right:
+            return False
+        lo, hi = (y1, y2) if y1 <= y2 else (y2, y1)
+        return not (hi < r.top or lo > r.bottom)
+    if y1 == y2:
+        if y1 < r.top or y1 > r.bottom:
+            return False
+        lo, hi = (x1, x2) if x1 <= x2 else (x2, x1)
+        return not (hi < r.left or lo > r.right)
+    return False
+
+
+def _polyline_intersects_any_rect(pts: List[Point], rects: Iterable[Rect], *, ignore: Optional[Iterable[Rect]] = None) -> bool:
+    ignore_set = set(ignore or [])
+    rs = [r for r in rects if r not in ignore_set]
+    for i in range(len(pts) - 1):
+        for r in rs:
+            if _segment_intersects_rect(pts[i], pts[i + 1], r):
+                return True
+    return False
+
+
+def route_via_outer_lane(src: Rect, dst: Rect, *, side: str, lane_x: float) -> List[Point]:
+    """Route an orthogonal polyline via an external vertical lane."""
+    ps, pd = _ports(src), _ports(dst)
+    src_p = ps["W"] if side == "left" else ps["E"]
+    dst_p = pd["W"] if side == "left" else pd["E"]
+    return [src_p, (lane_x, src_p[1]), (lane_x, dst_p[1]), dst_p]
+
+
+def rounded_path_d(pts: List[Point], radius: float = 10.0) -> str:
+    """Create an SVG path string from an orthogonal polyline with rounded corners."""
+    if not pts:
+        return ""
+    if len(pts) == 1:
+        return f"M {pts[0][0]} {pts[0][1]}"
+
+    def clamp(v: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, v))
+
+    d: List[str] = [f"M {pts[0][0]} {pts[0][1]}"]
+    for i in range(1, len(pts) - 1):
+        x1, y1 = pts[i]
+        x2, y2 = pts[i + 1]
+        xp, yp = pts[i - 1]
+        in_dx = 0 if x1 == xp else (1 if x1 > xp else -1)
+        in_dy = 0 if y1 == yp else (1 if y1 > yp else -1)
+        out_dx = 0 if x2 == x1 else (1 if x2 > x1 else -1)
+        out_dy = 0 if y2 == y1 else (1 if y2 > y1 else -1)
+        if (in_dx, in_dy) == (out_dx, out_dy):
+            d.append(f"L {x1} {y1}")
+            continue
+        cut_in_x, cut_in_y = x1 - in_dx * radius, y1 - in_dy * radius
+        cut_out_x, cut_out_y = x1 + out_dx * radius, y1 + out_dy * radius
+        if in_dx != 0:
+            cut_in_x = clamp(cut_in_x, min(xp, x1), max(xp, x1))
+            cut_in_y = y1
+        if in_dy != 0:
+            cut_in_y = clamp(cut_in_y, min(yp, y1), max(yp, y1))
+            cut_in_x = x1
+        if out_dx != 0:
+            cut_out_x = clamp(cut_out_x, min(x1, x2), max(x1, x2))
+            cut_out_y = y1
+        if out_dy != 0:
+            cut_out_y = clamp(cut_out_y, min(y1, y2), max(y1, y2))
+            cut_out_x = x1
+        d.append(f"L {cut_in_x} {cut_in_y}")
+        d.append(f"Q {x1} {y1} {cut_out_x} {cut_out_y}")
+    d.append(f"L {pts[-1][0]} {pts[-1][1]}")
+    return " ".join(d)
 
 
 @dataclass

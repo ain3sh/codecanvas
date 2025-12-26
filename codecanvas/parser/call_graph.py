@@ -8,11 +8,10 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..core.models import EdgeType, GraphEdge, GraphNode, NodeKind
-from .lsp import LSPError, detect_language, has_lsp_support, is_language_server_installed, path_to_uri, uri_to_path
-from .lsp_runtime import get_lsp_runtime
-from .lsp_session import get_lsp_session_manager
+from .config import LANGUAGE_SERVERS, detect_language, has_lsp_support, is_language_server_installed
+from .lsp import LSPError, get_lsp_runtime, get_lsp_session_manager, path_to_uri, uri_to_path
 from .treesitter import TsCallSite, extract_call_sites
-from .workspace import find_workspace_root
+from .utils import find_workspace_root
 
 
 @dataclass
@@ -117,8 +116,6 @@ async def _resolve_definitions_for_callsites(
     callsites: List[TsCallSite],
 ) -> List[object]:
     mgr = get_lsp_session_manager()
-
-    from .lsp import LANGUAGE_SERVERS
 
     server_config = LANGUAGE_SERVERS.get(lang)
     if not server_config:

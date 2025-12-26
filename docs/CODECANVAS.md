@@ -189,7 +189,7 @@ CodeCanvas uses a two-phase parsing strategy: LSP-first with tree-sitter fallbac
 The Language Server Protocol provides accurate symbol information:
 
 ```
-1. Start language server (pylsp, typescript-language-server, etc.)
+1. Start language server (basedpyright, typescript-language-server, etc.)
 2. Initialize with workspace root
 3. Request textDocument/documentSymbol for each file
 4. Build nodes from symbol hierarchy
@@ -247,12 +247,16 @@ This produces accurate call graphs by leveraging the language server's semantic 
 
 | Language | LSP Server | Tree-Sitter |
 |----------|------------|-------------|
-| Python | pylsp | tree-sitter-python |
-| TypeScript/JavaScript | typescript-language-server | tree-sitter-typescript |
-| Rust | rust-analyzer | tree-sitter-rust |
-| Go | gopls | tree-sitter-go |
+| Python | basedpyright-langserver | python |
+| TypeScript/JavaScript | typescript-language-server | typescript/tsx/javascript |
+| Go | gopls | go |
+| Rust | rust-analyzer | rust |
+| Java | jdtls | java |
+| Ruby | solargraph | ruby |
+| C/C++ | clangd | c/cpp |
+| Shell | bash-language-server | bash |
 
-Additional languages work via tree-sitter fallback.
+Tree-sitter parsing uses `tree-sitter-language-pack` which bundles grammars for all supported languages.
 
 ---
 
@@ -547,9 +551,7 @@ CodeCanvas uses hooks to **automatically run** init and impact analysis. The age
 
 **Trigger**: Session starts (matcher: `startup`)
 
-**Action**: Runs `canvas_action(action="init", repo_path=cwd)` when:
-1. Current directory is a code repo (.git, pyproject.toml, package.json, etc.)
-2. Contains ≥5 code files
+**Action**: Runs `canvas_action(action="init", repo_path=cwd)` unconditionally. The parser gracefully handles empty or non-code directories.
 
 **Output**: `additionalContext` injected into Claude's context:
 ```

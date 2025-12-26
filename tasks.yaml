@@ -1,6 +1,5 @@
 env_file: terminalbench/.env
 mcp_config: .mcp.json
-# NOTE: hooks are profile-specific, passed via run-experiment.sh only for codecanvas
 
 tasks:
   - id: sanitize-git-repo

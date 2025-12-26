@@ -8,9 +8,7 @@ version = "0.7.0"
 description = "Impact analysis for LLM agents - track code dependencies and side-effects"
 readme = "README.md"
 license = {text = "MIT"}
-authors = [
-    {name = "Ainesh Chatterjee"}
-]
+authors = [{name = "ain3sh"}]
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -21,53 +19,55 @@ classifiers = [
 ]
 keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis"]
 
-dependencies = [
-    "CairoSVG>=2.7.1",
-    "pyyaml>=6.0",
-    "lsprotocol>=2024.0.0",
-    "basedpyright>=1.36.1",
-    "tree-sitter>=0.24.0",
-    "tree-sitter-language-pack>=0.13.0",
-]
+dependencies = ["pyyaml>=6.0"]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "ruff>=0.6.0",
-]
-mcp = [
+codecanvas = [
+    # MCP server
     "mcp>=1.0.0",
     "pydantic>=2.0.0",
-]
-terminalbench = [
-    "rich>=13.0",
-    "litellm>=1.0.0",
-]
-
-# Optional deps for running LocAgent MCP in the top-level venv.
-locagent = [
-    "mcp>=1.0.0",
-    "networkx>=3.0.0",
+    # Parsing
     "tree-sitter>=0.24.0",
     "tree-sitter-language-pack>=0.13.0",
+    # LSP
+    "lsprotocol>=2024.0.0",
+    "basedpyright>=1.36.1",
+    # Visualization
+    "CairoSVG>=2.7.1",
+]
+
+locagent = [
+    # MCP server
+    "mcp>=1.0.0",
+    "pydantic>=2.0.0",
+    # Parsing
+    "tree-sitter>=0.24.0",
+    "tree-sitter-language-pack>=0.13.0",
+    # Code analysis
+    "networkx>=3.0.0",
     "bm25s>=0.2.0",
     "libcst>=1.0.0",
-    "pydantic>=2.0.0",
-    "click>=8.0.0",
-    "python-dotenv>=1.0.0",
-    "PyYAML>=6.0.0",
-    "tqdm>=4.60.0",
+    "rapidfuzz>=3.0.0",
+    "PyStemmer>=2.0.0",
+    # LlamaIndex
     "llama-index-core>=0.11.0",
     "llama-index-readers-file>=0.4.0",
     "llama-index-retrievers-bm25>=0.4.0",
-    "rapidfuzz>=3.0.0",
+    # Visualization
     "matplotlib>=3.0.0",
     "pydot>=2.0.0",
-    "PyStemmer>=2.0.0",
+    # CLI
+    "click>=8.0.0",
+    "python-dotenv>=1.0.0",
+    "tqdm>=4.60.0",
 ]
 
+terminalbench = ["rich>=13.0", "litellm>=1.0.0"]
+
+dev = ["pytest>=8.0", "ruff>=0.6.0", "pyright>=1.1.407"]
+
 [project.urls]
-"Homepage" = "https://github.com/ainesh/codecanvas"
+Homepage = "https://github.com/ainesh/codecanvas"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -87,8 +87,3 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-
-[dependency-groups]
-dev = [
-    "pyright>=1.1.407",
-]
