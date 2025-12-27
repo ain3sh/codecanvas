@@ -22,7 +22,7 @@ fi
 
 # 2. Kill local processes
 echo "Killing local processes..."
-PIDS=$(ps aux | grep -E "(terminalbench|harbor|run-experiment)" | grep -v grep | awk '{print $2}') || true
+PIDS=$(ps aux | command grep -E "(terminalbench|harbor|run-experiment)" | grep -v grep | awk '{print $2}') || true
 if [[ -n "${PIDS:-}" ]]; then
     echo "$PIDS" | xargs kill -9 2>/dev/null || true
 fi
@@ -41,7 +41,7 @@ sleep 1
 echo ""
 echo "=== Verification ==="
 REMAINING_CONTAINERS=$(docker ps -q 2>/dev/null | wc -l) || true
-REMAINING_PROCS=$(ps aux | grep -E "(terminalbench|harbor|run-experiment)" | grep -v grep | wc -l) || true
+REMAINING_PROCS=$(ps aux | command grep -E "(terminalbench|harbor|run-experiment)" | grep -v grep | wc -l) || true
 
 if [[ "${REMAINING_CONTAINERS:-0}" -eq 0 && "${REMAINING_PROCS:-0}" -eq 0 ]]; then
     echo "CLEAN: No containers or processes remaining"
@@ -49,6 +49,6 @@ if [[ "${REMAINING_CONTAINERS:-0}" -eq 0 && "${REMAINING_PROCS:-0}" -eq 0 ]]; th
 else
     echo "WARNING: ${REMAINING_CONTAINERS:-0} containers, ${REMAINING_PROCS:-0} processes still running"
     docker ps 2>/dev/null || true
-    ps aux | grep -E "(terminalbench|harbor)" | grep -v grep || true
+    ps aux | command grep -E "(terminalbench|harbor)" | grep -v grep || true
     exit 1
 fi
