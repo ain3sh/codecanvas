@@ -48,11 +48,13 @@ uv python install 3.13
 echo "=== Installing MCP servers from git ==="
 cd /tmp
 
-# Use credential helper for private repos (token never written to disk)
+# Clone repo (use token in URL for private repos - only in container memory)
 if [ -n "$GITHUB_TOKEN" ]; then
-    git config --global credential.helper '!f() { echo "password=$GITHUB_TOKEN"; }; f'
+    CLONE_URL=$(echo "{{ mcp_git_source }}" | sed "s|https://github.com|https://x-access-token:${GITHUB_TOKEN}@github.com|")
+    git clone "$CLONE_URL" mcp-repo
+else
+    git clone {{ mcp_git_source }} mcp-repo
 fi
-git clone {{ mcp_git_source }} mcp-repo
 
 cd mcp-repo
 
