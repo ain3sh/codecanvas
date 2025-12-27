@@ -10,7 +10,12 @@ resolution-markers = [
 ]
 
 [manifest]
-overrides = [{ name = "lsprotocol", specifier = ">=2024.0.0" }]
+overrides = [
+    { name = "jedi-language-server", specifier = ">=0.46.0" },
+    { name = "lsprotocol", specifier = ">=2024.0.0" },
+    { name = "multilspy", git = "https://github.com/microsoft/multilspy.git" },
+    { name = "pygls", specifier = ">=2.0.0" },
+]
 
 [[package]]
 name = "aiohappyeyeballs"
@@ -1421,7 +1426,7 @@ wheels = [
 
 [[package]]
 name = "jedi-language-server"
-version = "0.41.3"
+version = "0.46.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cattrs" },
@@ -1430,9 +1435,9 @@ dependencies = [
     { name = "lsprotocol" },
     { name = "pygls" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f3/34/4a35094c680040c8dd598b1ee9153a701289351c1dcbad1a0f2d196c524b/jedi_language_server-0.41.3.tar.gz", hash = "sha256:113ec22b95fadaceefbb704b5f365384bed296b82ede59026be375ecc97a9f8a", size = 29113, upload-time = "2024-02-26T04:28:05.521Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/6e/63/2ae4466db0d5f723bb141990487a46f1add8f6449995172c7d45e6d37c66/jedi_language_server-0.46.0.tar.gz", hash = "sha256:b9ee7cce6cb2bd6fce11115906db41549d7e97b358e0818a23dca164ed0b961a", size = 34602, upload-time = "2025-10-25T20:45:40.647Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b6/67/2cf4419a8c418b0e5cba0b43dc1ea33a0bb42907694d6a786a3644889f32/jedi_language_server-0.41.3-py3-none-any.whl", hash = "sha256:7411f7479cdc9e9ea495f91e20b182a5d00170c0a8a4a87d3a147462282c06af", size = 27615, upload-time = "2024-02-26T04:28:02.084Z" },
+    { url = "https://files.pythonhosted.org/packages/a0/06/c29fe15b67db3170e057376386a7643228b6bcea35df68e884475d8a7897/jedi_language_server-0.46.0-py3-none-any.whl", hash = "sha256:c8003c33a36de9998ac1c6e13ebe3d99b11d06046ae6307d75f54c73e9358ea7", size = 33769, upload-time = "2025-10-25T20:45:39.411Z" },
 ]
 
 [[package]]
@@ -2212,16 +2217,12 @@ wheels = [
 [[package]]
 name = "multilspy"
 version = "0.0.15"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/microsoft/multilspy.git#ee0f6dcd1c0f4c5471d8078580343203b0c73fa7" }
 dependencies = [
     { name = "jedi-language-server" },
     { name = "psutil" },
     { name = "requests" },
     { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d8/a8/4d6ab48e624f911eb5229aa01b3524b916470c9d036a9e8cc96d6fb81673/multilspy-0.0.15.tar.gz", hash = "sha256:b27a0b7c5c5306216b31fe1df9b4a42d2797735d0a78928e0df9ef8dfbcc97c5", size = 120639, upload-time = "2025-04-03T07:01:27.216Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/97/4d/b9d3492d6a7a2536498fc7fd49c1cc7bc86a41acf93b0ad967d75dbe5cd6/multilspy-0.0.15-py3-none-any.whl", hash = "sha256:3fa88939b953ed5d39aba4688a34105ec1e5cf2b2f778167fee2b78b3c0e1427", size = 137361, upload-time = "2025-04-03T07:01:25.492Z" },
 ]
 
 [[package]]
@@ -2820,15 +2821,16 @@ wheels = [
 
 [[package]]
 name = "pygls"
-version = "1.3.1"
+version = "2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "attrs" },
     { name = "cattrs" },
     { name = "lsprotocol" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/b9/41d173dad9eaa9db9c785a85671fc3d68961f08d67706dc2e79011e10b5c/pygls-1.3.1.tar.gz", hash = "sha256:140edceefa0da0e9b3c533547c892a42a7d2fd9217ae848c330c53d266a55018", size = 45527, upload-time = "2024-03-26T18:44:25.679Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/50/2bfc32f3acbc8941042919b59c9f592291127b55d7331b72e67ce7b62f08/pygls-2.0.0.tar.gz", hash = "sha256:99accd03de1ca76fe1e7e317f0968ebccf7b9955afed6e2e3e188606a20b4f07", size = 55796, upload-time = "2025-10-17T19:22:47.925Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/11/19/b74a10dd24548e96e8c80226cbacb28b021bc3a168a7d2709fb0d0185348/pygls-1.3.1-py3-none-any.whl", hash = "sha256:6e00f11efc56321bdeb6eac04f6d86131f654c7d49124344a9ebb968da3dd91e", size = 56031, upload-time = "2024-03-26T18:44:24.249Z" },
+    { url = "https://files.pythonhosted.org/packages/cc/09/14feafc13bebb9c85b29b374889c1549d3700cb572f2d43a1bb940d70315/pygls-2.0.0-py3-none-any.whl", hash = "sha256:b4e54bba806f76781017ded8fd07463b98670f959042c44170cd362088b200cc", size = 69533, upload-time = "2025-10-17T19:22:46.63Z" },
 ]
 
 [[package]]

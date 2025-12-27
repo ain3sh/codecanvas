@@ -91,6 +91,13 @@ select = ["E", "F", "I"]
 
 [tool.uv]
 override-dependencies = [
-    # multilspy pins old lsprotocol but newer version is compatible
+    # multilspy 0.0.15 lacks C++ (clangd) support - use git main until next PyPI release
+    # See: https://github.com/microsoft/multilspy/issues/14
+    "multilspy @ git+https://github.com/microsoft/multilspy.git",
+    # multilspy pins old jedi-language-server/lsprotocol but newer versions are compatible
+    # jedi-language-server 0.46.0+ uses pygls 2.0+ which is compatible with lsprotocol 2024+
+    # See: https://github.com/pappasam/jedi-language-server/blob/main/CHANGELOG.md
+    "jedi-language-server>=0.46.0",
+    "pygls>=2.0.0",
     "lsprotocol>=2024.0.0",
 ]

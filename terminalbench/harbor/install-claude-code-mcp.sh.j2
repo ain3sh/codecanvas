@@ -84,124 +84,67 @@ echo 'export PATH="/opt/venv/bin:$PATH"' >> /etc/profile.d/venv-path.sh
 
 {% if needs_codecanvas %}
 # =============================================================================
-# CodeCanvas LSP warmup: Detect languages in /app, warmup only those
-# Derived from codecanvas/parser/config.py MULTILSPY_LANGUAGES
+# CodeCanvas LSP warmup: Detect languages in /app, download LSP binaries
+# Uses codecanvas.parser.config as source of truth for all language mappings
 # =============================================================================
-log_start "Language detection for LSP warmup"
-LANGS=""
-
-# Python
-[ -n "$(find /app -name '*.py' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS python"
-
-# TypeScript/JavaScript (consolidated)
-[ -n "$(find /app \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \) -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS typescript"
-
-# Go
-[ -n "$(find /app -name '*.go' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS go"
-
-# Rust
-[ -n "$(find /app -name '*.rs' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS rust"
-
-# Java
-[ -n "$(find /app -name '*.java' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS java"
-
-# Ruby
-[ -n "$(find /app -name '*.rb' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS ruby"
-
-# C/C++ (consolidated under cpp for multilspy)
-[ -n "$(find /app \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.cc' -o -name '*.hpp' \) -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS cpp"
-
-# C#
-[ -n "$(find /app -name '*.cs' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS csharp"
-
-# Kotlin
-[ -n "$(find /app \( -name '*.kt' -o -name '*.kts' \) -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS kotlin"
-
-# Dart
-[ -n "$(find /app -name '*.dart' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS dart"
-
-log "Detected languages:$LANGS"
-log_done "Language detection"
-
-# R languageserver (custom LSP, not multilspy) - only if R files present
-if [ -n "$(find /app \( -name '*.R' -o -name '*.r' \) -type f 2>/dev/null | head -1)" ]; then
-    log_start "R languageserver install"
-    apt-get update
-    apt-get install -y --no-install-recommends r-base
-    rm -rf /var/lib/apt/lists/*
-    R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
-    log_done "R languageserver install"
-fi
-
-# Warmup multilspy for detected languages (downloads LSP binaries)
-if [ -n "$LANGS" ]; then
-    log_start "LSP warmup (multilspy parallel)"
-    /opt/venv/bin/python3 -c "
-import sys
-from datetime import datetime
+log_start "LSP warmup (detect + download)"
+/opt/venv/bin/python3 << 'WARMUP_EOF'
+import os, time, tempfile
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from codecanvas.parser.config import EXTENSION_TO_LANG, MULTILSPY_LANGUAGES, LANGUAGE_SERVERS
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import MultilspyConfig
 from multilspy.multilspy_logger import MultilspyLogger
-from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
-import tempfile, os, time
 
-def ts(): return datetime.now().strftime('%H:%M:%S')
+def ts(): return time.strftime('%H:%M:%S')
 
-EXT_MAP = {
-    'python': '.py',
-    'typescript': '.ts',
-    'go': '.go',
-    'rust': '.rs',
-    'java': '.java',
-    'ruby': '.rb',
-    'cpp': '.cpp',
-    'csharp': '.cs',
-    'kotlin': '.kt',
-    'dart': '.dart',
-}
+# Detect languages from /app file extensions
+exts = {('.' + f.rsplit('.', 1)[-1]) for r, _, fs in os.walk('/app') for f in fs if '.' in f}
+lang_keys = {EXTENSION_TO_LANG[e] for e in exts if e in EXTENSION_TO_LANG}
 
-TIMEOUT_PER_LANG = 90  # seconds per language
+# Split into multilspy (auto-download) vs fallback (may need apt)
+multilspy_langs = {MULTILSPY_LANGUAGES[k] for k in lang_keys if k in MULTILSPY_LANGUAGES}
+fallback_langs = {k for k in lang_keys if k in LANGUAGE_SERVERS}
 
-def warmup_lang(lang):
-    '''Warmup single language - downloads binary + starts/stops server.'''
-    print(f'[{ts()}] Starting warmup: {lang}', flush=True)
-    start = time.time()
-    logger = MultilspyLogger()
-    config = MultilspyConfig.from_dict({'code_language': lang})
-    with tempfile.TemporaryDirectory() as td:
-        ext = EXT_MAP.get(lang, '.txt')
-        dummy = os.path.join(td, f'test{ext}')
-        open(dummy, 'w').write('// dummy')
-        print(f'[{ts()}] {lang}: Creating LSP server...', flush=True)
-        lsp = SyncLanguageServer.create(config, logger, td)
-        print(f'[{ts()}] {lang}: Starting server...', flush=True)
-        with lsp.start_server():
-            pass
-        print(f'[{ts()}] {lang}: Server started and stopped OK', flush=True)
-    return lang, time.time() - start
+print(f'[{ts()}] Detected multilspy: {sorted(multilspy_langs) or "none"}', flush=True)
+print(f'[{ts()}] Detected fallback: {sorted(fallback_langs) or "none"}', flush=True)
 
-langs = '$LANGS'.split()
-max_workers = min(4, len(langs))
-print(f'[{ts()}] Warming up {len(langs)} language(s) with {max_workers} worker(s), {TIMEOUT_PER_LANG}s timeout each', flush=True)
+# Warmup multilspy languages (downloads LSP binaries in parallel)
+if multilspy_langs:
+    def warmup(lang):
+        start = time.time()
+        with tempfile.TemporaryDirectory() as td:
+            open(f'{td}/f.txt', 'w').close()
+            SyncLanguageServer.create(MultilspyConfig.from_dict({'code_language': lang}), MultilspyLogger(), td)
+        return lang, time.time() - start
 
-with ThreadPoolExecutor(max_workers=max_workers) as executor:
-    futures = {executor.submit(warmup_lang, lang): lang for lang in langs}
-    for future in as_completed(futures, timeout=TIMEOUT_PER_LANG * len(langs)):
-        lang = futures[future]
-        try:
-            _, elapsed = future.result(timeout=TIMEOUT_PER_LANG)
-            print(f'[{ts()}] {lang} ready ({elapsed:.1f}s)', flush=True)
-        except TimeoutError:
-            print(f'[{ts()}] WARNING: {lang} warmup timed out after {TIMEOUT_PER_LANG}s', flush=True)
-        except Exception as e:
-            print(f'[{ts()}] WARNING: {lang} warmup failed: {e}', flush=True)
+    with ThreadPoolExecutor(max_workers=min(4, len(multilspy_langs))) as ex:
+        for f in as_completed([ex.submit(warmup, l) for l in multilspy_langs]):
+            try:
+                lang, elapsed = f.result(timeout=120)
+                print(f'[{ts()}] {lang}: ready ({elapsed:.1f}s)', flush=True)
+            except Exception as e:
+                print(f'[{ts()}] WARNING: {e}', flush=True)
+
+# Signal fallback languages to shell (for apt-get installs)
+for lang in fallback_langs:
+    open(f'/tmp/.needs_lsp_{lang}', 'w').close()
 
 print(f'[{ts()}] LSP warmup complete', flush=True)
-"
-    log_done "LSP warmup"
-else
-    log "No multilspy languages detected, skipping LSP warmup"
+WARMUP_EOF
+log_done "LSP warmup"
+
+# Fallback language servers (not multilspy, may need apt)
+# sh: bash-language-server already installed via npm above
+# r: needs R base + languageserver package
+if [ -f /tmp/.needs_lsp_r ]; then
+    rm /tmp/.needs_lsp_r
+    log_start "R languageserver"
+    apt-get update && apt-get install -y --no-install-recommends r-base && rm -rf /var/lib/apt/lists/*
+    R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+    log_done "R languageserver"
 fi
+# Add new fallback languages here as needed (check /tmp/.needs_lsp_<lang>)
 {% else %}
 log "CodeCanvas not configured, skipping LSP warmup"
 {% endif %}
