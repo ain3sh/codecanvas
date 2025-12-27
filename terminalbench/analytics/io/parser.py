@@ -278,32 +278,17 @@ class TrajectoryParser:
         )
     
     def _get_elapsed_sec(self, run_entry: Dict[str, Any], traj_data: Dict[str, Any]) -> float:
-        """Get elapsed time from result.json or compute from trajectory timestamps."""
+        """Get agent working time from trajectory timestamps (excludes warmup/sidechain steps)."""
         from datetime import datetime
         
-        # Try result.json first (has started_at/finished_at)
-        results_json_path = run_entry.get("results_json")
-        if results_json_path:
-            results_path = self.runs_dir.parent / results_json_path
-            if results_path.exists():
-                try:
-                    result_data = json.loads(results_path.read_text())
-                    started = result_data.get("started_at")
-                    finished = result_data.get("finished_at")
-                    if started and finished:
-                        # Parse ISO format timestamps
-                        start_dt = datetime.fromisoformat(started.replace("Z", "+00:00"))
-                        end_dt = datetime.fromisoformat(finished.replace("Z", "+00:00"))
-                        return (end_dt - start_dt).total_seconds()
-                except (ValueError, KeyError, json.JSONDecodeError):
-                    pass
-        
-        # Fallback: compute from trajectory step timestamps
+        # Filter to only main task steps (exclude warmup/sidechain)
         steps = traj_data.get("steps", [])
-        if len(steps) >= 2:
+        main_steps = [s for s in steps if not s.get("extra", {}).get("is_sidechain", False)]
+        
+        if len(main_steps) >= 2:
             try:
-                first_ts = steps[0].get("timestamp", "")
-                last_ts = steps[-1].get("timestamp", "")
+                first_ts = main_steps[0].get("timestamp", "")
+                last_ts = main_steps[-1].get("timestamp", "")
                 if first_ts and last_ts:
                     start_dt = datetime.fromisoformat(first_ts.replace("Z", "+00:00"))
                     end_dt = datetime.fromisoformat(last_ts.replace("Z", "+00:00"))
