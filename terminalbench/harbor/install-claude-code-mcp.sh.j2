@@ -2,21 +2,16 @@
 set -e
 
 # =============================================================================
-# Install Claude Code with MCP support + LSP Servers
-# Uses multilspy for auto-download of most LSP binaries
+# Install Claude Code with MCP support
+# Tier 1: Profile-based skip (only codecanvas needs LSP warmup)
+# Tier 2: Language detection (only warmup languages present in /app)
 # =============================================================================
 
 echo "=== Installing system dependencies ==="
 apt-get update
 apt-get install -y --no-install-recommends \
-    curl git build-essential libcairo2-dev ca-certificates \
-    r-base
+    curl git build-essential libcairo2-dev ca-certificates
 rm -rf /var/lib/apt/lists/*
-
-# Install R languageserver (in background)
-echo "=== Installing R languageserver ==="
-R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')" &
-PID_RLSP=$!
 
 # =============================================================================
 # Install Node.js
@@ -36,9 +31,6 @@ npm install -g @anthropic-ai/claude-code@{{ claude_version }} bash-language-serv
 npm install -g @anthropic-ai/claude-code@latest bash-language-server
 {% endif %}
 
-# Wait for R languageserver
-wait $PID_RLSP
-
 # =============================================================================
 # Install Python and uv for MCP servers
 # =============================================================================
@@ -55,11 +47,13 @@ uv python install 3.13
 {% if mcp_git_source %}
 echo "=== Installing MCP servers from git ==="
 cd /tmp
-{% if github_token %}
-git clone https://{{ github_token }}@{{ mcp_git_source | replace('https://', '') }} mcp-repo
-{% else %}
+
+# Use credential helper for private repos (token never written to disk)
+if [ -n "$GITHUB_TOKEN" ]; then
+    git config --global credential.helper '!f() { echo "password=$GITHUB_TOKEN"; }; f'
+fi
 git clone {{ mcp_git_source }} mcp-repo
-{% endif %}
+
 cd mcp-repo
 
 # Create isolated venv and install packages
@@ -70,19 +64,83 @@ uv pip install --python /opt/venv/bin/python ".[codecanvas,locagent]"
 export PATH="/opt/venv/bin:$PATH"
 echo 'export PATH="/opt/venv/bin:$PATH"' >> /etc/profile.d/venv-path.sh
 
-# Warmup multilspy to pre-download LSP binaries
-echo "=== Pre-downloading LSP binaries via multilspy ==="
-/opt/venv/bin/python3 -c "
+{% if needs_codecanvas %}
+# =============================================================================
+# CodeCanvas LSP warmup: Detect languages in /app, warmup only those
+# Derived from codecanvas/parser/config.py MULTILSPY_LANGUAGES
+# =============================================================================
+echo "=== Detecting task languages for LSP warmup ==="
+LANGS=""
+
+# Python
+[ -n "$(find /app -name '*.py' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS python"
+
+# TypeScript/JavaScript (consolidated)
+[ -n "$(find /app \( -name '*.ts' -o -name '*.tsx' -o -name '*.js' -o -name '*.jsx' \) -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS typescript"
+
+# Go
+[ -n "$(find /app -name '*.go' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS go"
+
+# Rust
+[ -n "$(find /app -name '*.rs' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS rust"
+
+# Java
+[ -n "$(find /app -name '*.java' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS java"
+
+# Ruby
+[ -n "$(find /app -name '*.rb' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS ruby"
+
+# C/C++ (consolidated under cpp for multilspy)
+[ -n "$(find /app \( -name '*.c' -o -name '*.h' -o -name '*.cpp' -o -name '*.cc' -o -name '*.hpp' \) -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS cpp"
+
+# C#
+[ -n "$(find /app -name '*.cs' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS csharp"
+
+# Kotlin
+[ -n "$(find /app \( -name '*.kt' -o -name '*.kts' \) -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS kotlin"
+
+# Dart
+[ -n "$(find /app -name '*.dart' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS dart"
+
+echo "Detected languages: $LANGS"
+
+# R languageserver (custom LSP, not multilspy) - only if R files present
+if [ -n "$(find /app \( -name '*.R' -o -name '*.r' \) -type f 2>/dev/null | head -1)" ]; then
+    echo "=== Installing R languageserver ==="
+    apt-get update
+    apt-get install -y --no-install-recommends r-base
+    rm -rf /var/lib/apt/lists/*
+    R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+fi
+
+# Warmup multilspy for detected languages (downloads LSP binaries)
+if [ -n "$LANGS" ]; then
+    echo "=== Pre-downloading LSP binaries via multilspy ==="
+    /opt/venv/bin/python3 -c "
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import MultilspyConfig
 import tempfile, os
 
-for lang in ['java', 'python', 'rust', 'typescript', 'go', 'ruby', 'cpp']:
+langs = '$LANGS'.split()
+ext_map = {
+    'python': '.py',
+    'typescript': '.ts',
+    'go': '.go',
+    'rust': '.rs',
+    'java': '.java',
+    'ruby': '.rb',
+    'cpp': '.cpp',
+    'csharp': '.cs',
+    'kotlin': '.kt',
+    'dart': '.dart',
+}
+
+for lang in langs:
     try:
         print(f'Warming up {lang}...')
         config = MultilspyConfig.from_dict({'code_language': lang})
         with tempfile.TemporaryDirectory() as td:
-            ext = {'java': '.java', 'python': '.py', 'rust': '.rs', 'typescript': '.ts', 'go': '.go', 'ruby': '.rb', 'cpp': '.cpp'}[lang]
+            ext = ext_map.get(lang, '.txt')
             dummy = os.path.join(td, f'test{ext}')
             open(dummy, 'w').write('// dummy')
             lsp = SyncLanguageServer.create(config, None, td)
@@ -92,6 +150,12 @@ for lang in ['java', 'python', 'rust', 'typescript', 'go', 'ruby', 'cpp']:
     except Exception as e:
         print(f'  Warning: {lang} warmup failed: {e}')
 "
+else
+    echo "=== No multilspy languages detected, skipping LSP warmup ==="
+fi
+{% else %}
+echo "=== CodeCanvas not configured, skipping LSP warmup ==="
+{% endif %}
 
 cd /
 rm -rf /tmp/mcp-repo

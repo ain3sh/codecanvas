@@ -68,12 +68,20 @@ class ClaudeCodeMCP(ClaudeCode):
         return Path(__file__).parent / "install-claude-code-mcp.sh.j2"
 
     @property
-    def _template_variables(self) -> dict[str, str | None]:
+    def _needs_codecanvas(self) -> bool:
+        """Check if codecanvas MCP server is configured (requires multilspy warmup)."""
+        if not self.mcp_config:
+            return False
+        config = json.loads(self.mcp_config) if isinstance(self.mcp_config, str) else self.mcp_config
+        return "codecanvas" in config.get("mcpServers", {})
+
+    @property
+    def _template_variables(self) -> dict[str, str | bool | None]:
         """Variables to pass to the install template."""
         return {
             "claude_version": self.claude_version or self._version,
             "mcp_git_source": self.mcp_git_source,
-            "github_token": self.github_token,
+            "needs_codecanvas": self._needs_codecanvas,
         }
 
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
