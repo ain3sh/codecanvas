@@ -116,18 +116,15 @@ fi
 
 # Warmup multilspy for detected languages (downloads LSP binaries)
 if [ -n "$LANGS" ]; then
-    echo "=== Pre-downloading LSP binaries via multilspy ==="
+    echo "=== Pre-downloading LSP binaries via multilspy (parallel) ==="
     /opt/venv/bin/python3 -c "
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import MultilspyConfig
-import tempfile, os, logging
+from multilspy.multilspy_logger import MultilspyLogger
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import tempfile, os, time
 
-# multilspy requires a logger object
-logging.basicConfig(level=logging.WARNING)
-logger = logging.getLogger('multilspy')
-
-langs = '$LANGS'.split()
-ext_map = {
+EXT_MAP = {
     'python': '.py',
     'typescript': '.ts',
     'go': '.go',
@@ -140,20 +137,33 @@ ext_map = {
     'dart': '.dart',
 }
 
-for lang in langs:
-    try:
-        print(f'Warming up {lang}...')
-        config = MultilspyConfig.from_dict({'code_language': lang})
-        with tempfile.TemporaryDirectory() as td:
-            ext = ext_map.get(lang, '.txt')
-            dummy = os.path.join(td, f'test{ext}')
-            open(dummy, 'w').write('// dummy')
-            lsp = SyncLanguageServer.create(config, logger, td)
-            with lsp.start_server():
-                pass
-        print(f'  {lang} ready')
-    except Exception as e:
-        print(f'  Warning: {lang} warmup failed: {e}')
+def warmup_lang(lang):
+    '''Warmup single language - downloads binary + starts/stops server.'''
+    start = time.time()
+    logger = MultilspyLogger()  # Each thread gets its own logger
+    config = MultilspyConfig.from_dict({'code_language': lang})
+    with tempfile.TemporaryDirectory() as td:
+        ext = EXT_MAP.get(lang, '.txt')
+        dummy = os.path.join(td, f'test{ext}')
+        open(dummy, 'w').write('// dummy')
+        lsp = SyncLanguageServer.create(config, logger, td)
+        with lsp.start_server():
+            pass
+    return lang, time.time() - start
+
+langs = '$LANGS'.split()
+max_workers = min(4, len(langs))
+print(f'Warming up {len(langs)} language(s) with {max_workers} worker(s)...')
+
+with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    futures = {executor.submit(warmup_lang, lang): lang for lang in langs}
+    for future in as_completed(futures):
+        lang = futures[future]
+        try:
+            _, elapsed = future.result()
+            print(f'  {lang} ready ({elapsed:.1f}s)')
+        except Exception as e:
+            print(f'  Warning: {lang} warmup failed: {e}')
 "
 else
     echo "=== No multilspy languages detected, skipping LSP warmup ==="
