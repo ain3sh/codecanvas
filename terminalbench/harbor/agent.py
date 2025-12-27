@@ -81,6 +81,7 @@ class ClaudeCodeMCP(ClaudeCode):
         return {
             "claude_version": self.claude_version or self._version,
             "mcp_git_source": self.mcp_git_source,
+            "github_token": self.github_token,
             "needs_codecanvas": self._needs_codecanvas,
         }
 
