@@ -7,45 +7,61 @@ set -e
 # Tier 2: Language detection (only warmup languages present in /app)
 # =============================================================================
 
-echo "=== Installing system dependencies ==="
+# Timestamped logging helper
+log() { echo "[$(date '+%H:%M:%S')] $1"; }
+log_start() { echo "[$(date '+%H:%M:%S')] >>> START: $1"; STEP_START=$(date +%s); }
+log_done() { 
+    local elapsed=$(($(date +%s) - STEP_START))
+    echo "[$(date '+%H:%M:%S')] <<< DONE: $1 (${elapsed}s)"
+}
+
+log "=== INSTALL SCRIPT STARTED ==="
+INSTALL_START=$(date +%s)
+
+log_start "System dependencies (apt-get)"
 apt-get update
 apt-get install -y --no-install-recommends \
     curl git build-essential libcairo2-dev ca-certificates
 rm -rf /var/lib/apt/lists/*
+log_done "System dependencies"
 
 # =============================================================================
 # Install Node.js
 # =============================================================================
-echo "=== Installing Node.js via nvm ==="
+log_start "Node.js via nvm"
 curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.2/install.sh | bash
 source "$HOME/.nvm/nvm.sh"
 nvm install 22
+log_done "Node.js"
 
 # =============================================================================
 # Install Claude Code and bash-language-server
 # =============================================================================
-echo "=== Installing Claude Code and bash-language-server ==="
+log_start "Claude Code + bash-language-server (npm)"
 {% if claude_version %}
 npm install -g @anthropic-ai/claude-code@{{ claude_version }} bash-language-server
 {% else %}
 npm install -g @anthropic-ai/claude-code@latest bash-language-server
 {% endif %}
+log_done "Claude Code + bash-language-server"
 
 # =============================================================================
 # Install Python and uv for MCP servers
 # =============================================================================
-echo "=== Installing uv (Python package manager) ==="
+log_start "uv (Python package manager)"
 curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
+log_done "uv"
 
-echo "=== Setting up Python environment ==="
+log_start "Python 3.13"
 uv python install 3.13
+log_done "Python 3.13"
 
 # =============================================================================
 # Install MCP servers from git source
 # =============================================================================
 {% if mcp_git_source %}
-echo "=== Installing MCP servers from git ==="
+log_start "Git clone MCP: {{ mcp_git_source }}"
 cd /tmp
 
 # Clone repo (use token in URL for private repos)
@@ -54,12 +70,13 @@ git clone $(echo "{{ mcp_git_source }}" | sed "s|https://github.com|https://x-ac
 {% else %}
 git clone {{ mcp_git_source }} mcp-repo
 {% endif %}
-
 cd mcp-repo
+log_done "Git clone MCP"
 
-# Create isolated venv and install packages
+log_start "Python venv + pip install MCP packages"
 uv venv /opt/venv --python 3.13
 uv pip install --python /opt/venv/bin/python ".[codecanvas,locagent]"
+log_done "Python venv + pip install MCP packages"
 
 # Add venv bin to PATH
 export PATH="/opt/venv/bin:$PATH"
@@ -70,7 +87,7 @@ echo 'export PATH="/opt/venv/bin:$PATH"' >> /etc/profile.d/venv-path.sh
 # CodeCanvas LSP warmup: Detect languages in /app, warmup only those
 # Derived from codecanvas/parser/config.py MULTILSPY_LANGUAGES
 # =============================================================================
-echo "=== Detecting task languages for LSP warmup ==="
+log_start "Language detection for LSP warmup"
 LANGS=""
 
 # Python
@@ -103,26 +120,32 @@ LANGS=""
 # Dart
 [ -n "$(find /app -name '*.dart' -type f 2>/dev/null | head -1)" ] && LANGS="$LANGS dart"
 
-echo "Detected languages: $LANGS"
+log "Detected languages:$LANGS"
+log_done "Language detection"
 
 # R languageserver (custom LSP, not multilspy) - only if R files present
 if [ -n "$(find /app \( -name '*.R' -o -name '*.r' \) -type f 2>/dev/null | head -1)" ]; then
-    echo "=== Installing R languageserver ==="
+    log_start "R languageserver install"
     apt-get update
     apt-get install -y --no-install-recommends r-base
     rm -rf /var/lib/apt/lists/*
     R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+    log_done "R languageserver install"
 fi
 
 # Warmup multilspy for detected languages (downloads LSP binaries)
 if [ -n "$LANGS" ]; then
-    echo "=== Pre-downloading LSP binaries via multilspy (parallel) ==="
+    log_start "LSP warmup (multilspy parallel)"
     /opt/venv/bin/python3 -c "
+import sys
+from datetime import datetime
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import MultilspyConfig
 from multilspy.multilspy_logger import MultilspyLogger
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 import tempfile, os, time
+
+def ts(): return datetime.now().strftime('%H:%M:%S')
 
 EXT_MAP = {
     'python': '.py',
@@ -137,48 +160,61 @@ EXT_MAP = {
     'dart': '.dart',
 }
 
+TIMEOUT_PER_LANG = 90  # seconds per language
+
 def warmup_lang(lang):
     '''Warmup single language - downloads binary + starts/stops server.'''
+    print(f'[{ts()}] Starting warmup: {lang}', flush=True)
     start = time.time()
-    logger = MultilspyLogger()  # Each thread gets its own logger
+    logger = MultilspyLogger()
     config = MultilspyConfig.from_dict({'code_language': lang})
     with tempfile.TemporaryDirectory() as td:
         ext = EXT_MAP.get(lang, '.txt')
         dummy = os.path.join(td, f'test{ext}')
         open(dummy, 'w').write('// dummy')
+        print(f'[{ts()}] {lang}: Creating LSP server...', flush=True)
         lsp = SyncLanguageServer.create(config, logger, td)
+        print(f'[{ts()}] {lang}: Starting server...', flush=True)
         with lsp.start_server():
             pass
+        print(f'[{ts()}] {lang}: Server started and stopped OK', flush=True)
     return lang, time.time() - start
 
 langs = '$LANGS'.split()
 max_workers = min(4, len(langs))
-print(f'Warming up {len(langs)} language(s) with {max_workers} worker(s)...')
+print(f'[{ts()}] Warming up {len(langs)} language(s) with {max_workers} worker(s), {TIMEOUT_PER_LANG}s timeout each', flush=True)
 
 with ThreadPoolExecutor(max_workers=max_workers) as executor:
     futures = {executor.submit(warmup_lang, lang): lang for lang in langs}
-    for future in as_completed(futures):
+    for future in as_completed(futures, timeout=TIMEOUT_PER_LANG * len(langs)):
         lang = futures[future]
         try:
-            _, elapsed = future.result()
-            print(f'  {lang} ready ({elapsed:.1f}s)')
+            _, elapsed = future.result(timeout=TIMEOUT_PER_LANG)
+            print(f'[{ts()}] {lang} ready ({elapsed:.1f}s)', flush=True)
+        except TimeoutError:
+            print(f'[{ts()}] WARNING: {lang} warmup timed out after {TIMEOUT_PER_LANG}s', flush=True)
         except Exception as e:
-            print(f'  Warning: {lang} warmup failed: {e}')
+            print(f'[{ts()}] WARNING: {lang} warmup failed: {e}', flush=True)
+
+print(f'[{ts()}] LSP warmup complete', flush=True)
 "
+    log_done "LSP warmup"
 else
-    echo "=== No multilspy languages detected, skipping LSP warmup ==="
+    log "No multilspy languages detected, skipping LSP warmup"
 fi
 {% else %}
-echo "=== CodeCanvas not configured, skipping LSP warmup ==="
+log "CodeCanvas not configured, skipping LSP warmup"
 {% endif %}
 
 cd /
 rm -rf /tmp/mcp-repo
 {% else %}
-echo "=== No MCP git source specified, skipping MCP installation ==="
+log "No MCP git source specified, skipping MCP installation"
 {% endif %}
 
-echo "=== Installation complete ==="
-claude --version || echo "Claude Code installed"
-uv --version
-python3 --version
+INSTALL_ELAPSED=$(($(date +%s) - INSTALL_START))
+log "=== INSTALL SCRIPT COMPLETE (${INSTALL_ELAPSED}s total) ==="
+log "Versions:"
+claude --version 2>/dev/null || log "  Claude Code: installed"
+log "  uv: $(uv --version 2>/dev/null || echo 'N/A')"
+log "  python: $(python3 --version 2>/dev/null || echo 'N/A')"
