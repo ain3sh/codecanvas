@@ -270,11 +270,13 @@ class MultilspyBackend:
                 raise LSPError(f"Language {self.lang} not supported by multilspy")
 
             try:
+                import logging
+
                 from multilspy import SyncLanguageServer
                 from multilspy.multilspy_config import MultilspyConfig
 
                 config = MultilspyConfig.from_dict({"code_language": multilspy_lang})
-                logger: Any = None
+                logger = logging.getLogger("multilspy")
                 self._lsp = SyncLanguageServer.create(config, logger, self.workspace_root)
                 self._lsp.start_server().__enter__()
             except Exception as e:

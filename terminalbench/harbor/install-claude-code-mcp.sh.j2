@@ -120,7 +120,11 @@ if [ -n "$LANGS" ]; then
     /opt/venv/bin/python3 -c "
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import MultilspyConfig
-import tempfile, os
+import tempfile, os, logging
+
+# multilspy requires a logger object
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger('multilspy')
 
 langs = '$LANGS'.split()
 ext_map = {
@@ -144,7 +148,7 @@ for lang in langs:
             ext = ext_map.get(lang, '.txt')
             dummy = os.path.join(td, f'test{ext}')
             open(dummy, 'w').write('// dummy')
-            lsp = SyncLanguageServer.create(config, None, td)
+            lsp = SyncLanguageServer.create(config, logger, td)
             with lsp.start_server():
                 pass
         print(f'  {lang} ready')
