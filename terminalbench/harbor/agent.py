@@ -123,7 +123,7 @@ class ClaudeCodeMCP(ClaudeCode):
         # Build the claude command parts
         cmd_parts = [
             "claude",
-            "--debug", # get detailed logs
+            # "--debug", #! disabled: triggers stack overflow in Claude Code 2.0.76 logging
             "--verbose",
             "--output-format", "stream-json",
             "--dangerously-skip-permissions",  # Non-interactive: skip permission prompts
