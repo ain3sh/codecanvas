@@ -77,7 +77,8 @@ def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, L
     # Harbor configuration
     parser.add_argument("--harbor-bin", default=cfg.harbor_bin, help="harbor executable (default: use uvx)")
     parser.add_argument("--container-env", default=cfg.container_env, help="container runtime (docker|daytona|modal|e2b)")
-    parser.add_argument("--extra-flag", action="append", default=[], help="extra flag to pass to harbor run")
+    parser.add_argument("--extra-flag", action="append", default=[], help="extra flag to pass to harbor run (use = for flags with values)")
+    parser.add_argument("--registry-path", type=Path, help="local registry.json path (workaround for broken remote registry)")
     parser.add_argument("--profiles-parallel", type=int, default=0, help="parallel profile runs (0=sequential)")
     parser.add_argument("--env-file", type=Path, default=Path(cfg.env_file) if cfg.env_file else None)
 
@@ -294,6 +295,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         dry_run=args.dry_run,
         extra_flags=args.extra_flag,
         env_file=env_file,
+        registry_path=args.registry_path,
     )
 
     all_results = runner.run_profiles(tasks, profiles, profiles_parallel=args.profiles_parallel)

@@ -178,6 +178,7 @@ tasks:
 | `--batch N` | Batch ID (default: auto-increment) | auto |
 | `--attempts N` | Attempts per task | `1` |
 | `--retries N` | Retries on failure | `0` |
+| `--registry-path FILE` | Local registry.json (workaround for broken remote) | remote |
 | `--parallel`, `-n` | Parallel workers | `0` |
 | `--container-env` | Runtime (docker/daytona/modal/e2b) | `docker` |
 | `--dry-run` | Print commands without executing | |

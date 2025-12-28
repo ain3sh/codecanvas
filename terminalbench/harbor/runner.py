@@ -72,6 +72,7 @@ class HarborRunner:
         extra_flags: Optional[Sequence[str]] = None,
         env_file: Path | str | None = None,
         build_cache_path: Path | None = None,
+        registry_path: Path | None = None,
     ) -> None:
         self.harbor_bin = harbor_bin  # None = use uvx (default)
         self.output_root = Path(output_root).resolve() if output_root else None
@@ -83,6 +84,7 @@ class HarborRunner:
         self.extra_flags = list(extra_flags) if extra_flags else []
         self.env_from_file = load_env_file(env_file)
         self.build_cache_path = build_cache_path or CONFIG_DIR / "build-hash.json"
+        self.registry_path = Path(registry_path) if registry_path else None
 
     # ------------------------------------------------------------------
     # Build fingerprint helpers
@@ -163,6 +165,8 @@ class HarborRunner:
             cmd.append("--no-delete")
         if force_build:
             cmd.append("--force-build")
+        if self.registry_path:
+            cmd.extend(["--registry-path", str(self.registry_path)])
         if self.extra_flags:
             cmd.extend(self.extra_flags)
         return cmd
