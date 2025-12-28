@@ -220,33 +220,24 @@ class Parser:
         used_lsp = False
 
         if self.use_lsp and has_lsp_support(lang):
-            from .config import LANGUAGE_SERVERS
             from .lsp import LSPError
 
-            if not has_lsp_support(lang):
-                cmd0 = (LANGUAGE_SERVERS.get(lang) or {}).get("cmd")
-                self.last_summary.add_lsp_fallback(
-                    file_path,
-                    "missing_server",
-                    detail=(cmd0[0] if cmd0 else lang),
-                )
-            else:
-                try:
-                    self._parse_with_lsp(file_path, file_label, text, lang, graph, module_id=module_id)
-                    used_lsp = True
-                except LSPError as e:
-                    msg = str(e).lower()
-                    if "missing language server" in msg or "not found" in msg:
-                        category = "missing_server"
-                    elif "timed out" in msg:
-                        category = "timeout"
-                    elif getattr(e, "code", None) is not None:
-                        category = "protocol_error"
-                    else:
-                        category = "lsp_error"
-                    self.last_summary.add_lsp_fallback(file_path, category, detail=str(e))
-                except Exception as e:
-                    self.last_summary.add_lsp_fallback(file_path, "unknown", detail=type(e).__name__)
+            try:
+                self._parse_with_lsp(file_path, file_label, text, lang, graph, module_id=module_id)
+                used_lsp = True
+            except LSPError as e:
+                msg = str(e).lower()
+                if "missing" in msg or "not found" in msg or "not supported" in msg:
+                    category = "missing_server"
+                elif "timed out" in msg:
+                    category = "timeout"
+                elif getattr(e, "code", None) is not None:
+                    category = "protocol_error"
+                else:
+                    category = "lsp_error"
+                self.last_summary.add_lsp_fallback(file_path, category, detail=str(e))
+            except Exception as e:
+                self.last_summary.add_lsp_fallback(file_path, "unknown", detail=type(e).__name__)
 
         parsed_ts = parse_source(text, file_path=file_path, lang_key=lang) if has_treesitter_support(lang) else None
 
@@ -279,13 +270,7 @@ class Parser:
         module_id: str,
     ) -> None:
         """Parse defs using LSP document symbols."""
-        from .config import LANGUAGE_SERVERS
         from .lsp import LSPError, get_lsp_runtime, get_lsp_session_manager, path_to_uri
-
-        server_config = LANGUAGE_SERVERS.get(lang)
-        if not server_config:
-            raise LSPError(f"No LSP server for {lang}")
-
         from .utils import find_workspace_root
 
         workspace = str(find_workspace_root(file_path))
@@ -293,7 +278,8 @@ class Parser:
 
         async def _fetch_symbols():
             mgr = get_lsp_session_manager()
-            sess = await mgr.get(lang=lang, workspace_root=workspace, cmd=server_config["cmd"])
+            # LspSession routes to multilspy or fallback based on language
+            sess = await mgr.get(lang=lang, workspace_root=workspace)
             return await sess.document_symbols(uri, text=text)
 
         symbols = get_lsp_runtime().run(_fetch_symbols())

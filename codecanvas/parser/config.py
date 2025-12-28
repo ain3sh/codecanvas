@@ -24,9 +24,9 @@ MULTILSPY_LANGUAGES: Dict[str, str] = {
     "dart": "dart",
 }
 
-# Fallback language server configurations (languages not supported by multilspy)
-# Maps language key -> server command and initialization options
-LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
+# Custom LSP server configurations (languages not supported by multilspy)
+# These require external binaries to be installed
+CUSTOM_LSP_SERVERS: Dict[str, Dict[str, Any]] = {
     "sh": {
         "cmd": ["bash-language-server", "start"],
         "init_options": {},
@@ -36,6 +36,12 @@ LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
         "init_options": {},
     },
 }
+
+# Backwards compatibility alias
+LANGUAGE_SERVERS = CUSTOM_LSP_SERVERS
+
+# All languages with LSP support (multilspy or custom)
+LSP_SUPPORTED_LANGUAGES: frozenset[str] = frozenset(MULTILSPY_LANGUAGES) | frozenset(CUSTOM_LSP_SERVERS)
 
 # File extension to language key mapping
 EXTENSION_TO_LANG: Dict[str, str] = {
@@ -106,21 +112,25 @@ def get_multilspy_language(lang: str) -> Optional[str]:
 
 @lru_cache
 def has_lsp_support(lang: str) -> bool:
-    """Check if LSP is available for a language (multilspy or fallback)."""
+    """Check if LSP is available for a language.
+    
+    - Multilspy languages: always available (auto-downloads binaries)
+    - Custom LSP languages: only if the external binary is installed
+    """
     if lang in MULTILSPY_LANGUAGES:
-        return True
-    cfg = LANGUAGE_SERVERS.get(lang)
+        return True  # Multilspy auto-downloads, always available
+    cfg = CUSTOM_LSP_SERVERS.get(lang)
     if not cfg:
         return False
     cmd = cfg.get("cmd")
-    if not cmd:
-        return False
-    return shutil.which(cmd[0]) is not None
+    return bool(cmd and shutil.which(cmd[0]))
 
 
-def get_fallback_lsp_command(lang: str) -> Optional[List[str]]:
-    """Get fallback LSP server command for a language."""
-    cfg = LANGUAGE_SERVERS.get(lang)
-    if not cfg:
-        return None
-    return cfg.get("cmd")
+def get_custom_lsp_command(lang: str) -> Optional[List[str]]:
+    """Get custom LSP server command for a language (non-multilspy)."""
+    cfg = CUSTOM_LSP_SERVERS.get(lang)
+    return cfg.get("cmd") if cfg else None
+
+
+# Backwards compatibility alias
+get_fallback_lsp_command = get_custom_lsp_command

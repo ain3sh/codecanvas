@@ -23,7 +23,7 @@ from lsprotocol import types as lsp
 from lsprotocol.converters import get_converter
 
 from .config import (
-    LANGUAGE_SERVERS,
+    CUSTOM_LSP_SERVERS,
     MULTILSPY_LANGUAGES,
     get_multilspy_language,
 )
@@ -631,8 +631,8 @@ class LspSession:
         # Determine which backend to use
         if lang in MULTILSPY_LANGUAGES:
             self._backend = MultilspyBackend(lang, workspace_root)
-        elif lang in LANGUAGE_SERVERS:
-            cfg = LANGUAGE_SERVERS[lang]
+        elif lang in CUSTOM_LSP_SERVERS:
+            cfg = CUSTOM_LSP_SERVERS[lang]
             self._backend = CustomLspBackend(lang, workspace_root, cfg["cmd"])
         else:
             raise LSPError(f"No LSP support for language: {lang}")
