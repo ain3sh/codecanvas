@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-5-20250929"
 DEFAULT_REASONING = "medium"
 
-# Path to Python in the MCP venv created by install-claude-code-mcp.sh
+# Path to Python in the MCP venv created by install-claude-code-utils.sh
 MCP_VENV_PYTHON = "/opt/venv/bin/python"
 
 # Aliases for MCP server names -> source directory names (for USAGE.md discovery)

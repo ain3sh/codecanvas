@@ -115,10 +115,37 @@ def _patched_download_file(logger, url: str, target_path: str) -> None:
         raise MultilspyException("Error downloading file.") from None
 
 FileUtils.download_file = _patched_download_file
+
+# =============================================================================
+# Auto-install LSP servers for languages where multilspy only checks existence
+# (Harbor provides the base toolchain, we just need the language server)
+# =============================================================================
+import subprocess
+
+LSP_INSTALL_COMMANDS = {
+    'go': ['go', 'install', 'golang.org/x/tools/gopls@latest'],
+    'ruby': ['gem', 'install', 'solargraph', '--no-document'],
+}
+
+def try_install_lsp(lang: str) -> bool:
+    """Try to install LSP server for languages that need it. Returns True if installed."""
+    cmd = LSP_INSTALL_COMMANDS.get(lang)
+    if not cmd:
+        return False
+    # Check if base toolchain exists
+    if shutil.which(cmd[0]) is None:
+        return False
+    try:
+        print(f'[{time.strftime("%H:%M:%S")}] {lang}: installing {cmd[0]} LSP server...', flush=True)
+        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
+        return True
+    except Exception as e:
+        print(f'[{time.strftime("%H:%M:%S")}] {lang}: install failed: {e}', flush=True)
+        return False
 # =============================================================================
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from codecanvas.parser.config import EXTENSION_TO_LANG, MULTILSPY_LANGUAGES, LANGUAGE_SERVERS
+from codecanvas.parser.config import EXTENSION_TO_LANG, MULTILSPY_LANGUAGES, CUSTOM_LSP_SERVERS
 from multilspy import SyncLanguageServer
 from multilspy.multilspy_config import MultilspyConfig
 from multilspy.multilspy_logger import MultilspyLogger
@@ -129,32 +156,42 @@ def ts(): return time.strftime('%H:%M:%S')
 exts = {('.' + f.rsplit('.', 1)[-1]) for r, _, fs in os.walk('/app') for f in fs if '.' in f}
 lang_keys = {EXTENSION_TO_LANG[e] for e in exts if e in EXTENSION_TO_LANG}
 
-# Split into multilspy (auto-download) vs fallback (may need apt)
+# Split into multilspy vs custom LSP
 multilspy_langs = {MULTILSPY_LANGUAGES[k] for k in lang_keys if k in MULTILSPY_LANGUAGES}
-fallback_langs = {k for k in lang_keys if k in LANGUAGE_SERVERS}
+custom_lsp_langs = {k for k in lang_keys if k in CUSTOM_LSP_SERVERS}
 
 print(f'[{ts()}] Detected multilspy: {sorted(multilspy_langs) or "none"}', flush=True)
-print(f'[{ts()}] Detected fallback: {sorted(fallback_langs) or "none"}', flush=True)
+print(f'[{ts()}] Detected custom LSP: {sorted(custom_lsp_langs) or "none"}', flush=True)
 
-# Warmup multilspy languages (downloads LSP binaries in parallel)
+# Warmup multilspy languages (downloads LSP binaries, auto-installs if needed)
 if multilspy_langs:
     def warmup(lang):
         start = time.time()
         with tempfile.TemporaryDirectory() as td:
             open(f'{td}/f.txt', 'w').close()
-            SyncLanguageServer.create(MultilspyConfig.from_dict({'code_language': lang}), MultilspyLogger(), td)
+            try:
+                SyncLanguageServer.create(MultilspyConfig.from_dict({'code_language': lang}), MultilspyLogger(), td)
+            except Exception as e:
+                # If LSP not found, try to install it and retry once
+                if 'not found' in str(e).lower() or 'not installed' in str(e).lower():
+                    if try_install_lsp(lang):
+                        SyncLanguageServer.create(MultilspyConfig.from_dict({'code_language': lang}), MultilspyLogger(), td)
+                    else:
+                        raise
+                else:
+                    raise
         return lang, time.time() - start
 
     with ThreadPoolExecutor(max_workers=min(4, len(multilspy_langs))) as ex:
         for f in as_completed([ex.submit(warmup, l) for l in multilspy_langs]):
             try:
-                lang, elapsed = f.result(timeout=120)
+                lang, elapsed = f.result(timeout=180)
                 print(f'[{ts()}] {lang}: ready ({elapsed:.1f}s)', flush=True)
             except Exception as e:
-                print(f'[{ts()}] WARNING: {e}', flush=True)
+                print(f'[{ts()}] WARNING: {lang} warmup failed: {e}', flush=True)
 
-# Signal fallback languages to shell (for apt-get installs)
-for lang in fallback_langs:
+# Signal custom LSP languages to shell (for apt-get installs like R)
+for lang in custom_lsp_langs:
     open(f'/tmp/.needs_lsp_{lang}', 'w').close()
 
 print(f'[{ts()}] LSP warmup complete', flush=True)

@@ -93,7 +93,7 @@ class HarborRunner:
     def _compute_profile_fingerprint(self, profile: AgentProfile) -> str:
         """Fingerprint a profile's install-affecting attributes for build caching."""
 
-        template_path = Path(__file__).parent / "install-claude-code-mcp.sh.j2"
+        template_path = Path(__file__).parent / "install-claude-code-utils.sh.j2"
         template_bytes = template_path.read_bytes() if template_path.exists() else b""
 
         github_token_present = bool(

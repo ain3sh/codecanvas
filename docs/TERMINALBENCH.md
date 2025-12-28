@@ -119,7 +119,7 @@ terminalbench/
 ├── harbor/
 │   ├── runner.py      # HarborRunner: subprocess orchestration
 │   ├── agent.py       # ClaudeCodeMCP: custom agent class
-│   └── install-claude-code-mcp.sh.j2  # Container setup template
+│   └── install-claude-code-utils.sh.j2  # Container setup template
 ├── ui/
 │   ├── cli.py         # argparse CLI with config-set support
 │   └── display.py     # Output formatting
@@ -139,7 +139,7 @@ class ClaudeCodeMCP(ClaudeCode):
         # Auto-approve mcp__* tools
 ```
 
-**Install Template** (`install-claude-code-mcp.sh.j2`):
+**Install Template** (`install-claude-code-utils.sh.j2`):
 1. Install Node.js (via fnm) and Claude Code CLI
 2. Install uv for Python package management
 3. Clone MCP source repository (with optional GitHub token)

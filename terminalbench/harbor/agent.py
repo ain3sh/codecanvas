@@ -65,7 +65,7 @@ class ClaudeCodeMCP(ClaudeCode):
     @property
     def _install_agent_template_path(self) -> Path:
         """Path to the custom install template with MCP support."""
-        return Path(__file__).parent / "install-claude-code-mcp.sh.j2"
+        return Path(__file__).parent / "install-claude-code-utils.sh.j2"
 
     @property
     def _needs_codecanvas(self) -> bool:

@@ -312,12 +312,19 @@ class Parser:
             end = min(len(lines), line + span)
             return "\n".join(lines[line:end])
 
+        # SymbolKinds that represent type definitions (map to NodeKind.CLASS)
+        CLASS_KINDS = (SymbolKind.Class, SymbolKind.Struct, SymbolKind.Interface, SymbolKind.Enum)
+        # SymbolKinds that represent callables (map to NodeKind.FUNC)
+        FUNC_KINDS = (SymbolKind.Function, SymbolKind.Method, SymbolKind.Constructor)
+        # SymbolKinds that are containers - recurse into children but don't create nodes
+        CONTAINER_KINDS = (SymbolKind.Module, SymbolKind.Namespace, SymbolKind.Package)
+
         for sym in symbols:
             kind = sym.kind
             name = sym.name
             line = sym.range.start.line
 
-            if kind == SymbolKind.Class:
+            if kind in CLASS_KINDS:
                 class_id = make_class_id(file_label, name)
                 class_ids[name] = class_id
                 start = sym.range.start
@@ -349,7 +356,7 @@ class Parser:
                         class_ids=class_ids,
                     )
 
-            elif kind in (SymbolKind.Function, SymbolKind.Method):
+            elif kind in FUNC_KINDS:
                 start = sym.range.start
                 end = sym.range.end
                 sel = getattr(sym, "selection_range", None)
@@ -375,6 +382,20 @@ class Parser:
                         end_char=end.character,
                     )
                 )
+
+            elif kind in CONTAINER_KINDS:
+                # Containers (Module, Namespace, Package) - recurse into children
+                if hasattr(sym, "children") and sym.children:
+                    self._process_lsp_symbols(
+                        sym.children,
+                        module_id,
+                        file_label,
+                        fs_path,
+                        lines,
+                        graph,
+                        parent_class=parent_class,
+                        class_ids=class_ids,
+                    )
 
     def _add_def_nodes(
         self,

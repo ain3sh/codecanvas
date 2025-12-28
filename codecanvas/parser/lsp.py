@@ -122,8 +122,28 @@ def _parse_definition_locations(result: Any) -> List[Dict[str, Any]]:
 
 
 def _parse_document_symbol(data: Any) -> lsp.DocumentSymbol:
-    """Parse DocumentSymbol from JSON response."""
+    """Parse DocumentSymbol or SymbolInformation from JSON response.
+    
+    Handles both formats:
+    - DocumentSymbol: has 'range' and 'selectionRange' directly
+    - SymbolInformation: has 'location.range' (returned by clangd, etc.)
+    """
     d = data if isinstance(data, dict) else _to_dict(data)
+    
+    # Handle SymbolInformation format (location.range)
+    if "location" in d and "range" not in d:
+        loc = d.get("location", {})
+        range_data = loc.get("range", {})
+        return lsp.DocumentSymbol(
+            name=d["name"],
+            kind=lsp.SymbolKind(d["kind"]),
+            range=_parse_range(range_data),
+            selection_range=_parse_range(range_data),  # Use same range
+            detail=d.get("detail"),
+            children=None,  # SymbolInformation doesn't have children
+        )
+    
+    # Handle DocumentSymbol format (range directly)
     children_raw = d.get("children", [])
     children = (
         [_parse_document_symbol(c) for c in children_raw]
@@ -133,8 +153,8 @@ def _parse_document_symbol(data: Any) -> lsp.DocumentSymbol:
     return lsp.DocumentSymbol(
         name=d["name"],
         kind=lsp.SymbolKind(d["kind"]),
-        range=_parse_range(d["range"]),
-        selection_range=_parse_range(d["selectionRange"]),
+        range=_parse_range(d.get("range", {})),
+        selection_range=_parse_range(d.get("selectionRange", d.get("range", {}))),
         detail=d.get("detail"),
         children=children or None,
     )
@@ -142,9 +162,13 @@ def _parse_document_symbol(data: Any) -> lsp.DocumentSymbol:
 
 def _parse_range(data: Dict[str, Any]) -> lsp.Range:
     """Parse Range from JSON response."""
+    if not data:
+        return lsp.Range(start=lsp.Position(line=0, character=0), end=lsp.Position(line=0, character=0))
+    start = data.get("start", {})
+    end = data.get("end", {})
     return lsp.Range(
-        start=lsp.Position(line=data["start"]["line"], character=data["start"]["character"]),
-        end=lsp.Position(line=data["end"]["line"], character=data["end"]["character"]),
+        start=lsp.Position(line=start.get("line", 0), character=start.get("character", 0)),
+        end=lsp.Position(line=end.get("line", 0), character=end.get("character", 0)),
     )
 
 
@@ -290,6 +314,11 @@ class MultilspyBackend:
 
         try:
             result = self._lsp.request_document_symbols(rel_path)
+            if not result:
+                return []
+            # multilspy returns (list, None) tuple - extract the list
+            if isinstance(result, tuple):
+                result = result[0] if result[0] else []
             if not result:
                 return []
             return [_parse_document_symbol(s) for s in result]
