@@ -69,12 +69,6 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
             max_callsites_per_file=50,
             should_continue=lambda: generation == _call_graph_generation,
         )
-        # Debug: log call graph result counters
-        import sys
-        print(f"CALLGRAPH_RESULT: files={result.considered_files} processed={result.processed_callsites} "
-              f"resolved={result.resolved_callsites} no_caller={result.skipped_no_caller} "
-              f"no_def={result.skipped_no_definition} no_callee={result.skipped_no_callee} "
-              f"edges={len(result.edges)} lsp_fail={result.lsp_failures}", file=sys.stderr)
     except Exception as e:
         if generation == _call_graph_generation:
             _call_graph_status = "error"
@@ -138,6 +132,13 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
 
     _call_graph_thread = threading.Thread(target=_worker, name="codecanvas-call-graph", daemon=True)
     _call_graph_thread.start()
+
+
+def _wait_for_call_graph(timeout_s: float = 10.0) -> None:
+    """Wait for background call graph thread to complete."""
+    global _call_graph_thread
+    if _call_graph_thread and _call_graph_thread.is_alive():
+        _call_graph_thread.join(timeout=timeout_s)
 
 
 def _canvas_output_dir(project_dir: str) -> str:
@@ -254,7 +255,7 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
 
     call_edges_added = 0
     if use_lsp:
-        call_edges_added = _build_call_graph_foreground(time_budget_s=0.35, generation=generation)
+        call_edges_added = _build_call_graph_foreground(time_budget_s=2.0, generation=generation)
         _start_call_graph_background(time_budget_s=10.0, generation=generation)
 
     warn = ""
@@ -339,13 +340,16 @@ def _ensure_loaded(state: CanvasState) -> None:
         _call_graph_generation += 1
         generation = _call_graph_generation
         _call_graph_edges_total = 0
-        _build_call_graph_foreground(time_budget_s=0.2, generation=generation)
+        _build_call_graph_foreground(time_budget_s=2.0, generation=generation)
         _start_call_graph_background(time_budget_s=10.0, generation=generation)
 
 
 def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: int) -> CanvasResult:
     global _graph, _analyzer
     assert _graph is not None and _analyzer is not None
+
+    # Wait for background call graph to complete before analyzing
+    _wait_for_call_graph(timeout_s=10.0)
 
     with _graph_lock:
         node = _analyzer.find_target(symbol)
