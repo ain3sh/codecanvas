@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from ..core.models import EdgeType, GraphEdge, GraphNode, NodeKind
-from .config import LANGUAGE_SERVERS, detect_language, has_lsp_support
+from .config import detect_language, has_lsp_support
 from .lsp import LSPError, get_lsp_runtime, get_lsp_session_manager, path_to_uri, uri_to_path
 from .treesitter import TsCallSite, extract_call_sites
 from .utils import find_workspace_root
@@ -128,14 +128,12 @@ async def _resolve_definitions_for_callsites(
     text: str,
     callsites: List[TsCallSite],
 ) -> List[object]:
+    """Resolve definition locations for callsites using LSP."""
     mgr = get_lsp_session_manager()
-
-    server_config = LANGUAGE_SERVERS.get(lang)
-    if not server_config:
-        raise LSPError(f"No LSP server for {lang}")
-
     workspace_root = find_workspace_root(file_path)
-    sess = await mgr.get(lang=lang, workspace_root=str(workspace_root), cmd=server_config["cmd"])
+    
+    # LspSession routes to multilspy or custom backend based on language
+    sess = await mgr.get(lang=lang, workspace_root=str(workspace_root))
 
     uri = path_to_uri(str(file_path))
     positions = [(cs.line, cs.char) for cs in callsites]
@@ -183,9 +181,7 @@ def build_call_graph_edges(
             break
 
         lang = _lang_key(file_path)
-        if lang not in {"py", "ts"}:
-            continue
-        if not has_lsp_support(lang):
+        if not lang or not has_lsp_support(lang):
             continue
 
         try:

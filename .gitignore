@@ -9,4 +9,5 @@ __pycache__/
 *.env
 node_modules/
 **/runs/**
+.agent/
 .rewind/
