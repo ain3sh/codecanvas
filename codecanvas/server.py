@@ -101,6 +101,17 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
     def _worker() -> None:
         global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
 
+        # Log to file for debugging
+        log_path = os.path.join(_canvas_output_dir(str(Path(nodes_snapshot[0].fsPath).parent) if nodes_snapshot else "/tmp"), "call_graph.log")
+        def _log(msg: str) -> None:
+            try:
+                with open(log_path, "a") as f:
+                    f.write(f"{msg}\n")
+            except Exception:
+                pass
+
+        _log(f"[BG] Starting background call graph (budget={time_budget_s}s, nodes={len(nodes_snapshot)})")
+
         try:
             if generation == _call_graph_generation:
                 _call_graph_status = "working"
@@ -112,7 +123,12 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
                 max_callsites_per_file=200,
                 should_continue=lambda: generation == _call_graph_generation,
             )
+            _log(f"[BG] Result: files={result.considered_files} processed={result.processed_callsites} "
+                 f"resolved={result.resolved_callsites} no_caller={result.skipped_no_caller} "
+                 f"no_def={result.skipped_no_definition} no_callee={result.skipped_no_callee} "
+                 f"edges={len(result.edges)} lsp_fail={result.lsp_failures}")
         except Exception as e:
+            _log(f"[BG] Exception: {type(e).__name__}: {e}")
             if generation == _call_graph_generation:
                 _call_graph_status = "error"
                 _call_graph_error = f"{type(e).__name__}: {e}"
@@ -120,6 +136,7 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
 
         with _graph_lock:
             if _graph is None or _graph is not graph_ref:
+                _log("[BG] Graph changed, discarding results")
                 return
             added = 0
             for edge in result.edges:
@@ -129,6 +146,7 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
             if generation == _call_graph_generation:
                 _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": result.duration_s}
                 _call_graph_status = "completed"
+            _log(f"[BG] Completed: added={added} total={_call_graph_edges_total} status={_call_graph_status}")
 
     _call_graph_thread = threading.Thread(target=_worker, name="codecanvas-call-graph", daemon=True)
     _call_graph_thread.start()
