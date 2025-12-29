@@ -69,6 +69,12 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
             max_callsites_per_file=50,
             should_continue=lambda: generation == _call_graph_generation,
         )
+        # Debug: log call graph result counters
+        import sys
+        print(f"CALLGRAPH_RESULT: files={result.considered_files} processed={result.processed_callsites} "
+              f"resolved={result.resolved_callsites} no_caller={result.skipped_no_caller} "
+              f"no_def={result.skipped_no_definition} no_callee={result.skipped_no_callee} "
+              f"edges={len(result.edges)} lsp_fail={result.lsp_failures}", file=sys.stderr)
     except Exception as e:
         if generation == _call_graph_generation:
             _call_graph_status = "error"

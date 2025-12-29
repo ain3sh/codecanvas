@@ -273,6 +273,11 @@ def build_call_graph_edges(
                 target_path = uri_to_path(str(target_uri))
                 target_index = func_index.get(_abs(target_path))
                 if target_index is None:
+                    # Debug: log path mismatch
+                    if os.environ.get("CALLGRAPH_DEBUG"):
+                        import sys
+                        print(f"CALLGRAPH_DEBUG: miss path={_abs(target_path)}", file=sys.stderr)
+                        print(f"CALLGRAPH_DEBUG: keys={list(func_index.keys())[:5]}", file=sys.stderr)
                     continue
 
                 r = loc.get("range") or {}
