@@ -101,13 +101,6 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
     def _worker() -> None:
         global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
 
-        # Log to stderr for debugging
-        import sys
-        def _log(msg: str) -> None:
-            print(f"[CALLGRAPH] {msg}", file=sys.stderr, flush=True)
-
-        _log(f"[BG] Starting background call graph (budget={time_budget_s}s, nodes={len(nodes_snapshot)})")
-
         try:
             if generation == _call_graph_generation:
                 _call_graph_status = "working"
@@ -119,12 +112,7 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
                 max_callsites_per_file=200,
                 should_continue=lambda: generation == _call_graph_generation,
             )
-            _log(f"[BG] Result: files={result.considered_files} processed={result.processed_callsites} "
-                 f"resolved={result.resolved_callsites} no_caller={result.skipped_no_caller} "
-                 f"no_def={result.skipped_no_definition} no_callee={result.skipped_no_callee} "
-                 f"edges={len(result.edges)} lsp_fail={result.lsp_failures}")
         except Exception as e:
-            _log(f"[BG] Exception: {type(e).__name__}: {e}")
             if generation == _call_graph_generation:
                 _call_graph_status = "error"
                 _call_graph_error = f"{type(e).__name__}: {e}"
@@ -132,7 +120,6 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
 
         with _graph_lock:
             if _graph is None or _graph is not graph_ref:
-                _log("[BG] Graph changed, discarding results")
                 return
             added = 0
             for edge in result.edges:
@@ -142,7 +129,6 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
             if generation == _call_graph_generation:
                 _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": result.duration_s}
                 _call_graph_status = "completed"
-            _log(f"[BG] Completed: added={added} total={_call_graph_edges_total} status={_call_graph_status}")
 
     _call_graph_thread = threading.Thread(target=_worker, name="codecanvas-call-graph", daemon=True)
     _call_graph_thread.start()
@@ -269,8 +255,8 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
 
     call_edges_added = 0
     if use_lsp:
-        call_edges_added = _build_call_graph_foreground(time_budget_s=2.0, generation=generation)
-        _start_call_graph_background(time_budget_s=10.0, generation=generation)
+        call_edges_added = _build_call_graph_foreground(time_budget_s=0.35, generation=generation)
+        _start_call_graph_background(time_budget_s=30.0, generation=generation)
 
     warn = ""
     backend_note = ""
@@ -354,8 +340,8 @@ def _ensure_loaded(state: CanvasState) -> None:
         _call_graph_generation += 1
         generation = _call_graph_generation
         _call_graph_edges_total = 0
-        _build_call_graph_foreground(time_budget_s=2.0, generation=generation)
-        _start_call_graph_background(time_budget_s=10.0, generation=generation)
+        _build_call_graph_foreground(time_budget_s=0.2, generation=generation)
+        _start_call_graph_background(time_budget_s=30.0, generation=generation)
 
 
 def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: int) -> CanvasResult:

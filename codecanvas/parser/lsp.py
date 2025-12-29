@@ -333,7 +333,11 @@ class MultilspyBackend:
         rel_path = os.path.relpath(path, self.workspace_root)
 
         try:
-            result = self._lsp.request_definition(rel_path, line, char)
+            # Run sync multilspy call in thread pool to allow true parallelism
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                None, self._lsp.request_definition, rel_path, line, char
+            )
             return _parse_definition_locations(result)
         except Exception:
             return []
