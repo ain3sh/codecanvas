@@ -101,14 +101,10 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
     def _worker() -> None:
         global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
 
-        # Log to file for debugging
-        log_path = os.path.join(_canvas_output_dir(str(Path(nodes_snapshot[0].fsPath).parent) if nodes_snapshot else "/tmp"), "call_graph.log")
+        # Log to stderr for debugging
+        import sys
         def _log(msg: str) -> None:
-            try:
-                with open(log_path, "a") as f:
-                    f.write(f"{msg}\n")
-            except Exception:
-                pass
+            print(f"[CALLGRAPH] {msg}", file=sys.stderr, flush=True)
 
         _log(f"[BG] Starting background call graph (budget={time_budget_s}s, nodes={len(nodes_snapshot)})")
 
