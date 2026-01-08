@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -47,10 +48,48 @@ _call_graph_last: dict | None = None
 _call_graph_thread: threading.Thread | None = None
 _call_graph_generation: int = 0
 _call_graph_edges_total: int = 0
+_call_graph_result_summary: dict | None = None  # Detailed result for diagnostics
+
+
+def _call_graph_diag(*, phase: str | None = None) -> dict:
+    """Build a durable diagnostic snapshot for post-hoc inspection.
+
+    This is intended to be persisted to .codecanvas/state.json (and Harbor extraction).
+    """
+    thread_alive = bool(_call_graph_thread and _call_graph_thread.is_alive())
+    return {
+        "updated_at": time.time(),
+        "generation": int(_call_graph_generation),
+        "status": str(_call_graph_status),
+        "error": _call_graph_error,
+        "edges_total": int(_call_graph_edges_total),
+        "thread_alive": thread_alive,
+        "phase": phase,
+        "last": dict(_call_graph_last or {}),
+        "result": dict(_call_graph_result_summary or {}),
+    }
+
+
+def _persist_call_graph_diag(diag: dict) -> None:
+    """Best-effort persist of call graph diagnostics to disk.
+
+    Safe to call from background threads.
+    """
+    try:
+        state = load_state()
+        if not state.initialized:
+            return
+        # Only update the diagnostic field; preserve everything else.
+        state.call_graph_summary = dict(diag)
+        save_state(state)
+    except Exception:
+        return
 
 
 def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> int:
-    global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
+    global _graph
+    global _call_graph_status, _call_graph_error, _call_graph_last
+    global _call_graph_edges_total, _call_graph_result_summary
     if _graph is None:
         return 0
 
@@ -62,6 +101,12 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
         if generation == _call_graph_generation:
             _call_graph_status = "working"
             _call_graph_error = None
+            _call_graph_result_summary = {
+                "phase": "foreground",
+                "time_budget_s": float(time_budget_s),
+                "max_callsites_total": 250,
+                "max_callsites_per_file": 50,
+            }
         result = build_call_graph_edges(
             nodes_snapshot,
             time_budget_s=float(time_budget_s),
@@ -73,6 +118,12 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
         if generation == _call_graph_generation:
             _call_graph_status = "error"
             _call_graph_error = f"{type(e).__name__}: {e}"
+            _call_graph_result_summary = {
+                "phase": "foreground",
+                "time_budget_s": float(time_budget_s),
+                "error": f"{type(e).__name__}: {e}",
+            }
+            _persist_call_graph_diag(_call_graph_diag(phase="foreground"))
         return 0
 
     added = 0
@@ -85,6 +136,24 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
         _call_graph_edges_total += added
         if generation == _call_graph_generation:
             _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": result.duration_s}
+            _call_graph_result_summary = {
+                "phase": "foreground",
+                "time_budget_s": float(time_budget_s),
+                "max_callsites_total": 250,
+                "max_callsites_per_file": 50,
+                "considered_files": result.considered_files,
+                "processed_callsites": result.processed_callsites,
+                "resolved_callsites": result.resolved_callsites,
+                "skipped_no_caller": result.skipped_no_caller,
+                "skipped_no_definition": result.skipped_no_definition,
+                "skipped_no_callee": result.skipped_no_callee,
+                "edges_in_result": len(result.edges),
+                "edges_added": int(added),
+                "edges_total": int(_call_graph_edges_total),
+                "lsp_failures": dict(result.lsp_failures),
+                "duration_s": result.duration_s,
+            }
+            _persist_call_graph_diag(_call_graph_diag(phase="foreground"))
 
     return added
 
@@ -99,12 +168,21 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
         nodes_snapshot = list(_graph.nodes)
 
     def _worker() -> None:
-        global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
+        global _graph
+        global _call_graph_status, _call_graph_error, _call_graph_last
+        global _call_graph_edges_total, _call_graph_result_summary
 
         try:
             if generation == _call_graph_generation:
                 _call_graph_status = "working"
                 _call_graph_error = None
+                _call_graph_result_summary = {
+                    "phase": "background",
+                    "time_budget_s": float(time_budget_s),
+                    "max_callsites_total": 2000,
+                    "max_callsites_per_file": 200,
+                }
+                _persist_call_graph_diag(_call_graph_diag(phase="background"))
             result = build_call_graph_edges(
                 nodes_snapshot,
                 time_budget_s=float(time_budget_s),
@@ -116,6 +194,12 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
             if generation == _call_graph_generation:
                 _call_graph_status = "error"
                 _call_graph_error = f"{type(e).__name__}: {e}"
+                _call_graph_result_summary = {
+                    "phase": "background",
+                    "time_budget_s": float(time_budget_s),
+                    "error": f"{type(e).__name__}: {e}",
+                }
+                _persist_call_graph_diag(_call_graph_diag(phase="background"))
             return
 
         with _graph_lock:
@@ -129,9 +213,48 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
             if generation == _call_graph_generation:
                 _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": result.duration_s}
                 _call_graph_status = "completed"
+                _call_graph_result_summary = {
+                    "phase": "background",
+                    "time_budget_s": float(time_budget_s),
+                    "max_callsites_total": 2000,
+                    "max_callsites_per_file": 200,
+                    "considered_files": result.considered_files,
+                    "processed_callsites": result.processed_callsites,
+                    "resolved_callsites": result.resolved_callsites,
+                    "skipped_no_caller": result.skipped_no_caller,
+                    "skipped_no_definition": result.skipped_no_definition,
+                    "skipped_no_callee": result.skipped_no_callee,
+                    "edges_in_result": len(result.edges),
+                    "edges_added": int(added),
+                    "edges_total": int(_call_graph_edges_total),
+                    "lsp_failures": dict(result.lsp_failures),
+                    "duration_s": result.duration_s,
+                }
+                _persist_call_graph_diag(_call_graph_diag(phase="background"))
 
     _call_graph_thread = threading.Thread(target=_worker, name="codecanvas-call-graph", daemon=True)
     _call_graph_thread.start()
+
+    # Watchdog: if the background thread runs far beyond the requested time budget,
+    # mark it as timed out so post-hoc diagnostics are actionable.
+    def _watchdog() -> None:
+        global _call_graph_status, _call_graph_error, _call_graph_result_summary
+        # Allow a small grace period beyond the time budget.
+        deadline_s = float(time_budget_s) + 5.0
+        time.sleep(max(0.0, deadline_s))
+        if generation != _call_graph_generation:
+            return
+        if _call_graph_thread and _call_graph_thread.is_alive():
+            _call_graph_status = "error"
+            _call_graph_error = f"TimeoutError: background call graph exceeded {time_budget_s}s"
+            _call_graph_result_summary = {
+                "phase": "background",
+                "time_budget_s": float(time_budget_s),
+                "error": _call_graph_error,
+            }
+            _persist_call_graph_diag(_call_graph_diag(phase="background_timeout"))
+
+    threading.Thread(target=_watchdog, name="codecanvas-call-graph-watchdog", daemon=True).start()
 
 
 def _wait_for_call_graph(timeout_s: float = 10.0) -> None:
@@ -139,6 +262,9 @@ def _wait_for_call_graph(timeout_s: float = 10.0) -> None:
     global _call_graph_thread
     if _call_graph_thread and _call_graph_thread.is_alive():
         _call_graph_thread.join(timeout=timeout_s)
+        if _call_graph_thread.is_alive():
+            # Capture that we timed out waiting (useful when impact is invoked early).
+            _persist_call_graph_diag(_call_graph_diag(phase="wait_timeout"))
 
 
 def _canvas_output_dir(project_dir: str) -> str:
@@ -252,6 +378,8 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
     _call_graph_error = None
     _call_graph_last = None
     _call_graph_edges_total = 0
+    global _call_graph_result_summary
+    _call_graph_result_summary = None
 
     call_edges_added = 0
     if use_lsp:
@@ -286,6 +414,10 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
         for node in _graph.nodes:
             state.symbol_files[node.id] = node.fsPath
 
+    # Persist call graph diagnostics immediately so SessionStart logs/state are useful
+    # even if the run is terminated early.
+    state.call_graph_summary = _call_graph_diag(phase="init")
+
     state.focus = Path(project_dir).name
 
     out_dir = _canvas_output_dir(project_dir)
@@ -306,7 +438,15 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
 
     board = _render_board(state, "Board").images[0]
 
-    call_note = "" if not use_lsp else f" Call graph: +{call_edges_added} edges ({_call_graph_status})."
+    diag = state.call_graph_summary or {}
+    diag_note = ""
+    if use_lsp:
+        diag_note = (
+            f" Diag: status={diag.get('status')}, thread_alive={diag.get('thread_alive')}, "
+            f"edges_total={diag.get('edges_total')}."
+        )
+
+    call_note = "" if not use_lsp else f" Call graph: +{call_edges_added} edges ({_call_graph_status}).{diag_note}"
     msg = (
         f"Initialized: {stats['modules']} modules, {stats['classes']} classes, {stats['funcs']} funcs. "
         f"Created evidence {ev.id}.{backend_note}{call_note}{warn}\n\n"
@@ -340,16 +480,28 @@ def _ensure_loaded(state: CanvasState) -> None:
         _call_graph_generation += 1
         generation = _call_graph_generation
         _call_graph_edges_total = 0
+        global _call_graph_result_summary
+        _call_graph_result_summary = None
         _build_call_graph_foreground(time_budget_s=0.2, generation=generation)
         _start_call_graph_background(time_budget_s=30.0, generation=generation)
 
+        # Snapshot diagnostics for post-hoc inspection.
+        try:
+            state.call_graph_summary = _call_graph_diag(phase="ensure_loaded")
+            save_state(state)
+        except Exception:
+            pass
+
 
 def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: int) -> CanvasResult:
-    global _graph, _analyzer
+    global _graph, _analyzer, _call_graph_result_summary
     assert _graph is not None and _analyzer is not None
 
     # Wait for background call graph to complete before analyzing
     _wait_for_call_graph(timeout_s=10.0)
+
+    # Save call graph summary to state for diagnostics
+    state.call_graph_summary = _call_graph_diag(phase="impact")
 
     with _graph_lock:
         node = _analyzer.find_target(symbol)

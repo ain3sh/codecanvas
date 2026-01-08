@@ -10,12 +10,16 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 STATE_VERSION = 1
+
+
+_STATE_LOCK = threading.RLock()
 
 
 def _get_state_path() -> Path:
@@ -187,6 +191,9 @@ class CanvasState:
     # Parse backend breakdown from last init
     parse_summary: Dict[str, Any] = field(default_factory=dict)
 
+    # Call graph build summary (set after background completes)
+    call_graph_summary: Dict[str, Any] = field(default_factory=dict)
+
     # Multi-target analysis support
     analyses: Dict[str, AnalysisState] = field(default_factory=dict)
 
@@ -243,6 +250,7 @@ class CanvasState:
             "initialized": self.initialized,
             "use_lsp": self.use_lsp,
             "parse_summary": dict(self.parse_summary or {}),
+            "call_graph_summary": dict(self.call_graph_summary or {}),
             "analyses": {k: v.to_dict() for k, v in self.analyses.items()},
             "focus": self.focus,
             "active_task_id": self.active_task_id,
@@ -262,6 +270,7 @@ class CanvasState:
             initialized=d.get("initialized", False),
             use_lsp=bool(d.get("use_lsp", True)),
             parse_summary=dict(d.get("parse_summary") or {}),
+            call_graph_summary=dict(d.get("call_graph_summary") or {}),
             symbol_files=d.get("symbol_files", {}),
         )
         for k, v in d.get("analyses", {}).items():
@@ -277,17 +286,18 @@ class CanvasState:
 
 def load_state() -> CanvasState:
     """Load state from disk."""
-    path = _get_state_path()
-    if path.exists():
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return CanvasState.from_dict(json.load(f) or {})
-        except Exception:
+    with _STATE_LOCK:
+        path = _get_state_path()
+        if path.exists():
             try:
-                path.replace(path.with_name(path.name + ".bak"))
+                with open(path, "r", encoding="utf-8") as f:
+                    return CanvasState.from_dict(json.load(f) or {})
             except Exception:
-                pass
-    return CanvasState()
+                try:
+                    path.replace(path.with_name(path.name + ".bak"))
+                except Exception:
+                    pass
+        return CanvasState()
 
 
 def _get_extraction_dir() -> Path:
@@ -321,15 +331,16 @@ def save_state(state: CanvasState):
     1. Primary: .codecanvas/state.json in project
     2. Extraction: CLAUDE_CONFIG_DIR/codecanvas/state.json (for Harbor artifact extraction)
     """
-    path = _get_state_path()
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    json_str = json.dumps(state.to_dict(), indent=2)
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(json_str)
-    tmp.replace(path)
-    
-    _save_for_harbor_extraction(json_str)
+    with _STATE_LOCK:
+        path = _get_state_path()
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        json_str = json.dumps(state.to_dict(), indent=2)
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(json_str)
+        tmp.replace(path)
+
+        _save_for_harbor_extraction(json_str)
 
 
 def clear_state():

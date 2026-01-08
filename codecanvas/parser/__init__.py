@@ -270,7 +270,7 @@ class Parser:
         module_id: str,
     ) -> None:
         """Parse defs using LSP document symbols."""
-        from .lsp import LSPError, get_lsp_runtime, get_lsp_session_manager, path_to_uri
+        from .lsp import get_lsp_runtime, get_lsp_session_manager, path_to_uri
         from .utils import find_workspace_root
 
         workspace = str(find_workspace_root(file_path))
