@@ -23,6 +23,8 @@ class CallGraphBuildResult:
     skipped_no_caller: int = 0
     skipped_no_definition: int = 0
     skipped_no_callee: int = 0
+    skipped_no_callee_reasons: Dict[str, int] = field(default_factory=dict)
+    skipped_no_callee_samples: List[Dict[str, object]] = field(default_factory=list)
     lsp_failures: Dict[str, int] = field(default_factory=dict)
     complete: bool = False
     duration_s: float = 0.0
@@ -264,29 +266,41 @@ def build_call_graph_edges(
             res.resolved_callsites += 1
 
             added = False
+            reasons: set[str] = set()
+            uris_seen: List[str] = []
             for loc in locations_iter:
                 if not isinstance(loc, dict):
+                    reasons.add("non_dict_location")
                     continue
                 target_uri = loc.get("uri")
                 if not target_uri:
+                    reasons.add("missing_uri")
                     continue
+                try:
+                    uris_seen.append(str(target_uri))
+                except Exception:
+                    pass
                 target_path = uri_to_path(str(target_uri))
                 target_index = func_index.get(_abs(target_path))
                 if target_index is None:
+                    reasons.add("target_not_indexed")
                     continue
 
                 r = loc.get("range") or {}
                 start_pos = (r.get("start") or {}) if isinstance(r, dict) else {}
                 if not isinstance(start_pos, dict):
+                    reasons.add("missing_range")
                     continue
 
                 dl = _safe_int(start_pos.get("line"))
                 dc = _safe_int(start_pos.get("character"))
                 if dl is None or dc is None:
+                    reasons.add("missing_range")
                     continue
 
                 callee = target_index.find_enclosing_func(line=dl, char=dc)
                 if callee is None:
+                    reasons.add("no_enclosing_func")
                     continue
 
                 edge = GraphEdge(from_id=caller.id, to_id=callee.id, type=EdgeType.CALL)
@@ -301,6 +315,32 @@ def build_call_graph_edges(
 
             if not added:
                 res.skipped_no_callee += 1
+                primary = None
+                for k in [
+                    "target_not_indexed",
+                    "no_enclosing_func",
+                    "missing_range",
+                    "missing_uri",
+                    "non_dict_location",
+                ]:
+                    if k in reasons:
+                        primary = k
+                        break
+                if primary is None:
+                    primary = "unknown"
+
+                res.skipped_no_callee_reasons[primary] = res.skipped_no_callee_reasons.get(primary, 0) + 1
+
+                if len(res.skipped_no_callee_samples) < 20:
+                    res.skipped_no_callee_samples.append(
+                        {
+                            "reason": primary,
+                            "caller_id": caller.id,
+                            "caller_path": caller.fsPath,
+                            "callsite": {"line": int(cs.line), "char": int(cs.char)},
+                            "definition_uris": uris_seen[:5],
+                        }
+                    )
 
     res.complete = remaining_total <= 0
     res.duration_s = time.monotonic() - start

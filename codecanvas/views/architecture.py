@@ -334,7 +334,13 @@ class ArchitectureView:
                 box.x + box.w - 18,
                 box.y + 22,
                 hub_r,
-                style=Style(fill=COLORS["import"], stroke="none", opacity=0.9),
+                style=Style(
+                    fill=COLORS["focus"],
+                    stroke=COLORS["bg"],
+                    stroke_width=1.5,
+                    opacity=0.98,
+                    filter="drop-shadow",
+                ),
             )
 
             y = box.y + 66
@@ -350,7 +356,18 @@ class ArchitectureView:
         # Legend
         lx = margin
         ly = height - 22
-        canvas.add_circle(lx + 8, ly - 6, 7, style=Style(fill=COLORS["import"], stroke="none", opacity=0.9))
+        canvas.add_circle(
+            lx + 8,
+            ly - 6,
+            7,
+            style=Style(
+                fill=COLORS["focus"],
+                stroke=COLORS["bg"],
+                stroke_width=1.5,
+                opacity=0.98,
+                filter="drop-shadow",
+            ),
+        )
         canvas.add_text(
             lx + 22,
             ly,

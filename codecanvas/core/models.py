@@ -18,6 +18,7 @@ class EdgeType(str, Enum):
 
     IMPORT = "import"  # module -> module
     CALL = "call"  # func -> func
+    CONTAINS = "contains"  # container (module|class) -> member (class|func)
 
 
 @dataclass(frozen=True)
@@ -26,7 +27,6 @@ class GraphNode:
     kind: NodeKind
     label: str
     fsPath: str
-    parent: Optional[str] = None
     snippet: Optional[str] = None
     start_line: Optional[int] = None
     start_char: Optional[int] = None
@@ -63,6 +63,8 @@ class Graph:
     _edges_from: Dict[str, List[GraphEdge]] = field(default_factory=dict, repr=False)
     _edges_to: Dict[str, List[GraphEdge]] = field(default_factory=dict, repr=False)
     _edge_keys: Set[str] = field(default_factory=set, repr=False)
+    _contains_children: Dict[str, List[str]] = field(default_factory=dict, repr=False)
+    _contains_parent: Dict[str, str] = field(default_factory=dict, repr=False)
 
     def rebuild_indexes(self) -> None:
         """Rebuild all indexes after modification."""
@@ -70,6 +72,8 @@ class Graph:
         self._edges_from = {}
         self._edges_to = {}
         self._edge_keys = set()
+        self._contains_children = {}
+        self._contains_parent = {}
 
         for e in self.edges:
             if e.from_id not in self._edges_from:
@@ -81,6 +85,13 @@ class Graph:
             self._edges_to[e.to_id].append(e)
 
             self._edge_keys.add(e.key())
+
+            if e.type == EdgeType.CONTAINS:
+                existing = self._contains_parent.get(e.to_id)
+                if existing is not None and existing != e.from_id:
+                    raise ValueError(f"Multiple CONTAINS parents for {e.to_id}: {existing} and {e.from_id}")
+                self._contains_parent[e.to_id] = e.from_id
+                self._contains_children.setdefault(e.from_id, []).append(e.to_id)
 
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         """Get node by ID (O(1))."""
@@ -119,10 +130,32 @@ class Graph:
             self._edges_to[edge.to_id] = []
         self._edges_to[edge.to_id].append(edge)
 
+        if edge.type == EdgeType.CONTAINS:
+            existing = self._contains_parent.get(edge.to_id)
+            if existing is not None and existing != edge.from_id:
+                raise ValueError(f"Multiple CONTAINS parents for {edge.to_id}: {existing} and {edge.from_id}")
+            self._contains_parent[edge.to_id] = edge.from_id
+            self._contains_children.setdefault(edge.from_id, []).append(edge.to_id)
+
         return True
 
+    def get_parent_id(self, node_id: str) -> Optional[str]:
+        return self._contains_parent.get(node_id)
+
+    def get_parent(self, node_id: str) -> Optional[GraphNode]:
+        pid = self.get_parent_id(node_id)
+        return None if pid is None else self.get_node(pid)
+
+    def get_children_ids(self, parent_id: str) -> List[str]:
+        return list(self._contains_children.get(parent_id, []))
+
     def get_children(self, parent_id: str) -> List[GraphNode]:
-        return [n for n in self.nodes if n.parent == parent_id]
+        out: List[GraphNode] = []
+        for cid in self.get_children_ids(parent_id):
+            n = self.get_node(cid)
+            if n is not None:
+                out.append(n)
+        return out
 
     def stats(self) -> Dict[str, int]:
         """Return graph statistics."""
@@ -132,6 +165,7 @@ class Graph:
             "funcs": sum(1 for n in self.nodes if n.kind == NodeKind.FUNC),
             "import_edges": sum(1 for e in self.edges if e.type == EdgeType.IMPORT),
             "call_edges": sum(1 for e in self.edges if e.type == EdgeType.CALL),
+            "contains_edges": sum(1 for e in self.edges if e.type == EdgeType.CONTAINS),
         }
 
 

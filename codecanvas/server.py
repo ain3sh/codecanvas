@@ -147,6 +147,8 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
                 "skipped_no_caller": result.skipped_no_caller,
                 "skipped_no_definition": result.skipped_no_definition,
                 "skipped_no_callee": result.skipped_no_callee,
+                "skipped_no_callee_reasons": dict(result.skipped_no_callee_reasons),
+                "skipped_no_callee_samples": list(result.skipped_no_callee_samples),
                 "edges_in_result": len(result.edges),
                 "edges_added": int(added),
                 "edges_total": int(_call_graph_edges_total),
@@ -224,6 +226,8 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
                     "skipped_no_caller": result.skipped_no_caller,
                     "skipped_no_definition": result.skipped_no_definition,
                     "skipped_no_callee": result.skipped_no_callee,
+                    "skipped_no_callee_reasons": dict(result.skipped_no_callee_reasons),
+                    "skipped_no_callee_samples": list(result.skipped_no_callee_samples),
                     "edges_in_result": len(result.edges),
                     "edges_added": int(added),
                     "edges_total": int(_call_graph_edges_total),
@@ -524,22 +528,42 @@ def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: in
     state.focus = node.label
 
     with _graph_lock:
-        neigh_nodes, neigh_edges = _analyzer.neighborhood(node.id, hops=depth, max_nodes=max_nodes)
+        caller_counts, callee_counts = _analyzer.impact_call_counts(node.id)
 
     out_dir = _canvas_output_dir(state.project_path)
     png_path = os.path.join(out_dir, f"impact_{node.id}.png")
+    max_side = max(1, min(8, (int(max_nodes) - 1) // 2))
     with _graph_lock:
-        svg = ImpactView(_graph).render(node.id, neigh_nodes, neigh_edges, output_path=None)
+        svg = ImpactView(_graph).render(
+            node.id,
+            caller_counts=caller_counts,
+            callee_counts=callee_counts,
+            max_side=max_side,
+            output_path=None,
+        )
     png_bytes = save_png(svg, png_path)
 
-    callers = len([e for e in neigh_edges if e.to_id == node.id])
-    callees = len([e for e in neigh_edges if e.from_id == node.id])
+    callers = len(caller_counts)
+    callees = len(callee_counts)
+
+    callers_top = sorted(caller_counts, key=lambda k: caller_counts[k], reverse=True)[:max_side]
+    callees_top = sorted(callee_counts, key=lambda k: callee_counts[k], reverse=True)[:max_side]
+    node_count = 1 + len(callers_top) + len(callees_top)
+    edge_count = sum(caller_counts[k] for k in callers_top) + sum(callee_counts[k] for k in callees_top)
 
     ev = state.add_evidence(
         kind="impact",
         png_path=png_path,
         symbol=node.label,
-        metrics={"depth": depth, "node_count": len(neigh_nodes), "edge_count": len(neigh_edges)},
+        metrics={
+            "depth": depth,
+            "node_count": node_count,
+            "edge_count": edge_count,
+            "callers": callers,
+            "callees": callees,
+            "caller_edges": sum(caller_counts.values()),
+            "callee_edges": sum(callee_counts.values()),
+        },
     )
     save_state(state)
 

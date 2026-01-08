@@ -43,7 +43,16 @@ def test_empty_lsp_symbols_does_not_force_fallback(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(parser_mod, "has_lsp_support", lambda _lang: True)
 
     def _fake_parse_with_lsp(self, file_path, file_label, text, lang, graph, *, module_id):
-        self._process_lsp_symbols([], module_id, file_label, str(file_path), text.split("\n"), graph)
+        self._process_lsp_symbols(
+            [],
+            container_id=module_id,
+            container_qualname=None,
+            module_id=module_id,
+            file_label=file_label,
+            fs_path=str(file_path),
+            lines=text.split("\n"),
+            graph=graph,
+        )
 
     monkeypatch.setattr(Parser, "_parse_with_lsp", _fake_parse_with_lsp)
 

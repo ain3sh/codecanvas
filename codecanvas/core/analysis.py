@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 
 from .models import EdgeType, Graph, GraphEdge, GraphNode, NodeKind
 
@@ -68,12 +69,15 @@ class Analyzer:
         if not start_node:
             return Slice(nodes=set(), edges=set(), target=start_id, direction=direction)
 
-        # Seed: classes have no edges, start from their methods
+        allowed: Set[EdgeType] = set()
+        if include_calls:
+            allowed.add(EdgeType.CALL)
+        if include_imports:
+            allowed.add(EdgeType.IMPORT)
+
         seed = {start_id}
-        if start_node.kind == NodeKind.CLASS:
-            for child in self.graph.get_children(start_id):
-                if child.kind == NodeKind.FUNC:
-                    seed.add(child.id)
+        if start_node.kind in {NodeKind.CLASS, NodeKind.MODULE}:
+            seed.update(self.descendant_funcs(start_id))
 
         seen = set(seed)
         edge_set: Set[str] = set()
@@ -85,10 +89,7 @@ class Analyzer:
             edges = self.graph.get_edges_from(node_id) if direction == "out" else self.graph.get_edges_to(node_id)
 
             for edge in edges:
-                # Filter by edge type
-                if edge.type == EdgeType.IMPORT and not include_imports:
-                    continue
-                if edge.type == EdgeType.CALL and not include_calls:
+                if edge.type not in allowed:
                     continue
 
                 # Get neighbor
@@ -104,50 +105,104 @@ class Analyzer:
                     seen.add(neighbor)
                     queue.append(neighbor)
 
-        # Include ancestors (func → class → module)
         self._include_ancestors(seen)
 
         return Slice(nodes=seen, edges=edge_set, target=start_id, direction=direction)
 
     def _include_ancestors(self, node_set: Set[str]):
-        """
-        Include ancestor nodes (DepViz includeAncestors).
-
-        func → class → module
-        class → module
-        """
-        to_add = []
+        to_add: Set[str] = set()
 
         for node_id in list(node_set):
-            node = self.graph.get_node(node_id)
-            if not node:
-                continue
-
-            if node.kind == NodeKind.FUNC:
-                if node.parent is None:
-                    continue
-
-                parent = self.graph.get_node(node.parent)
-                if parent:
-                    if parent.kind == NodeKind.CLASS:
-                        to_add.append(parent.id)
-                        if parent.parent is None:
-                            continue
-                        grandparent = self.graph.get_node(parent.parent)
-                        if grandparent and grandparent.kind == NodeKind.MODULE:
-                            to_add.append(grandparent.id)
-                    elif parent.kind == NodeKind.MODULE:
-                        to_add.append(parent.id)
-
-            elif node.kind == NodeKind.CLASS:
-                if node.parent is None:
-                    continue
-
-                parent = self.graph.get_node(node.parent)
-                if parent and parent.kind == NodeKind.MODULE:
-                    to_add.append(parent.id)
+            parent_id = self.graph.get_parent_id(node_id)
+            while parent_id is not None:
+                if parent_id in node_set:
+                    break
+                to_add.add(parent_id)
+                parent_id = self.graph.get_parent_id(parent_id)
 
         node_set.update(to_add)
+
+    def descendant_funcs(self, node_id: str) -> Set[str]:
+        """Return all descendant FUNC nodes via CONTAINS edges."""
+        out: Set[str] = set()
+        queue: deque[str] = deque([node_id])
+        seen: Set[str] = {node_id}
+
+        while queue:
+            cur = queue.popleft()
+            for child_id in self.graph.get_children_ids(cur):
+                if child_id in seen:
+                    continue
+                seen.add(child_id)
+                child = self.graph.get_node(child_id)
+                if child is None:
+                    continue
+                if child.kind == NodeKind.FUNC:
+                    out.add(child.id)
+                elif child.kind in {NodeKind.CLASS, NodeKind.MODULE}:
+                    queue.append(child.id)
+
+        return out
+
+    def impact_call_counts(self, target_id: str) -> Tuple[Dict[str, int], Dict[str, int]]:
+        """Compute aggregated callers/callees for impact rendering."""
+        target = self.graph.get_node(target_id)
+        if target is None:
+            return {}, {}
+
+        if target.kind == NodeKind.FUNC:
+            target_funcs = {target_id}
+        elif target.kind in {NodeKind.CLASS, NodeKind.MODULE}:
+            target_funcs = self.descendant_funcs(target_id)
+        else:
+            target_funcs = set()
+
+        if not target_funcs:
+            return {}, {}
+
+        callers: Dict[str, int] = {}
+        callees: Dict[str, int] = {}
+
+        for fid in target_funcs:
+            for e in self.graph.get_edges_to(fid):
+                if e.type != EdgeType.CALL:
+                    continue
+                did = self._impact_display_id(e.from_id, center=target)
+                if did != target_id:
+                    callers[did] = callers.get(did, 0) + 1
+
+            for e in self.graph.get_edges_from(fid):
+                if e.type != EdgeType.CALL:
+                    continue
+                did = self._impact_display_id(e.to_id, center=target)
+                if did != target_id:
+                    callees[did] = callees.get(did, 0) + 1
+
+        return callers, callees
+
+    def _impact_display_id(self, node_id: str, *, center: GraphNode) -> str:
+        if center.kind == NodeKind.FUNC:
+            return node_id
+        if center.kind == NodeKind.MODULE:
+            return self._nearest_ancestor_id(node_id, kind=NodeKind.MODULE) or node_id
+
+        # center.kind == CLASS
+        cid = self._nearest_ancestor_id(node_id, kind=NodeKind.CLASS)
+        if cid is not None:
+            return cid
+        mid = self._nearest_ancestor_id(node_id, kind=NodeKind.MODULE)
+        return mid or node_id
+
+    def _nearest_ancestor_id(self, node_id: str, *, kind: NodeKind) -> str | None:
+        cur = node_id
+        while True:
+            pid = self.graph.get_parent_id(cur)
+            if pid is None:
+                return None
+            pnode = self.graph.get_node(pid)
+            if pnode is not None and pnode.kind == kind:
+                return pid
+            cur = pid
 
     def neighborhood(self, node_id: str, hops: int = 1, max_nodes: int = 20) -> Tuple[List[GraphNode], List[GraphEdge]]:
         """
@@ -167,21 +222,26 @@ class Analyzer:
         if not center:
             return [], []
 
-        # BFS to collect nodes within k hops
-        visited = {node_id}
-        frontier = {node_id}
+        seed: Set[str] = {node_id}
+        if center.kind in {NodeKind.CLASS, NodeKind.MODULE}:
+            seed.update(self.descendant_funcs(node_id))
+
+        visited = set(seed)
+        frontier = set(seed)
 
         for _ in range(hops):
             next_frontier = set()
             for nid in frontier:
-                # Outgoing edges (what this calls)
                 for edge in self.graph.get_edges_from(nid):
+                    if edge.type != EdgeType.CALL:
+                        continue
                     if edge.to_id not in visited:
                         visited.add(edge.to_id)
                         next_frontier.add(edge.to_id)
 
-                # Incoming edges (what calls this)
                 for edge in self.graph.get_edges_to(nid):
+                    if edge.type != EdgeType.CALL:
+                        continue
                     if edge.from_id not in visited:
                         visited.add(edge.from_id)
                         next_frontier.add(edge.from_id)
@@ -192,20 +252,7 @@ class Analyzer:
             if len(visited) >= max_nodes:
                 break
 
-        # Include ancestors (class, module) for context
-        to_add = set()
-        for nid in visited:
-            node = self.graph.get_node(nid)
-            if node and node.parent:
-                parent = self.graph.get_node(node.parent)
-                if parent:
-                    to_add.add(parent.id)
-                    if parent.parent:
-                        grandparent = self.graph.get_node(parent.parent)
-                        if grandparent:
-                            to_add.add(grandparent.id)
-
-        visited.update(to_add)
+        self._include_ancestors(visited)
 
         # Cap at max_nodes, prioritizing center node
         if len(visited) > max_nodes:
@@ -237,16 +284,33 @@ class Analyzer:
         if node:
             return node
 
+        def _score(n: GraphNode) -> tuple[int, int, int, int, int]:
+            kind_score = {
+                NodeKind.FUNC: 300,
+                NodeKind.CLASS: 200,
+                NodeKind.MODULE: 100,
+            }.get(n.kind, 0)
+
+            degree = len(self.graph.get_edges_from(n.id)) + len(self.graph.get_edges_to(n.id))
+            child_count = len(self.graph.get_children(n.id))
+
+            suffix = Path(n.fsPath).suffix.lower()
+            header_suffixes = {".h", ".hh", ".hpp", ".hxx"}
+            ext_score = 0 if suffix in header_suffixes else 1
+
+            has_range = 1 if (n.start_line is not None and n.end_line is not None) else 0
+            return (kind_score, degree, child_count, ext_score, has_range)
+
         # Exact label
-        for n in self.graph.nodes:
-            if n.label == query:
-                return n
+        exact = [n for n in self.graph.nodes if n.label == query]
+        if exact:
+            return max(exact, key=_score)
 
         # Partial match
         query_lower = query.lower()
-        for n in self.graph.nodes:
-            if query_lower in n.label.lower():
-                return n
+        partial = [n for n in self.graph.nodes if query_lower in n.label.lower()]
+        if partial:
+            return max(partial, key=_score)
 
         return None
 

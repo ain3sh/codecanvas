@@ -1,17 +1,9 @@
-"""
-Impact View - The Blast Radius Map (Refined).
-
-Visualizes:
-- Central Target Card (Snippet + Docstring)
-- Aggregated Callers (Thick edges with counts)
-- Aggregated Callees
-- Traffic Light Risk Coloring
-"""
+"""Impact View - Blast radius (callers/callees)."""
 
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Dict, Tuple
 
-from ..core.models import Graph, GraphNode
+from ..core.models import Graph
 from . import COLORS, Style, SVGCanvas
 
 
@@ -22,8 +14,10 @@ class ImpactView:
     def render(
         self,
         target_id: str,
-        neighborhood_nodes: List[GraphNode],
-        neighborhood_edges: List[Any],
+        *,
+        caller_counts: Dict[str, int],
+        callee_counts: Dict[str, int],
+        max_side: int = 8,
         output_path: str | None = None,
     ) -> str:
         """Render the impact view."""
@@ -32,21 +26,11 @@ class ImpactView:
         if not target_node:
             return ""
 
-        # 1. Aggregate Edges
-        # Count calls from A -> Target and Target -> B
-        caller_counts: Dict[str, int] = {}
-        callee_counts: Dict[str, int] = {}
-
-        for e in neighborhood_edges:
-            if e.to_id == target_id:
-                caller_counts[e.from_id] = caller_counts.get(e.from_id, 0) + 1
-            elif e.from_id == target_id:
-                callee_counts[e.to_id] = callee_counts.get(e.to_id, 0) + 1
-
-        # Filter nodes to aggregated sets (hard cap)
-        max_side = 8
-        callers_all = [n for n in neighborhood_nodes if n.id in caller_counts]
-        callees_all = [n for n in neighborhood_nodes if n.id in callee_counts]
+        max_side = max(0, int(max_side))
+        callers_all = [self.graph.get_node(nid) for nid in caller_counts]
+        callees_all = [self.graph.get_node(nid) for nid in callee_counts]
+        callers_all = [n for n in callers_all if n is not None]
+        callees_all = [n for n in callees_all if n is not None]
 
         callers_all.sort(key=lambda n: caller_counts.get(n.id, 0), reverse=True)
         callees_all.sort(key=lambda n: callee_counts.get(n.id, 0), reverse=True)

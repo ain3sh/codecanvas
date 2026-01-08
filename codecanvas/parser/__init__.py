@@ -286,27 +286,34 @@ class Parser:
 
         lines = text.split("\n")
 
-        self._process_lsp_symbols(symbols, module_id, file_label, str(file_path), lines, graph)
+        self._process_lsp_symbols(
+            symbols,
+            container_id=module_id,
+            container_qualname=None,
+            module_id=module_id,
+            file_label=file_label,
+            fs_path=str(file_path),
+            lines=lines,
+            graph=graph,
+        )
 
     def _process_lsp_symbols(
         self,
         symbols,
+        *,
+        container_id: str,
+        container_qualname: str | None,
         module_id: str,
         file_label: str,
         fs_path: str,
         lines: List[str],
         graph: Graph,
-        parent_class: Optional[str] = None,
-        class_ids: Optional[Dict[str, str]] = None,
     ) -> None:
         """Process LSP DocumentSymbol tree into graph nodes."""
         from lsprotocol.types import SymbolKind
 
         if not symbols:
             return
-
-        if class_ids is None:
-            class_ids = {}
 
         def snippet_from(line: int, span: int = 20) -> str:
             end = min(len(lines), line + span)
@@ -325,17 +332,16 @@ class Parser:
             line = sym.range.start.line
 
             if kind in CLASS_KINDS:
-                class_id = make_class_id(file_label, name)
-                class_ids[name] = class_id
+                qualname = f"{container_qualname}.{name}" if container_qualname else name
+                class_id = make_class_id(file_label, qualname)
                 start = sym.range.start
                 end = sym.range.end
                 graph.add_node(
                     GraphNode(
                         id=class_id,
                         kind=NodeKind.CLASS,
-                        label=name,
+                        label=qualname,
                         fsPath=fs_path,
-                        parent=module_id,
                         snippet=snippet_from(line),
                         start_line=start.line,
                         start_char=start.character,
@@ -343,17 +349,18 @@ class Parser:
                         end_char=end.character,
                     )
                 )
+                graph.add_edge(GraphEdge(from_id=container_id, to_id=class_id, type=EdgeType.CONTAINS))
                 # Recurse into children
                 if hasattr(sym, "children") and sym.children:
                     self._process_lsp_symbols(
                         sym.children,
-                        module_id,
-                        file_label,
-                        fs_path,
-                        lines,
-                        graph,
-                        parent_class=name,
-                        class_ids=class_ids,
+                        container_id=class_id,
+                        container_qualname=qualname,
+                        module_id=module_id,
+                        file_label=file_label,
+                        fs_path=fs_path,
+                        lines=lines,
+                        graph=graph,
                     )
 
             elif kind in FUNC_KINDS:
@@ -362,19 +369,13 @@ class Parser:
                 sel = getattr(sym, "selection_range", None)
                 id_line = sel.start.line if sel is not None else start.line
                 func_id = make_func_id(file_label, name, id_line)
-                if parent_class:
-                    label = f"{parent_class}.{name}"
-                    parent = class_ids.get(parent_class, module_id)
-                else:
-                    label = name
-                    parent = module_id
+                label = f"{container_qualname}.{name}" if container_qualname else name
                 graph.add_node(
                     GraphNode(
                         id=func_id,
                         kind=NodeKind.FUNC,
                         label=label,
                         fsPath=fs_path,
-                        parent=parent,
                         snippet=snippet_from(line),
                         start_line=start.line,
                         start_char=start.character,
@@ -382,19 +383,20 @@ class Parser:
                         end_char=end.character,
                     )
                 )
+                graph.add_edge(GraphEdge(from_id=container_id, to_id=func_id, type=EdgeType.CONTAINS))
 
             elif kind in CONTAINER_KINDS:
                 # Containers (Module, Namespace, Package) - recurse into children
                 if hasattr(sym, "children") and sym.children:
                     self._process_lsp_symbols(
                         sym.children,
-                        module_id,
-                        file_label,
-                        fs_path,
-                        lines,
-                        graph,
-                        parent_class=parent_class,
-                        class_ids=class_ids,
+                        container_id=container_id,
+                        container_qualname=container_qualname,
+                        module_id=module_id,
+                        file_label=file_label,
+                        fs_path=fs_path,
+                        lines=lines,
+                        graph=graph,
                     )
 
     def _add_def_nodes(
@@ -413,15 +415,18 @@ class Parser:
             return "\n".join(lines[max(0, line) : end])
 
         class_ids: Dict[str, str] = {}
-        for d in defs:
-            if getattr(d, "kind", None) != "class":
-                continue
+        classes = [d for d in defs if getattr(d, "kind", None) == "class"]
+        for d in classes:
             class_name = str(getattr(d, "bare_name", ""))
             if not class_name:
                 continue
+            class_ids[class_name] = make_class_id(file_label, class_name)
 
-            class_id = make_class_id(file_label, class_name)
-            class_ids[class_name] = class_id
+        for d in classes:
+            class_name = str(getattr(d, "bare_name", ""))
+            if not class_name:
+                continue
+            class_id = class_ids[class_name]
             r = d.range
             graph.add_node(
                 GraphNode(
@@ -429,7 +434,6 @@ class Parser:
                     kind=NodeKind.CLASS,
                     label=class_name,
                     fsPath=fs_path,
-                    parent=module_id,
                     snippet=snippet_from(r.start_line),
                     start_line=r.start_line,
                     start_char=r.start_char,
@@ -437,6 +441,11 @@ class Parser:
                     end_char=r.end_char,
                 )
             )
+
+            parent_class = getattr(d, "parent_class", None)
+            parent_id = class_ids.get(parent_class) if parent_class else None
+            parent_id = parent_id or module_id
+            graph.add_edge(GraphEdge(from_id=parent_id, to_id=class_id, type=EdgeType.CONTAINS))
 
         for d in defs:
             if getattr(d, "kind", None) != "func":
@@ -447,7 +456,6 @@ class Parser:
 
             r = d.range
             parent_class = getattr(d, "parent_class", None)
-            parent = class_ids.get(parent_class) if parent_class else module_id
             label = str(getattr(d, "name", bare))
             func_id = make_func_id(file_label, bare, r.start_line)
             graph.add_node(
@@ -456,7 +464,6 @@ class Parser:
                     kind=NodeKind.FUNC,
                     label=label,
                     fsPath=fs_path,
-                    parent=parent,
                     snippet=snippet_from(r.start_line),
                     start_line=r.start_line,
                     start_char=r.start_char,
@@ -464,6 +471,10 @@ class Parser:
                     end_char=r.end_char,
                 )
             )
+
+            parent_id = class_ids.get(parent_class) if parent_class else None
+            parent_id = parent_id or module_id
+            graph.add_edge(GraphEdge(from_id=parent_id, to_id=func_id, type=EdgeType.CONTAINS))
 
     def _add_import_edges(
         self,
