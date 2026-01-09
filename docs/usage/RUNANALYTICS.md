@@ -98,7 +98,7 @@ Layer 1 gives you the numbers. Layer 2 explains what they mean.
 │  │  trajectory.json    verifier/ctrf.json    state.json            │   │
 │  │  (ATIF trace)       (test results)        (CodeCanvas state)    │   │
 │  │                                                                  │   │
-│  │  architecture.png   impact_*.png          board.png             │   │
+│  │  architecture.png   impact_*.png          task.png              │   │
 │  │  (init viz)         (blast radius)        (evidence board)      │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -140,24 +140,26 @@ results/
 │   ├── runs/
 │   │   ├── index.json                   # Run manifest
 │   │   └── 2025-01-15__14-30-00__codecanvas/
-│   │       └── sanitize-git-repo/       # Task ID
+│   │       └── sanitize-git-repo__JQpycDc/   # Trial (task_id + unique suffix)
 │   │           ├── agent/
-│   │           │   ├── trajectory.json  # ATIF-format trace
+│   │           │   ├── trajectory.json       # ATIF-format trace
 │   │           │   └── sessions/
-│   │           │       └── codecanvas/  # CodeCanvas artifacts
+│   │           │       └── codecanvas/       # CodeCanvas artifacts (if used)
 │   │           │           ├── state.json
 │   │           │           ├── architecture.png
 │   │           │           ├── impact_*.png
-│   │           │           └── board.png
+│   │           │           └── task.png
 │   │           ├── verifier/
-│   │           │   ├── ctrf.json        # Test results (CTRF format)
-│   │           │   └── reward.txt       # Binary reward (0 or 1)
-│   │           └── result.json          # Timing, metadata
+│   │           │   ├── ctrf.json             # Test results (CTRF format)
+│   │           │   └── reward.txt            # Binary reward (0 or 1)
+│   │           └── result.json               # Timing, metadata
 │   ├── analytics/                       # Analytics outputs (auto-derived)
-│   └── canvas/                          # CodeCanvas state copies
+│   └── canvas/                          # Mirror of agent/sessions/codecanvas (per trial)
 ├── 1/                                   # Batch 1
 └── ...
 ```
+
+Analytics reads CodeCanvas artifacts from `runs/**/agent/sessions/codecanvas/` (when present). `results/<batch>/canvas/` is a convenience mirror for browsing.
 
 ### File Contents
 

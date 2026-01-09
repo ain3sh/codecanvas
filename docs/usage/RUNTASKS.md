@@ -217,7 +217,7 @@ results/
 │   │               ├── claude-code.txt     # Raw Claude output
 │   │               └── sessions/           # Claude Code session logs
 │   ├── analytics/                          # Analytics outputs
-│   ├── canvas/                             # CodeCanvas state copies
+│   ├── canvas/                             # Mirror of agent/sessions/codecanvas (per trial)
 │   └── experiment_*.log                    # Experiment log
 ├── 1/                                      # Batch 1
 └── 2/                                      # Batch 2 (etc.)
@@ -226,6 +226,8 @@ results/
 When running multiple profiles in parallel (`--profiles-parallel`), each profile gets its own timestamped directory with the profile key appended (e.g., `2025-12-21__14-30-00__text`, `2025-12-21__14-30-00__codegraph`).
 
 Use `--batch N` to target a specific batch, or omit to auto-create the next batch.
+
+If a run produces CodeCanvas artifacts under `agent/sessions/codecanvas/`, the harness mirrors them into `results/<batch>/canvas/<task_id>__<hash>/` for convenient browsing.
 
 ## Common Workflows
 

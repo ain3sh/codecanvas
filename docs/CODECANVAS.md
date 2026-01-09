@@ -451,6 +451,11 @@ Shows module-level structure:
 - Nested boxes: Classes and functions
 - Arrows: Import relationships
 
+Rendering notes:
+- C/C++ import edges are derived from `#include` statements (quoted or angle-bracket)
+- Single-module districts annotate contained symbol counts (classes/functions) and sample symbol names
+- Highly connected hub modules are visually emphasized
+
 Layout: Hierarchical top-down, grouped by directory.
 
 ### Impact View
@@ -462,6 +467,10 @@ Shows blast radius around target:
 - Above: Callers (aggregated)
 - Below: Callees (aggregated)
 - Edges: Call relationships (counts)
+
+Center card content:
+- `MODULE`: file path + contains counts (classes/functions) + sample contained symbols
+- `CLASS` / `FUNC`: signature + file location (`path:line`)
 
 For `CLASS` and `MODULE` targets, the view represents the aggregated behavior of descendant functions/methods.
 
@@ -532,14 +541,14 @@ TIPS:
 
 | Action | Parameters | Returns | Purpose |
 |--------|------------|---------|---------|
-| `init` | `repo_path` | architecture.png, board.png | Parse codebase, create initial evidence |
-| `impact` | `symbol`, `depth`, `max_nodes` | impact.png, board.png | Analyze blast radius |
-| `claim` | `text`, `kind` | board.png | Record hypothesis/finding/question |
-| `decide` | `text`, `kind` | board.png | Record plan/test/edit |
-| `mark` | `symbol`, `text` | board.png | Mark symbol verified |
-| `skip` | `symbol`, `text` | board.png | Mark symbol out-of-scope |
-| `task_select` | `task_id` | board.png | Select task from tasks.yaml |
-| `status` | (none) | board.png | Refresh board without reparsing |
+| `init` | `repo_path` | architecture.png, task.png | Parse codebase, create initial evidence |
+| `impact` | `symbol`, `depth`, `max_nodes` | impact_*.png, task.png | Analyze blast radius |
+| `claim` | `text`, `kind` | task.png | Record hypothesis/finding/question |
+| `decide` | `text`, `kind` | task.png | Record plan/test/edit |
+| `mark` | `symbol`, `text` | task.png | Mark symbol verified |
+| `skip` | `symbol`, `text` | task.png | Mark symbol out-of-scope |
+| `task_select` | `task_id` | task.png | Select task from tasks.yaml |
+| `status` | (none) | task.png | Refresh board without reparsing |
 | `read` | (none) | text only | Text dump for non-multimodal |
 
 ### Parameters

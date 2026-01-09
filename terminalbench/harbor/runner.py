@@ -3,15 +3,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
+from terminalbench.core.config import CONFIG_DIR
 from terminalbench.core.profiles import AgentProfile
 from terminalbench.core.tasks import Task
-from terminalbench.core.config import CONFIG_DIR
 
 
 def load_env_file(env_file: Path | str | None) -> Dict[str, str]:
@@ -237,6 +238,49 @@ class HarborRunner:
         runs.append(result.to_dict())
         index_file.write_text(json.dumps({"runs": runs}, indent=2))
 
+    def _mirror_codecanvas_artifacts(self, *, job_dir: Optional[Path], task_id: str) -> None:
+        """Copy CodeCanvas session outputs into results/<batch>/canvas/<trial>/.
+
+        Source:
+          results/<batch>/runs/<job>/<task_id>__*/agent/sessions/codecanvas/
+        Dest:
+          results/<batch>/canvas/<task_id>__*/
+
+        Best-effort: failures should not block the main run.
+        """
+        if not self.output_root or not job_dir or not job_dir.exists():
+            return
+
+        batch_dir = self.output_root.parent
+        canvas_root = batch_dir / "canvas"
+        try:
+            canvas_root.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            return
+
+        try:
+            trial_dirs = [
+                d
+                for d in job_dir.iterdir()
+                if d.is_dir() and d.name.startswith(f"{task_id}__") and (d / "agent").exists()
+            ]
+        except Exception:
+            return
+
+        for trial_dir in trial_dirs:
+            src = trial_dir / "agent" / "sessions" / "codecanvas"
+            if not src.exists():
+                continue
+
+            dst = canvas_root / trial_dir.name
+            try:
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+            except Exception:
+                # Copy failures should not block execution.
+                continue
+
     def _run_single(
         self,
         task: Task,
@@ -308,6 +352,9 @@ class HarborRunner:
                 accuracy=mean_reward,
                 resolved=mean_reward == 1.0 if mean_reward is not None else None,
             )
+
+            # Populate results/<batch>/canvas/<trial>/ when CodeCanvas artifacts exist.
+            self._mirror_codecanvas_artifacts(job_dir=job_dir, task_id=task.id)
 
             if last_result.success:
                 self._update_index(last_result)

@@ -264,20 +264,29 @@ GITHUB_TOKEN=ghp_...  # For private MCP repos
 ## Output Structure
 
 ```
-results/runs/
-├── index.json                    # Run manifest
-└── {timestamp}/
-    ├── config.json               # Job configuration
-    ├── result.json               # Aggregate results
-    └── {task_id}__{hash}/
-        ├── agent/
-        │   ├── trajectory.json   # ATIF trace
-        │   ├── claude-code.txt   # Raw output
-        │   └── sessions/         # Claude Code logs
-        └── verifier/
-            ├── ctrf.json         # Test results
-            └── reward.txt        # Binary reward
+results/
+├── 0/                                      # Batch 0
+│   ├── runs/
+│   │   ├── index.json                      # Run index
+│   │   └── {timestamp}__{profile_key}/     # Unique per profile
+│   │       ├── config.json                 # Job configuration
+│   │       ├── result.json                 # Aggregate results
+│   │       └── {task_id}__{hash}/
+│   │           ├── agent/
+│   │           │   ├── trajectory.json     # ATIF trace
+│   │           │   ├── claude-code.txt     # Raw Claude output
+│   │           │   └── sessions/           # Claude Code session logs
+│   │           │       └── codecanvas/     # CodeCanvas artifacts (if used)
+│   │           └── verifier/
+│   │               ├── ctrf.json           # Test results
+│   │               └── reward.txt          # Binary reward
+│   ├── canvas/                             # Mirror of agent/sessions/codecanvas (per trial)
+│   │   └── {task_id}__{hash}/              # Contains state.json + *.png
+│   └── analytics/                          # Post-run analysis outputs
+└── 1/                                      # Batch 1
 ```
+
+If a run produces CodeCanvas artifacts under `agent/sessions/codecanvas/`, the harness mirrors them into `results/<batch>/canvas/<task_id>__<hash>/` for convenient browsing.
 
 ## Design Decisions
 
