@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -50,6 +51,8 @@ _call_graph_generation: int = 0
 _call_graph_edges_total: int = 0
 _call_graph_result_summary: dict | None = None  # Detailed result for diagnostics
 
+_SERVER_INSTANCE_ID = uuid.uuid4().hex
+
 
 def _call_graph_diag(*, phase: str | None = None) -> dict:
     """Build a durable diagnostic snapshot for post-hoc inspection.
@@ -58,6 +61,8 @@ def _call_graph_diag(*, phase: str | None = None) -> dict:
     """
     thread_alive = bool(_call_graph_thread and _call_graph_thread.is_alive())
     return {
+        "pid": int(os.getpid()),
+        "instance_id": _SERVER_INSTANCE_ID,
         "updated_at": time.time(),
         "generation": int(_call_graph_generation),
         "status": str(_call_graph_status),
@@ -489,13 +494,6 @@ def _ensure_loaded(state: CanvasState) -> None:
         _build_call_graph_foreground(time_budget_s=0.2, generation=generation)
         _start_call_graph_background(time_budget_s=30.0, generation=generation)
 
-        # Snapshot diagnostics for post-hoc inspection.
-        try:
-            state.call_graph_summary = _call_graph_diag(phase="ensure_loaded")
-            save_state(state)
-        except Exception:
-            pass
-
 
 def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: int) -> CanvasResult:
     global _graph, _analyzer, _call_graph_result_summary
@@ -563,6 +561,10 @@ def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: in
             "callees": callees,
             "caller_edges": sum(caller_counts.values()),
             "callee_edges": sum(callee_counts.values()),
+            "call_graph_status": (state.call_graph_summary or {}).get("status"),
+            "call_graph_edges_total": (state.call_graph_summary or {}).get("edges_total"),
+            "call_graph_generation": (state.call_graph_summary or {}).get("generation"),
+            "call_graph_instance_id": (state.call_graph_summary or {}).get("instance_id"),
         },
     )
     save_state(state)

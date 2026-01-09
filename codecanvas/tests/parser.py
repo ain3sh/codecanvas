@@ -85,3 +85,18 @@ def test_parser_skips_node_modules_with_pruning(tmp_path: Path):
     g = Parser().parse_directory(str(tmp_path))
     assert g.get_node(make_module_id("main.py")) is not None
     assert g.get_node(make_module_id("node_modules/a.py")) is None
+
+
+def test_cpp_includes_create_module_edges(tmp_path: Path):
+    (tmp_path / "user.h").write_text("#pragma once\n", encoding="utf-8")
+    (tmp_path / "user.cpp").write_text('#include "user.h"\n', encoding="utf-8")
+    (tmp_path / "main.cpp").write_text('#include "user.h"\nint main(){return 0;}\n', encoding="utf-8")
+
+    g = Parser(use_lsp=False).parse_directory(str(tmp_path))
+
+    main_id = make_module_id("main.cpp")
+    user_cpp_id = make_module_id("user.cpp")
+    user_h_id = make_module_id("user.h")
+
+    assert any(e.from_id == main_id and e.to_id == user_h_id and e.type == EdgeType.IMPORT for e in g.edges)
+    assert any(e.from_id == user_cpp_id and e.to_id == user_h_id and e.type == EdgeType.IMPORT for e in g.edges)

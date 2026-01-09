@@ -513,7 +513,8 @@ class Parser:
 
     def _detect_includes_c(self, text: str, module_id: str, file_label: str, graph: Graph) -> None:
         """Detect C/C++ #include directives."""
-        stripped = strip_strings_and_comments(text)
+        # Keep quoted strings and preprocessor lines so `#include "foo.h"` remains parseable.
+        stripped = strip_strings_and_comments(text, strip_hash_comments=False, strip_strings=False)
         pat = re.compile(r"^\s*#\s*include\s+[<\"]([^>\"]+)[>\"]", re.MULTILINE)
         for m in pat.finditer(stripped):
             inc = (m.group(1) or "").strip()
@@ -531,7 +532,7 @@ class Parser:
 
     def _detect_sources_sh(self, text: str, module_id: str, file_label: str, graph: Graph) -> None:
         """Detect shell source commands."""
-        stripped = strip_strings_and_comments(text)
+        stripped = strip_strings_and_comments(text, strip_hash_comments=True, strip_strings=False)
         pat = re.compile(r"^(?:\s*source\s+|\s*\.\s+)([^\s]+)", re.MULTILINE)
         for m in pat.finditer(stripped):
             spec = (m.group(1) or "").strip().strip("\"'")
@@ -547,7 +548,7 @@ class Parser:
 
     def _detect_sources_r(self, text: str, module_id: str, file_label: str, graph: Graph) -> None:
         """Detect R source() calls."""
-        stripped = strip_strings_and_comments(text)
+        stripped = strip_strings_and_comments(text, strip_hash_comments=True, strip_strings=False)
         pat = re.compile(r"\bsource\(\s*[\"\']([^\"\']+)[\"\']\s*\)")
         for m in pat.finditer(stripped):
             spec = (m.group(1) or "").strip()

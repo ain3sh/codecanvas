@@ -36,14 +36,26 @@ def normalize_path(path: str) -> str:
 # =============================================================================
 
 
-def strip_strings_and_comments(src: str) -> str:
-    """Remove strings and comments for cleaner parsing."""
+def strip_strings_and_comments(
+    src: str,
+    *,
+    strip_hash_comments: bool = True,
+    strip_strings: bool = True,
+) -> str:
+    """Remove comments (and optionally strings) for heuristic scanning.
+
+    NOTE: Some scans (e.g. C/C++ includes, shell `source`, R `source()`) must keep
+    quoted strings intact, so callers can disable `strip_strings`.
+    """
+
     s = src
     s = re.sub(r"/\*[\s\S]*?\*/", "", s)  # Block comments /* */
     s = re.sub(r"(^|[^:])//.*$", r"\1", s, flags=re.MULTILINE)  # Line comments //
-    s = re.sub(r"^[ \t]*#.*$", "", s, flags=re.MULTILINE)  # Python comments #
-    s = re.sub(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'', "", s)  # Triple-quoted strings
-    s = re.sub(r"\'(?:\\\\.|[^\'\\\\])*\'|\"(?:\\\\.|[^\"\\\\])*\"", "", s)  # Quoted strings
+    if strip_hash_comments:
+        s = re.sub(r"^[ \t]*#.*$", "", s, flags=re.MULTILINE)  # Hash comments (#)
+    if strip_strings:
+        s = re.sub(r'"""[\s\S]*?"""|\'\'\'[\s\S]*?\'\'\'', "", s)  # Triple-quoted strings
+        s = re.sub(r"\'(?:\\\\.|[^\'\\\\])*\'|\"(?:\\\\.|[^\"\\\\])*\"", "", s)  # Quoted strings
     return s
 
 

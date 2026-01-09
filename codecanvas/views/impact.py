@@ -1,9 +1,10 @@
 """Impact View - Blast radius (callers/callees)."""
 
 import math
+import os
 from typing import Dict, Tuple
 
-from ..core.models import Graph
+from ..core.models import Graph, NodeKind
 from . import COLORS, Style, SVGCanvas
 
 
@@ -24,6 +25,16 @@ class ImpactView:
 
         target_node = self.graph.get_node(target_id)
         if not target_node:
+            return ""
+
+        def short_path(p: str) -> str:
+            p = (p or "").replace("\\", "/")
+            return os.path.basename(p) or p
+
+        def first_nonempty_line(s: str) -> str:
+            for line in (s or "").splitlines():
+                if line.strip():
+                    return line.strip()
             return ""
 
         max_side = max(0, int(max_side))
@@ -126,10 +137,35 @@ class ImpactView:
         )
 
         # Docstring / Snippet
-        snippet_text = target_node.snippet
-        if not snippet_text:
-            snippet_text = "No source available"
-        lines = snippet_text.split("\n")[:4]  # First 4 lines
+        lines: list[str] = []
+        if target_node.kind == NodeKind.MODULE:
+            children = self.graph.get_children(target_node.id)
+            n_cls = sum(1 for c in children if c.kind == NodeKind.CLASS)
+            n_fn = sum(1 for c in children if c.kind == NodeKind.FUNC)
+            lines.append(f"file: {target_node.label}")
+            lines.append(f"contains: {n_cls} classes, {n_fn} funcs")
+            # Show a couple of contained symbols for interpretability.
+            shown = 0
+            for c in sorted(children, key=lambda n: (n.kind.value, n.label)):
+                if c.kind not in (NodeKind.CLASS, NodeKind.FUNC):
+                    continue
+                lines.append(f"- {c.kind.value}: {c.label}")
+                shown += 1
+                if shown >= 2:
+                    break
+        else:
+            sig = first_nonempty_line(target_node.snippet or "")
+            if sig:
+                lines.append(sig)
+            loc = short_path(target_node.fsPath)
+            if target_node.start_line is not None:
+                loc = f"{loc}:{int(target_node.start_line) + 1}"
+            lines.append(loc)
+
+        if not lines:
+            lines = ["No source available"]
+
+        lines = lines[:4]
         y_text = cy - card_h / 2 + 50
         for line in lines:
             canvas.add_text(

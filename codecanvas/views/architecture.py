@@ -305,6 +305,24 @@ class ArchitectureView:
             if not box:
                 continue
 
+            # If this district is a single module, surface contained symbol counts for interpretability.
+            n_classes = 0
+            n_funcs = 0
+            top_symbols: List[str] = []
+            if len(d.module_ids) == 1:
+                children = self.graph.get_children(d.module_ids[0])
+                n_classes = sum(1 for c in children if c.kind == NodeKind.CLASS)
+                n_funcs = sum(1 for c in children if c.kind == NodeKind.FUNC)
+                # Prefer showing classes first, then funcs.
+                shown: List[str] = []
+                for c in sorted(children, key=lambda n: (0 if n.kind == NodeKind.CLASS else 1, n.label)):
+                    if c.kind not in (NodeKind.CLASS, NodeKind.FUNC):
+                        continue
+                    shown.append(f"{c.kind.value}: {c.label}")
+                    if len(shown) >= 2:
+                        break
+                top_symbols = shown
+
             canvas.add_rect(
                 box.x,
                 box.y,
@@ -321,10 +339,13 @@ class ArchitectureView:
             )
             in_cnt = dist_in.get(d.district_id, 0)
             out_cnt = dist_out.get(d.district_id, 0)
+            counts = f"{len(d.module_ids)} modules    in/out: {in_cnt}/{out_cnt}"
+            if len(d.module_ids) == 1:
+                counts = f"1 module    classes: {n_classes}    funcs: {n_funcs}    in/out: {in_cnt}/{out_cnt}"
             canvas.add_text(
                 box.x + 12,
                 box.y + 44,
-                f"{len(d.module_ids)} modules    in/out: {in_cnt}/{out_cnt}",
+                counts,
                 style=Style(fill=COLORS["muted"], font_size=11),
             )
 
@@ -352,6 +373,17 @@ class ArchitectureView:
                     style=Style(fill=COLORS["text"], font_size=11),
                 )
                 y += 16
+
+            if top_symbols:
+                y += 2
+                for s in top_symbols:
+                    canvas.add_text(
+                        box.x + 18,
+                        y,
+                        f"- {s}"[:44],
+                        style=Style(fill=COLORS["muted"], font_size=10),
+                    )
+                    y += 14
 
         # Legend
         lx = margin
