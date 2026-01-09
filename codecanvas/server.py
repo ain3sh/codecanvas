@@ -447,15 +447,7 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
 
     board = _render_board(state, "Board").images[0]
 
-    diag = state.call_graph_summary or {}
-    diag_note = ""
-    if use_lsp:
-        diag_note = (
-            f" Diag: status={diag.get('status')}, thread_alive={diag.get('thread_alive')}, "
-            f"edges_total={diag.get('edges_total')}."
-        )
-
-    call_note = "" if not use_lsp else f" Call graph: +{call_edges_added} edges ({_call_graph_status}).{diag_note}"
+    call_note = "" if not use_lsp else f" Call graph: +{call_edges_added} edges ({_call_graph_status})."
     msg = (
         f"Initialized: {stats['modules']} modules, {stats['classes']} classes, {stats['funcs']} funcs. "
         f"Created evidence {ev.id}.{backend_note}{call_note}{warn}\n\n"

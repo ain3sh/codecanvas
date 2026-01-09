@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set
 
 if TYPE_CHECKING:
     from ..core.intelligent import LLMAnalyzer
@@ -124,6 +124,7 @@ class CanvasState:
     analyses: Dict[str, CanvasAnalysisState]
     symbol_files: Dict[str, str]
     parse_summary: Dict[str, Any]
+    call_graph_summary: Dict[str, Any]
     
     @classmethod
     def from_json(cls, json_str: str) -> "CanvasState":
@@ -136,6 +137,7 @@ class CanvasState:
             analyses={k: CanvasAnalysisState.from_dict(v) for k, v in d.get("analyses", {}).items()},
             symbol_files=dict(d.get("symbol_files", {})),
             parse_summary=dict(d.get("parse_summary", {})),
+            call_graph_summary=dict(d.get("call_graph_summary", {})),
         )
     
     @classmethod
@@ -148,6 +150,7 @@ class CanvasState:
             analyses={},
             symbol_files={},
             parse_summary={},
+            call_graph_summary={},
         )
 
 
@@ -285,8 +288,11 @@ def compute_codecanvas_metrics(
         m.functions_parsed = arch_evidence.metrics.get("funcs", 0)
         m.classes_parsed = arch_evidence.metrics.get("classes", 0)
     
-    # call_edges not stored in parse_summary; could be computed from graph but not persisted
-    m.call_edges = 0
+    cgs = state.call_graph_summary or {}
+    if cgs.get("status") == "completed":
+        m.call_edges = int(cgs.get("edges_total") or 0)
+    else:
+        m.call_edges = 0
     
     # Blast radius files
     blast_radius_files: Set[str] = set()
@@ -420,7 +426,9 @@ class CodeCanvasVisualAnalysis:
             "has_images": self.has_images,
             "impact_alignment": self.impact_alignment.raw_response if self.impact_alignment else None,
             "board_quality": self.board_quality.raw_response if self.board_quality else None,
-            "architecture_understanding": self.architecture_understanding.raw_response if self.architecture_understanding else None,
+            "architecture_understanding": (
+                self.architecture_understanding.raw_response if self.architecture_understanding else None
+            ),
         }
 
 
