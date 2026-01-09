@@ -5,14 +5,14 @@ All prompts designed for GPT-5.2 with structured JSON output.
 Includes both text analysis prompts and vision prompts.
 """
 
-from typing import Dict, Any
-
+from typing import Any, Dict
 
 # =============================================================================
 # Text Analysis Prompts
 # =============================================================================
 
-STRATEGY_ANALYSIS_PROMPT = """You are an expert at analyzing LLM agent behavior. Analyze this agent trajectory and classify its problem-solving strategy.
+STRATEGY_ANALYSIS_PROMPT = """You are an expert at analyzing LLM agent behavior.
+Analyze this agent trajectory and classify its problem-solving strategy.
 
 ## Task Context
 - **Task ID**: {task_id}
@@ -35,7 +35,7 @@ Classify the agent's strategy and assess its quality. Output valid JSON:
 
 ```json
 {{
-    "primary_strategy": "<one of: systematic_exploration, hypothesis_driven, grep_and_fix, trial_and_error, tool_guided, chaotic>",
+    "primary_strategy": "<primary_strategy>",
     "strategy_quality": <float 0-1>,
     "reasoning_coherence": <float 0-1>,
     "adaptation_events": ["<description of strategy pivots>"],
@@ -56,7 +56,8 @@ Strategy definitions:
 - **chaotic**: No discernible strategy, random actions"""
 
 
-FAILURE_ANALYSIS_PROMPT = """You are an expert at diagnosing why LLM agents fail at tasks. Analyze this failed trajectory.
+FAILURE_ANALYSIS_PROMPT = """You are an expert at diagnosing why LLM agents fail at tasks.
+Analyze this failed trajectory.
 
 ## Task Context
 - **Task ID**: {task_id}
@@ -83,7 +84,7 @@ Diagnose the root cause of failure. Output valid JSON:
 
 ```json
 {{
-    "root_cause": "<one of: incomplete_exploration, misunderstood_task, correct_approach_poor_execution, knowledge_gap, tool_misuse, context_loss, premature_termination, infinite_loop>",
+    "root_cause": "<root_cause>",
     "confidence": <float 0-1>,
     "critical_step": <int or null>,
     "critical_step_explanation": "<what went wrong at this step>",
@@ -106,7 +107,8 @@ Root cause definitions:
 - **infinite_loop**: Got stuck repeating actions"""
 
 
-MCP_UTILIZATION_PROMPT = """You are an expert at evaluating how effectively LLM agents use specialized tools. Analyze this MCP-enabled trajectory.
+MCP_UTILIZATION_PROMPT = """You are an expert at evaluating how effectively LLM agents use specialized tools.
+Analyze this MCP-enabled trajectory.
 
 ## Task Context
 - **Task ID**: {task_id}
@@ -150,7 +152,8 @@ Evaluate the quality of MCP tool utilization. Output valid JSON:
 ```"""
 
 
-COMPARATIVE_NARRATIVE_PROMPT = """You are an expert at analyzing comparative experiments in AI research. Compare these two trajectories for the same task.
+COMPARATIVE_NARRATIVE_PROMPT = """You are an expert at analyzing comparative experiments in AI research.
+Compare these two trajectories for the same task.
 
 ## Task Context
 - **Task ID**: {task_id}
@@ -205,12 +208,13 @@ Generate a comparative analysis suitable for a research paper. Output valid JSON
         "profile": "<which profile>",
         "description": "<what happened that illustrates the difference>"
     }},
-    "narrative_paragraph": "<2-3 sentence narrative comparing the two approaches, suitable for a paper's Results section>"
+    "narrative_paragraph": "<paper_ready_paragraph>"
 }}
 ```"""
 
 
-INSIGHT_SYNTHESIS_PROMPT = """You are an expert at synthesizing research findings. Analyze these aggregate results across all tasks and profiles.
+INSIGHT_SYNTHESIS_PROMPT = """You are an expert at synthesizing research findings.
+Analyze these aggregate results across all tasks and profiles.
 
 ## Experiment Setup
 - **Profiles Compared**: {profiles}
@@ -270,7 +274,8 @@ Synthesize high-level insights for a research paper. Output valid JSON:
 
 VISUAL_EDIT_ALIGNMENT_PROMPT = """You are an expert at analyzing code visualization diagrams and agent behavior.
 
-This is an IMPACT ANALYSIS visualization from CodeCanvas, showing the "blast radius" of a code symbol - what other code depends on it and might be affected by changes.
+This is an IMPACT ANALYSIS visualization from CodeCanvas, showing the "blast radius" of a code symbol -
+what other code depends on it and might be affected by changes.
 
 The visualization shows:
 - A central node (the analyzed symbol)
@@ -367,33 +372,34 @@ Output valid JSON:
 # Utility Functions
 # =============================================================================
 
+
 def condense_trajectory(trajectory, max_steps: int = 50, max_chars_per_step: int = 500) -> str:
     """Condense a trajectory into LLM-digestible format."""
     lines = []
     step_count = 0
-    
+
     for step in trajectory.steps:
         if step_count >= max_steps:
             lines.append(f"\n... [{len(trajectory.steps) - max_steps} more steps truncated]")
             break
-        
+
         if step.source == "agent":
             thought = (step.message or "")[:max_chars_per_step]
             if len(step.message or "") > max_chars_per_step:
                 thought += "..."
-            
+
             tool_strs = []
             for tc in step.tool_calls:
                 args_summary = _summarize_args(tc.arguments)
                 tool_strs.append(f"{tc.function_name}({args_summary})")
-            
+
             tools_line = " | ".join(tool_strs) if tool_strs else "[no tools]"
             lines.append(f"[{step.step_id}] {thought}")
             if tool_strs:
                 lines.append(f"    -> {tools_line}")
-            
+
             step_count += 1
-        
+
         elif step.observation_results:
             for obs in step.observation_results[:2]:
                 content = obs.content
@@ -403,7 +409,7 @@ def condense_trajectory(trajectory, max_steps: int = 50, max_chars_per_step: int
                     lines.append(f"    ERROR: {obs.error[:100]}")
                 else:
                     lines.append(f"    <- {content}")
-    
+
     return "\n".join(lines)
 
 
@@ -411,14 +417,14 @@ def _summarize_args(args: Dict[str, Any], max_len: int = 100) -> str:
     """Summarize tool arguments for display."""
     if not args:
         return ""
-    
+
     parts = []
     for k, v in args.items():
         v_str = str(v)
         if len(v_str) > 50:
             v_str = v_str[:25] + "..." + v_str[-25:]
         parts.append(f"{k}={v_str}")
-    
+
     result = ", ".join(parts)
     return result[:max_len] + "..." if len(result) > max_len else result
 
@@ -427,16 +433,16 @@ def format_test_results(verifier_results) -> str:
     """Format test results for prompt."""
     if not verifier_results:
         return "No test results available"
-    
+
     lines = [
         f"Reward: {verifier_results.reward}",
         f"Tests: {verifier_results.tests_passed}/{verifier_results.tests_total} passed",
     ]
-    
+
     for test in verifier_results.test_results[:5]:
         status = "PASS" if test.status == "passed" else "FAIL"
         lines.append(f"  [{status}] {test.name}")
         if test.message and test.status != "passed":
             lines.append(f"       {test.message[:200]}")
-    
+
     return "\n".join(lines)

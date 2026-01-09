@@ -587,11 +587,7 @@ def _action_claim(state: CanvasState, *, text: str, kind: str | None) -> CanvasR
 
     linked = f" linked to {ev_ids[0]}" if ev_ids else ""
     board_result = _render_board(state, "Board")
-    msg = (
-        f"Created {cl.id} [{k}]{linked}.\n\n"
-        f"{_board_summary(state)}\n"
-        f"{_next_hint('claim')}"
-    )
+    msg = f"Created {cl.id} [{k}]{linked}.\n\n{_board_summary(state)}\n{_next_hint('claim')}"
     return CanvasResult(text=msg, images=board_result.images)
 
 
@@ -603,11 +599,7 @@ def _action_decide(state: CanvasState, *, text: str, kind: str | None) -> Canvas
 
     linked = f" linked to {ev_ids[0]}" if ev_ids else ""
     board_result = _render_board(state, "Board")
-    msg = (
-        f"Created {dc.id} [{k}]{linked}.\n\n"
-        f"{_board_summary(state)}\n"
-        f"{_next_hint('decide')}"
-    )
+    msg = f"Created {dc.id} [{k}]{linked}.\n\n{_board_summary(state)}\n{_next_hint('decide')}"
     return CanvasResult(text=msg, images=board_result.images)
 
 
@@ -647,8 +639,7 @@ def _action_mark_skip(state: CanvasState, *, symbol: str, mode: str, text: str |
                 f"Hint: Use exact function/class names from the suggestions above."
             )
         return CanvasResult(
-            f'Symbol not found: "{symbol}"\n'
-            f"Hint: Run status to see the Evidence Board, or read for available symbols."
+            f'Symbol not found: "{symbol}"\nHint: Run status to see the Evidence Board, or read for available symbols.'
         )
 
     with _graph_lock:
@@ -702,11 +693,7 @@ def _action_task_select(state: CanvasState, task_id: str) -> CanvasResult:
     save_state(state)
 
     board_result = _render_board(state, "Board")
-    msg = (
-        f'Selected task: "{task_id}".\n\n'
-        f"{_board_summary(state)}\n"
-        f"{_next_hint('task_select')}"
-    )
+    msg = f'Selected task: "{task_id}".\n\n{_board_summary(state)}\n{_next_hint("task_select")}'
     return CanvasResult(text=msg, images=board_result.images)
 
 

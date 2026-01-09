@@ -23,16 +23,18 @@ if TYPE_CHECKING:
 # State Parsing (from state.json)
 # =============================================================================
 
+
 @dataclass
 class CanvasEvidence:
     """Evidence item from state.json."""
+
     id: str
     kind: str  # impact | architecture
     png_path: str
     symbol: Optional[str]
     created_at: float
     metrics: Dict[str, Any]
-    
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "CanvasEvidence":
         return cls(
@@ -48,13 +50,14 @@ class CanvasEvidence:
 @dataclass
 class CanvasClaim:
     """Claim from state.json."""
+
     id: str
     kind: str  # hypothesis | finding | question
     text: str
     status: str
     evidence_ids: List[str]
     created_at: float
-    
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "CanvasClaim":
         return cls(
@@ -70,13 +73,14 @@ class CanvasClaim:
 @dataclass
 class CanvasDecision:
     """Decision from state.json."""
+
     id: str
     kind: str  # mark | skip | plan | test | edit
     text: str
     target: Optional[str]
     evidence_ids: List[str]
     created_at: float
-    
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "CanvasDecision":
         return cls(
@@ -92,12 +96,13 @@ class CanvasDecision:
 @dataclass
 class CanvasAnalysisState:
     """Per-symbol analysis state from state.json."""
+
     target_id: str
     target_label: str
     affected_ids: Set[str]
     addressed_ids: Set[str]
     skipped_ids: Set[str]
-    
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "CanvasAnalysisState":
         return cls(
@@ -107,7 +112,7 @@ class CanvasAnalysisState:
             addressed_ids=set(d.get("addressed_ids", [])),
             skipped_ids=set(d.get("skipped_ids", [])),
         )
-    
+
     def progress(self) -> tuple[int, int]:
         done = len(self.addressed_ids) + len(self.skipped_ids)
         total = len(self.affected_ids)
@@ -117,6 +122,7 @@ class CanvasAnalysisState:
 @dataclass
 class CanvasState:
     """Parsed CodeCanvas state.json."""
+
     initialized: bool
     evidence: List[CanvasEvidence]
     claims: List[CanvasClaim]
@@ -125,7 +131,7 @@ class CanvasState:
     symbol_files: Dict[str, str]
     parse_summary: Dict[str, Any]
     call_graph_summary: Dict[str, Any]
-    
+
     @classmethod
     def from_json(cls, json_str: str) -> "CanvasState":
         d = json.loads(json_str)
@@ -139,7 +145,7 @@ class CanvasState:
             parse_summary=dict(d.get("parse_summary", {})),
             call_graph_summary=dict(d.get("call_graph_summary", {})),
         )
-    
+
     @classmethod
     def empty(cls) -> "CanvasState":
         return cls(
@@ -177,37 +183,38 @@ def get_codecanvas_images(trial_dir: Path) -> Dict[str, Path]:
 # Deterministic Metrics (Layer 1)
 # =============================================================================
 
+
 @dataclass
 class CodeCanvasMetrics:
     """CodeCanvas-specific deterministic metrics."""
-    
+
     # Basic counts
     evidence_count: int = 0
     claims_count: int = 0
     decisions_count: int = 0
     impact_analyses_count: int = 0
-    
+
     # Claim breakdown
     hypotheses_count: int = 0
     findings_count: int = 0
     questions_count: int = 0
-    
+
     # Decision breakdown
     marks_count: int = 0
     skips_count: int = 0
     plans_count: int = 0
     edits_count: int = 0
-    
+
     # Core metrics
     blast_radius_edit_rate: float = 0.0
     anticipated_failure_rate: float = 0.0
     deliberation_depth: int = 0
     reasoning_density: float = 0.0
     systematic_progress: float = 0.0
-    
+
     # Composite
     informed_editing_score: float = 0.0
-    
+
     # Blast radius details
     total_affected_symbols: int = 0
     total_addressed_symbols: int = 0
@@ -215,17 +222,17 @@ class CodeCanvasMetrics:
     blast_radius_files: Set[str] = field(default_factory=set)
     edits_in_blast_radius: int = 0
     edits_outside_blast_radius: int = 0
-    
+
     # Test-failure analysis
     failed_tests_in_blast_radius: int = 0
     failed_tests_outside_blast_radius: int = 0
-    
+
     # Parse summary
     files_parsed: int = 0
     functions_parsed: int = 0
     classes_parsed: int = 0
     call_edges: int = 0
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {k: list(v) if isinstance(v, set) else v for k, v in self.__dict__.items()}
 
@@ -254,46 +261,46 @@ def compute_codecanvas_metrics(
 ) -> CodeCanvasMetrics:
     """Compute CodeCanvas-specific metrics from trajectory and state."""
     m = CodeCanvasMetrics()
-    
+
     # Basic counts
     m.evidence_count = len(state.evidence)
     m.claims_count = len(state.claims)
     m.decisions_count = len(state.decisions)
     m.impact_analyses_count = sum(1 for e in state.evidence if e.kind == "impact")
-    
+
     # Claim breakdown
     m.hypotheses_count = sum(1 for c in state.claims if c.kind == "hypothesis")
     m.findings_count = sum(1 for c in state.claims if c.kind == "finding")
     m.questions_count = sum(1 for c in state.claims if c.kind == "question")
-    
+
     # Decision breakdown
     m.marks_count = sum(1 for d in state.decisions if d.kind == "mark")
     m.skips_count = sum(1 for d in state.decisions if d.kind == "skip")
     m.plans_count = sum(1 for d in state.decisions if d.kind == "plan")
     m.edits_count = sum(1 for d in state.decisions if d.kind == "edit")
-    
+
     # Aggregate analysis state
     for analysis in state.analyses.values():
         m.total_affected_symbols += len(analysis.affected_ids)
         m.total_addressed_symbols += len(analysis.addressed_ids)
         m.total_skipped_symbols += len(analysis.skipped_ids)
-    
+
     # Parse summary - correct keys from state.json structure
     ps = state.parse_summary
     m.files_parsed = ps.get("parsed_files", 0)
-    
+
     # Functions/classes come from architecture evidence metrics, not parse_summary
     arch_evidence = next((e for e in state.evidence if e.kind == "architecture"), None)
     if arch_evidence and arch_evidence.metrics:
         m.functions_parsed = arch_evidence.metrics.get("funcs", 0)
         m.classes_parsed = arch_evidence.metrics.get("classes", 0)
-    
+
     cgs = state.call_graph_summary or {}
     if cgs.get("status") == "completed":
         m.call_edges = int(cgs.get("edges_total") or 0)
     else:
         m.call_edges = 0
-    
+
     # Blast radius files
     blast_radius_files: Set[str] = set()
     for analysis in state.analyses.values():
@@ -301,7 +308,7 @@ def compute_codecanvas_metrics(
             if symbol_id in state.symbol_files:
                 blast_radius_files.add(state.symbol_files[symbol_id])
     m.blast_radius_files = blast_radius_files
-    
+
     # Files edited from trajectory
     files_edited: Set[str] = set()
     for step in trajectory.steps:
@@ -310,13 +317,13 @@ def compute_codecanvas_metrics(
                 path = tc.arguments.get("file_path") or tc.arguments.get("path")
                 if path:
                     files_edited.add(str(path))
-    
+
     # 1. Blast Radius Edit Rate
     if files_edited:
         m.edits_in_blast_radius = _count_matching_files(files_edited, blast_radius_files)
         m.edits_outside_blast_radius = len(files_edited) - m.edits_in_blast_radius
         m.blast_radius_edit_rate = m.edits_in_blast_radius / len(files_edited)
-    
+
     # 2. Anticipated Failure Rate
     if trajectory.verifier and trajectory.verifier.test_results:
         failed_tests = [t for t in trajectory.verifier.test_results if t.status == "failed"]
@@ -328,25 +335,23 @@ def compute_codecanvas_metrics(
                 else:
                     m.failed_tests_outside_blast_radius += 1
             m.anticipated_failure_rate = m.failed_tests_in_blast_radius / len(failed_tests)
-    
+
     # 3. Deliberation Depth
     m.deliberation_depth = m.claims_count + m.plans_count
-    
+
     # 4. Reasoning Density
     if m.evidence_count > 0:
         m.reasoning_density = m.claims_count / m.evidence_count
-    
+
     # 5. Systematic Progress
     if m.total_affected_symbols > 0:
         m.systematic_progress = (m.total_addressed_symbols + m.total_skipped_symbols) / m.total_affected_symbols
-    
+
     # 6. Informed Editing Score (composite)
     m.informed_editing_score = (
-        0.4 * m.blast_radius_edit_rate +
-        0.3 * m.anticipated_failure_rate +
-        0.3 * min(1.0, m.deliberation_depth / 3.0)
+        0.4 * m.blast_radius_edit_rate + 0.3 * m.anticipated_failure_rate + 0.3 * min(1.0, m.deliberation_depth / 3.0)
     )
-    
+
     return m
 
 
@@ -374,9 +379,11 @@ def aggregate_codecanvas_metrics(metrics_list: List[CodeCanvasMetrics]) -> Dict[
 # Vision Analysis (Layer 2)
 # =============================================================================
 
+
 @dataclass
 class VisualEditAlignment:
     """Result of visual-edit alignment analysis."""
+
     alignment_score: float
     aligned_edits: List[str]
     outside_edits: List[str]
@@ -390,6 +397,7 @@ class VisualEditAlignment:
 @dataclass
 class EvidenceBoardQuality:
     """Result of evidence board quality analysis."""
+
     board_quality_score: float
     reasoning_style: str
     evidence_to_claim_linkage: float
@@ -404,6 +412,7 @@ class EvidenceBoardQuality:
 @dataclass
 class ArchitectureUnderstanding:
     """Result of architecture understanding analysis."""
+
     architecture_understanding: float
     relevant_modules_explored: List[str]
     irrelevant_exploration: List[str]
@@ -416,11 +425,12 @@ class ArchitectureUnderstanding:
 @dataclass
 class CodeCanvasVisualAnalysis:
     """Complete visual analysis for a CodeCanvas run."""
+
     has_images: bool
     impact_alignment: Optional[VisualEditAlignment] = None
     board_quality: Optional[EvidenceBoardQuality] = None
     architecture_understanding: Optional[ArchitectureUnderstanding] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "has_images": self.has_images,
@@ -434,10 +444,10 @@ class CodeCanvasVisualAnalysis:
 
 class CodeCanvasVisionAnalyzer:
     """Vision-powered analyzer for CodeCanvas artifacts. Uses LLMAnalyzer for API calls."""
-    
+
     def __init__(self, analyzer: "LLMAnalyzer"):
         self.analyzer = analyzer
-    
+
     def analyze_impact_alignment(
         self,
         impact_image: Path,
@@ -446,13 +456,13 @@ class CodeCanvasVisionAnalyzer:
     ) -> VisualEditAlignment:
         """Analyze alignment between impact visualization and actual edits."""
         from .prompts import VISUAL_EDIT_ALIGNMENT_PROMPT
-        
+
         prompt = VISUAL_EDIT_ALIGNMENT_PROMPT.format(
             files_edited="\n".join(f"- {f}" for f in files_edited) if files_edited else "(none)",
             blast_radius_files="\n".join(f"- {f}" for f in blast_radius_files) if blast_radius_files else "(none)",
         )
         result = self.analyzer._call_vision(prompt, impact_image)
-        
+
         return VisualEditAlignment(
             alignment_score=result.get("alignment_score", 0.0),
             aligned_edits=result.get("aligned_edits", []),
@@ -463,13 +473,13 @@ class CodeCanvasVisionAnalyzer:
             recommendation=result.get("recommendation", ""),
             raw_response=result,
         )
-    
+
     def analyze_evidence_board(self, board_image: Path) -> EvidenceBoardQuality:
         """Analyze quality of the evidence board reasoning trail."""
         from .prompts import EVIDENCE_BOARD_QUALITY_PROMPT
-        
+
         result = self.analyzer._call_vision(EVIDENCE_BOARD_QUALITY_PROMPT, board_image)
-        
+
         return EvidenceBoardQuality(
             board_quality_score=result.get("board_quality_score", 0.0),
             reasoning_style=result.get("reasoning_style", "unknown"),
@@ -481,7 +491,7 @@ class CodeCanvasVisionAnalyzer:
             key_insight=result.get("key_insight", ""),
             raw_response=result,
         )
-    
+
     def analyze_architecture_understanding(
         self,
         architecture_image: Path,
@@ -491,14 +501,14 @@ class CodeCanvasVisionAnalyzer:
     ) -> ArchitectureUnderstanding:
         """Analyze whether agent understood the architecture visualization."""
         from .prompts import ARCHITECTURE_UNDERSTANDING_PROMPT
-        
+
         prompt = ARCHITECTURE_UNDERSTANDING_PROMPT.format(
             task_description=task_description,
             files_explored="\n".join(f"- {f}" for f in files_explored) if files_explored else "(none)",
             files_edited="\n".join(f"- {f}" for f in files_edited) if files_edited else "(none)",
         )
         result = self.analyzer._call_vision(prompt, architecture_image)
-        
+
         return ArchitectureUnderstanding(
             architecture_understanding=result.get("architecture_understanding", 0.0),
             relevant_modules_explored=result.get("relevant_modules_explored", []),
@@ -508,7 +518,7 @@ class CodeCanvasVisionAnalyzer:
             observations=result.get("observations", []),
             raw_response=result,
         )
-    
+
     def analyze_run(
         self,
         trial_dir: Path,
@@ -519,25 +529,25 @@ class CodeCanvasVisionAnalyzer:
     ) -> CodeCanvasVisualAnalysis:
         """Run full visual analysis on a CodeCanvas run."""
         images = get_codecanvas_images(trial_dir)
-        
+
         if not images:
             return CodeCanvasVisualAnalysis(has_images=False)
-        
+
         analysis = CodeCanvasVisualAnalysis(has_images=True)
-        
+
         # Analyze most recent impact image
         impact_images = sorted(k for k in images if k.startswith("impact"))
         if impact_images:
             analysis.impact_alignment = self.analyze_impact_alignment(
                 images[impact_images[-1]], files_edited, blast_radius_files
             )
-        
+
         if "board" in images:
             analysis.board_quality = self.analyze_evidence_board(images["board"])
-        
+
         if "architecture" in images:
             analysis.architecture_understanding = self.analyze_architecture_understanding(
                 images["architecture"], task_description, files_read, files_edited
             )
-        
+
         return analysis

@@ -113,7 +113,7 @@ def get_multilspy_language(lang: str) -> Optional[str]:
 @lru_cache
 def has_lsp_support(lang: str) -> bool:
     """Check if LSP is available for a language.
-    
+
     - Multilspy languages: always available (auto-downloads binaries)
     - Custom LSP languages: only if the external binary is installed
     """

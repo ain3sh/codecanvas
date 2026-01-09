@@ -1,11 +1,11 @@
 """Agent profile configuration for Terminal-Bench harness."""
+
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
 
 DEFAULT_MODEL = "anthropic/claude-sonnet-4-5-20250929"
 DEFAULT_REASONING = "medium"
@@ -26,21 +26,12 @@ def load_mcp_config(config_path: Path) -> Dict[str, Any]:
     return json.loads(config_path.read_text())
 
 
-def filter_mcp_servers(
-    config: Dict[str, Any],
-    enabled_servers: List[str] | None
-) -> Dict[str, Any]:
+def filter_mcp_servers(config: Dict[str, Any], enabled_servers: List[str] | None) -> Dict[str, Any]:
     """Filter MCP config to only include enabled servers."""
     if enabled_servers is None:
         return config  # All servers enabled
 
-    return {
-        "mcpServers": {
-            name: cfg
-            for name, cfg in config.get("mcpServers", {}).items()
-            if name in enabled_servers
-        }
-    }
+    return {"mcpServers": {name: cfg for name, cfg in config.get("mcpServers", {}).items() if name in enabled_servers}}
 
 
 def get_available_servers(config_path: Path) -> List[str]:
@@ -51,20 +42,20 @@ def get_available_servers(config_path: Path) -> List[str]:
 
 def discover_mcp_usage_prompts(server_names: List[str], search_dir: Optional[Path] = None) -> Optional[str]:
     """Discover and combine USAGE.md files for enabled MCP servers.
-    
+
     Looks for <server_name>/USAGE.md in the search directory (defaults to cwd).
     Returns combined content of all found USAGE.md files, or None if none found.
     """
     if search_dir is None:
         search_dir = Path.cwd()
-    
+
     prompts = []
     for name in server_names:
         source_name = MCP_USAGE_ALIASES.get(name, name)
         usage_file = search_dir / source_name / "USAGE.md"
         if usage_file.exists():
             prompts.append(usage_file.read_text().strip())
-    
+
     return "\n\n".join(prompts) if prompts else None
 
 
@@ -123,7 +114,7 @@ class AgentProfile:
 
 def adapt_mcp_config_for_harbor(config: Dict[str, Any]) -> Dict[str, Any]:
     """Adapt MCP config for Harbor container environment.
-    
+
     Local .mcp.json uses 'uv run python -m ...' but Harbor containers
     have packages installed in /opt/venv, so we convert to use that venv's Python.
     """
@@ -140,7 +131,7 @@ def adapt_mcp_config_for_harbor(config: Dict[str, Any]) -> Dict[str, Any]:
 
 def adapt_hooks_for_harbor(hooks_json: str) -> str:
     """Adapt hooks config for Harbor container environment.
-    
+
     Local hooks.json uses 'uv run python' but Harbor containers
     have packages installed in /opt/venv, so we convert to use that venv's Python.
     """

@@ -10,11 +10,7 @@ from codecanvas.parser import call_graph as cg
 
 def test_call_graph_builds_edges_from_definition(monkeypatch, tmp_path: Path):
     (tmp_path / "a.py").write_text(
-        "def callee():\n"
-        "    return 1\n"
-        "\n"
-        "def caller():\n"
-        "    callee()\n",
+        "def callee():\n    return 1\n\ndef caller():\n    callee()\n",
         encoding="utf-8",
     )
 
@@ -48,7 +44,4 @@ def test_call_graph_builds_edges_from_definition(monkeypatch, tmp_path: Path):
 
     result = cg.build_call_graph_edges(g.nodes, time_budget_s=1.0, max_callsites_total=10, max_callsites_per_file=10)
 
-    assert any(
-        e.from_id == caller_id and e.to_id == callee_id and e.type == EdgeType.CALL
-        for e in result.edges
-    )
+    assert any(e.from_id == caller_id and e.to_id == callee_id and e.type == EdgeType.CALL for e in result.edges)

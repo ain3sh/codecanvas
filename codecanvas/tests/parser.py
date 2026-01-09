@@ -40,6 +40,7 @@ def test_empty_lsp_symbols_does_not_force_fallback(monkeypatch, tmp_path: Path):
     (tmp_path / "a.py").write_text("import os\n", encoding="utf-8")
 
     import codecanvas.parser as parser_mod
+
     monkeypatch.setattr(parser_mod, "has_lsp_support", lambda _lang: True)
 
     def _fake_parse_with_lsp(self, file_path, file_label, text, lang, graph, *, module_id):

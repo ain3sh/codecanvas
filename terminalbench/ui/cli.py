@@ -4,14 +4,13 @@ import argparse
 import csv
 import json
 import sys
-
 from pathlib import Path
 from typing import Iterable, List, Tuple
 
-from terminalbench.core.profiles import build_profile, get_available_servers, discover_mcp_usage_prompts, AgentProfile
 from terminalbench.core.config import get_batch_dir
+from terminalbench.core.profiles import AgentProfile, build_profile, discover_mcp_usage_prompts, get_available_servers
+from terminalbench.core.tasks import DEFAULT_ENV_FILE, Task, load_manifest
 from terminalbench.harbor.runner import HarborRunner, RunResult
-from terminalbench.core.tasks import load_manifest, Task, DEFAULT_ENV_FILE
 from terminalbench.ui.display import print_summary
 
 
@@ -52,6 +51,7 @@ def _config_set_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, List[argparse.Namespace]]:
     from terminalbench.core.config import load_config
+
     cfg = load_config()
 
     raw_argv = list(argv) if argv is not None else sys.argv[1:]
@@ -76,9 +76,22 @@ def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, L
 
     # Harbor configuration
     parser.add_argument("--harbor-bin", default=cfg.harbor_bin, help="harbor executable (default: use uvx)")
-    parser.add_argument("--container-env", default=cfg.container_env, help="container runtime (docker|daytona|modal|e2b)")
-    parser.add_argument("--extra-flag", action="append", default=[], help="extra flag to pass to harbor run (use = for flags with values)")
-    parser.add_argument("--registry-path", type=Path, help="local registry.json path (workaround for broken remote registry)")
+    parser.add_argument(
+        "--container-env",
+        default=cfg.container_env,
+        help="container runtime (docker|daytona|modal|e2b)",
+    )
+    parser.add_argument(
+        "--extra-flag",
+        action="append",
+        default=[],
+        help="extra flag to pass to harbor run (use = for flags with values)",
+    )
+    parser.add_argument(
+        "--registry-path",
+        type=Path,
+        help="local registry.json path (workaround for broken remote registry)",
+    )
     parser.add_argument("--profiles-parallel", type=int, default=0, help="parallel profile runs (0=sequential)")
     parser.add_argument("--env-file", type=Path, default=Path(cfg.env_file) if cfg.env_file else None)
 
@@ -92,24 +105,18 @@ def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, L
         "--mcp-config",
         type=Path,
         default=Path(cfg.mcp_config) if cfg.mcp_config else None,
-        help="MCP config file path (default: from manifest or config)"
+        help="MCP config file path (default: from manifest or config)",
     )
     parser.add_argument(
         "--mcp-server",
         action="append",
         dest="mcp_servers",
         help="Enable specific MCP server(s) by name (can be repeated). "
-             "If not specified, all servers in config are enabled."
+        "If not specified, all servers in config are enabled.",
     )
+    parser.add_argument("--no-mcp", action="store_true", help="Disable all MCP servers for this run")
     parser.add_argument(
-        "--no-mcp",
-        action="store_true",
-        help="Disable all MCP servers for this run"
-    )
-    parser.add_argument(
-        "--list-mcp-servers",
-        action="store_true",
-        help="List available MCP servers from config and exit"
+        "--list-mcp-servers", action="store_true", help="List available MCP servers from config and exit"
     )
 
     # Hooks configuration
@@ -117,19 +124,15 @@ def parse_args(argv: Iterable[str] | None = None) -> Tuple[argparse.Namespace, L
         "--hooks",
         type=Path,
         default=Path(cfg.hooks) if cfg.hooks else None,
-        help="Hooks settings file path (.claude/settings.json format)"
+        help="Hooks settings file path (.claude/settings.json format)",
     )
 
     # MCP installation from git (for Harbor container)
     parser.add_argument(
         "--mcp-git-source",
-        help="Git URL to install MCP servers from (assumes 'main' branch). "
-             "E.g., https://github.com/user/codecanvas"
+        help="Git URL to install MCP servers from (assumes 'main' branch). E.g., https://github.com/user/codecanvas",
     )
-    parser.add_argument(
-        "--github-token",
-        help="GitHub token for cloning private repos (or set GITHUB_TOKEN env var)"
-    )
+    parser.add_argument("--github-token", help="GitHub token for cloning private repos (or set GITHUB_TOKEN env var)")
 
     # Output format
     parser.add_argument("--json", action="store_true", help="emit results as JSON")
@@ -157,19 +160,33 @@ def export_csv(results: List[RunResult], path: Path) -> None:
     """Export results to a CSV file."""
     with open(path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["task_id", "agent", "success", "exit_code", "elapsed_sec", "accuracy", "resolved", "job_dir", "trajectory_json"])
+        writer.writerow(
+            [
+                "task_id",
+                "agent",
+                "success",
+                "exit_code",
+                "elapsed_sec",
+                "accuracy",
+                "resolved",
+                "job_dir",
+                "trajectory_json",
+            ]
+        )
         for r in results:
-            writer.writerow([
-                r.task_id,
-                r.agent_key,
-                r.success,
-                r.exit_code,
-                f"{r.elapsed_sec:.2f}",
-                r.accuracy if r.accuracy is not None else "",
-                r.resolved if r.resolved is not None else "",
-                str(r.job_dir) if r.job_dir else "",
-                str(r.trajectory_json) if r.trajectory_json else "",
-            ])
+            writer.writerow(
+                [
+                    r.task_id,
+                    r.agent_key,
+                    r.success,
+                    r.exit_code,
+                    f"{r.elapsed_sec:.2f}",
+                    r.accuracy if r.accuracy is not None else "",
+                    r.resolved if r.resolved is not None else "",
+                    str(r.job_dir) if r.job_dir else "",
+                    str(r.trajectory_json) if r.trajectory_json else "",
+                ]
+            )
     print(f"Results exported to {path}")
 
 
@@ -179,6 +196,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     # Handle setup subcommand
     if args.command == "setup":
         from terminalbench.core.config import run_setup
+
         run_setup()
         return 0
 
@@ -211,6 +229,7 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
 
     # Load env file for reading config values (also used by HarborRunner)
     from terminalbench.harbor.runner import load_env_file
+
     env_from_file = load_env_file(env_file)
 
     # Resolve hooks path: CLI > manifest
@@ -218,22 +237,21 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     if hooks_path is None and manifest_config.hooks:
         hooks_path = Path(manifest_config.hooks)
 
-    # Determine MCP settings for default profile
-    enabled_servers = None if args.no_mcp else args.mcp_servers
-    mcp_path = None if args.no_mcp else mcp_config_path
-
     # Resolve GitHub token: CLI > env file > env var
     import os
+
     github_token = (
-        getattr(args, 'github_token', None) 
-        or env_from_file.get('GITHUB_TOKEN') 
-        or os.environ.get('GITHUB_TOKEN')
+        getattr(args, "github_token", None) or env_from_file.get("GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
     )
 
     def build_profile_from_set(set_ns: argparse.Namespace | None, default_key: str) -> AgentProfile:
-        model = (set_ns.model if set_ns and getattr(set_ns, "model", None) else args.model)
-        reasoning = (set_ns.reasoning if set_ns and getattr(set_ns, "reasoning", None) else args.reasoning)
-        claude_version = (set_ns.claude_version if set_ns and getattr(set_ns, "claude_version", None) else getattr(args, "claude_version", None))
+        model = set_ns.model if set_ns and getattr(set_ns, "model", None) else args.model
+        reasoning = set_ns.reasoning if set_ns and getattr(set_ns, "reasoning", None) else args.reasoning
+        claude_version = (
+            set_ns.claude_version
+            if set_ns and getattr(set_ns, "claude_version", None)
+            else getattr(args, "claude_version", None)
+        )
 
         # Resolve MCP specifics
         no_mcp_flag = bool(set_ns.no_mcp) if set_ns and hasattr(set_ns, "no_mcp") else args.no_mcp
@@ -275,7 +293,11 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
     profiles: List[AgentProfile] = []
     if config_sets:
         for idx, cs in enumerate(config_sets):
-            default_key = cs.key or ("nomcp" if getattr(cs, "no_mcp", False) else ("-".join(cs.mcp_servers) if cs.mcp_servers else f"profile{idx+1}"))
+            default_key = cs.key or (
+                "nomcp"
+                if getattr(cs, "no_mcp", False)
+                else ("-".join(cs.mcp_servers) if cs.mcp_servers else f"profile{idx + 1}")
+            )
             profiles.append(build_profile_from_set(cs, default_key))
     else:
         default_key = "nomcp" if args.no_mcp else ("-".join(args.mcp_servers) if args.mcp_servers else "claude-code")

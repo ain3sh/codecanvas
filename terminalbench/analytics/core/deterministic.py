@@ -6,27 +6,26 @@ All metrics computed directly from ATIF trajectory data without LLM calls.
 
 from __future__ import annotations
 
-import re
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-from ..io.parser import ParsedTrajectory, Step
 from ..extensions.codecanvas import (
-    load_codecanvas_state,
     compute_codecanvas_metrics,
+    load_codecanvas_state,
 )
+from ..io.parser import ParsedTrajectory, Step
 
 
 @dataclass
 class DeterministicMetrics:
     """All deterministic metrics for a single trajectory."""
-    
+
     # Identity
     task_id: str
     profile_key: str
     run_timestamp: str
-    
+
     # Outcome metrics
     success: bool
     reward: float
@@ -34,7 +33,7 @@ class DeterministicMetrics:
     tests_failed: int
     tests_total: int
     tests_passed_ratio: float
-    
+
     # Economic metrics
     total_input_tokens: int
     total_output_tokens: int
@@ -42,7 +41,7 @@ class DeterministicMetrics:
     total_cost_usd: float
     cost_per_success: float  # inf if failed
     token_efficiency: float  # success/1M tokens
-    
+
     # Process metrics
     total_steps: int
     agent_steps: int
@@ -51,7 +50,7 @@ class DeterministicMetrics:
     tools_per_step: float
     steps_per_minute: float
     elapsed_sec: float
-    
+
     # Tool usage metrics
     tool_distribution: Dict[str, int]
     tool_success_rate: float
@@ -59,7 +58,7 @@ class DeterministicMetrics:
     mcp_tools_used: List[str]
     mcp_tool_calls: int
     native_tool_calls: int
-    
+
     # Behavioral metrics
     loop_count: int
     backtrack_count: int
@@ -67,10 +66,10 @@ class DeterministicMetrics:
     files_read: Set[str]
     files_edited: Set[str]
     grep_before_edit: bool
-    
+
     # Failure taxonomy (heuristic detection)
     failure_indicators: Dict[str, int]
-    
+
     # CodeCanvas-specific (None if not a codecanvas run or no state.json)
     codecanvas_evidence_count: Optional[int] = None
     codecanvas_claims_count: Optional[int] = None
@@ -82,14 +81,14 @@ class DeterministicMetrics:
     codecanvas_reasoning_density: Optional[float] = None
     codecanvas_systematic_progress: Optional[float] = None
     codecanvas_informed_editing_score: Optional[float] = None
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         d = {}
         for k, v in self.__dict__.items():
             if isinstance(v, set):
                 d[k] = list(v)
-            elif isinstance(v, float) and v == float('inf'):
+            elif isinstance(v, float) and v == float("inf"):
                 d[k] = None
             else:
                 d[k] = v
@@ -99,16 +98,32 @@ class DeterministicMetrics:
 # Known MCP tools (codegraph, codecanvas) - base names
 MCP_TOOL_BASE_NAMES = {
     # CodeGraph (locagent backend)
-    "init_repository", "get_code", "get_dependencies", "search_code",
-    "get_symbol_info", "find_references", "get_file_tree",
+    "init_repository",
+    "get_code",
+    "get_dependencies",
+    "search_code",
+    "get_symbol_info",
+    "find_references",
+    "get_file_tree",
     # CodeCanvas
     "canvas",
 }
 
 # Native Claude Code tools
 NATIVE_TOOL_NAMES = {
-    "Read", "Grep", "Glob", "LS", "Edit", "MultiEdit", "Create",
-    "Execute", "Bash", "TodoRead", "TodoWrite", "WebFetch", "Task",
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "Edit",
+    "MultiEdit",
+    "Create",
+    "Execute",
+    "Bash",
+    "TodoRead",
+    "TodoWrite",
+    "WebFetch",
+    "Task",
 }
 
 
@@ -130,7 +145,7 @@ def is_native_tool(tool_name: str) -> bool:
 
 def compute_metrics(trajectory: ParsedTrajectory) -> DeterministicMetrics:
     """Compute all deterministic metrics for a trajectory."""
-    
+
     # Outcome metrics
     success = trajectory.success
     reward = trajectory.verifier.reward if trajectory.verifier else 0.0
@@ -138,53 +153,53 @@ def compute_metrics(trajectory: ParsedTrajectory) -> DeterministicMetrics:
     tests_failed = trajectory.verifier.tests_failed if trajectory.verifier else 0
     tests_total = trajectory.verifier.tests_total if trajectory.verifier else 0
     tests_passed_ratio = tests_passed / tests_total if tests_total > 0 else 0.0
-    
+
     # Economic metrics
     total_input = trajectory.final_metrics.total_prompt_tokens
     total_output = trajectory.final_metrics.total_completion_tokens
     total_tokens = total_input + total_output
     total_cost = trajectory.final_metrics.total_cost_usd
-    
+
     if total_cost == 0:
         total_cost = _estimate_cost_from_steps(trajectory.steps)
-    
-    cost_per_success = total_cost if success else float('inf')
+
+    cost_per_success = total_cost if success else float("inf")
     token_efficiency = (1.0 / total_tokens * 1_000_000) if success and total_tokens > 0 else 0.0
-    
+
     # Process metrics
     total_steps = len(trajectory.steps)
     agent_steps = len(trajectory.agent_steps)
     tool_calls_count = trajectory.total_tool_calls
-    
+
     tool_names = _extract_tool_names(trajectory.steps)
     unique_tools = len(set(tool_names))
     tools_per_step = tool_calls_count / agent_steps if agent_steps > 0 else 0.0
-    
+
     elapsed = trajectory.elapsed_sec
     steps_per_minute = (total_steps / elapsed * 60) if elapsed > 0 else 0.0
-    
+
     # Tool usage
     tool_dist = Counter(tool_names)
     tool_errors = _count_tool_errors(trajectory.steps)
     tool_success_rate = 1.0 - (tool_errors / tool_calls_count) if tool_calls_count > 0 else 1.0
-    
+
     mcp_tools = [t for t in tool_names if is_mcp_tool(t)]
     native_tools = [t for t in tool_names if is_native_tool(t)]
-    
+
     # Behavioral patterns
     loop_count = _detect_loops(trajectory.steps)
     backtrack_count = _detect_backtracks(trajectory.steps)
     files_read, files_edited = _extract_file_operations(trajectory.steps)
     exploration_breadth = len(files_read | files_edited)
     grep_before_edit = _check_grep_before_edit(trajectory.steps)
-    
+
     # Failure indicators
     failure_indicators = _detect_failure_indicators(trajectory.steps, success)
-    
+
     # CodeCanvas-specific metrics
     cc_state = load_codecanvas_state(trajectory.trial_dir)
     cc_metrics = compute_codecanvas_metrics(trajectory, cc_state) if cc_state else None
-    
+
     return DeterministicMetrics(
         task_id=trajectory.task_id,
         profile_key=trajectory.profile_key,
@@ -306,24 +321,30 @@ def _check_grep_before_edit(steps: List[Step]) -> bool:
 
 
 def _detect_failure_indicators(steps: List[Step], success: bool) -> Dict[str, int]:
-    indicators = {"context_omission": 0, "tool_misuse": 0, "infinite_loop": 0, "budget_exhaustion": 0, "premature_stop": 0}
-    
+    indicators = {
+        "context_omission": 0,
+        "tool_misuse": 0,
+        "infinite_loop": 0,
+        "budget_exhaustion": 0,
+        "premature_stop": 0,
+    }
+
     tool_calls = sum(len(s.tool_calls) for s in steps)
     tool_errors = _count_tool_errors(steps)
     if tool_calls > 0 and tool_errors / tool_calls > 0.3:
         indicators["tool_misuse"] = tool_errors
-    
+
     loop_count = _detect_loops(steps)
     if loop_count > 5:
         indicators["infinite_loop"] = loop_count
-    
+
     total_tokens = sum((s.metrics.prompt_tokens + s.metrics.completion_tokens) for s in steps if s.metrics)
     if not success and total_tokens > 80000:
         indicators["budget_exhaustion"] = 1
-    
+
     if not success and len(steps) < 10:
         indicators["premature_stop"] = 1
-    
+
     return indicators
 
 
@@ -331,10 +352,10 @@ def compute_aggregate_metrics(metrics_list: List[DeterministicMetrics]) -> Dict[
     """Compute aggregate metrics across multiple trajectories."""
     if not metrics_list:
         return {}
-    
+
     n = len(metrics_list)
     successes = [m for m in metrics_list if m.success]
-    
+
     return {
         "count": n,
         "success_rate": len(successes) / n * 100,

@@ -85,17 +85,27 @@ def _guess_language_id(path: str) -> str:
     ext = Path(path).suffix.lower()
     mapping = {
         ".py": "python",
-        ".ts": "typescript", ".tsx": "typescript",
-        ".js": "javascript", ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascript",
         ".go": "go",
         ".rs": "rust",
         ".java": "java",
         ".rb": "ruby",
-        ".c": "c", ".h": "c", ".cc": "c", ".hh": "c", ".cpp": "c", ".hpp": "c",
-        ".sh": "shellscript", ".bash": "shellscript",
-        ".r": "r", ".R": "r",
+        ".c": "c",
+        ".h": "c",
+        ".cc": "c",
+        ".hh": "c",
+        ".cpp": "c",
+        ".hpp": "c",
+        ".sh": "shellscript",
+        ".bash": "shellscript",
+        ".r": "r",
+        ".R": "r",
         ".cs": "csharp",
-        ".kt": "kotlin", ".kts": "kotlin",
+        ".kt": "kotlin",
+        ".kts": "kotlin",
         ".dart": "dart",
     }
     return mapping.get(ext, "plaintext")
@@ -123,13 +133,13 @@ def _parse_definition_locations(result: Any) -> List[Dict[str, Any]]:
 
 def _parse_document_symbol(data: Any) -> lsp.DocumentSymbol:
     """Parse DocumentSymbol or SymbolInformation from JSON response.
-    
+
     Handles both formats:
     - DocumentSymbol: has 'range' and 'selectionRange' directly
     - SymbolInformation: has 'location.range' (returned by clangd, etc.)
     """
     d = data if isinstance(data, dict) else _to_dict(data)
-    
+
     # Handle SymbolInformation format (location.range)
     if "location" in d and "range" not in d:
         loc = d.get("location", {})
@@ -142,14 +152,10 @@ def _parse_document_symbol(data: Any) -> lsp.DocumentSymbol:
             detail=d.get("detail"),
             children=None,  # SymbolInformation doesn't have children
         )
-    
+
     # Handle DocumentSymbol format (range directly)
     children_raw = d.get("children", [])
-    children = (
-        [_parse_document_symbol(c) for c in children_raw]
-        if isinstance(children_raw, list)
-        else []
-    )
+    children = [_parse_document_symbol(c) for c in children_raw] if isinstance(children_raw, list) else []
     return lsp.DocumentSymbol(
         name=d["name"],
         kind=lsp.SymbolKind(d["kind"]),
@@ -335,9 +341,7 @@ class MultilspyBackend:
         try:
             # Run sync multilspy call in thread pool to allow true parallelism
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                None, self._lsp.request_definition, rel_path, line, char
-            )
+            result = await loop.run_in_executor(None, self._lsp.request_definition, rel_path, line, char)
             return _parse_definition_locations(result)
         except Exception:
             return []

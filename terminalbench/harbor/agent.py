@@ -1,4 +1,5 @@
 """Custom Claude Code agent with MCP and hooks support for Harbor."""
+
 from __future__ import annotations
 
 import json
@@ -23,16 +24,16 @@ def _ensure_json_string(value: Any) -> str | None:
 
 class ClaudeCodeMCP(ClaudeCode):
     """Claude Code agent with MCP server and hooks support.
-    
+
     This agent extends ClaudeCode to:
     1. Install MCP servers in the container from a git source
     2. Pass MCP config and hooks to the Claude CLI
     3. Optionally append a system prompt to guide tool usage
-    
+
     Installation options (via kwargs):
     - mcp_git_source: Git URL to clone (e.g., "https://github.com/user/codecanvas")
                       Assumes 'main' branch.
-    
+
     Note: Harbor's kwarg parser converts JSON strings to dicts, so we handle both.
     """
 
@@ -125,9 +126,11 @@ class ClaudeCodeMCP(ClaudeCode):
             "claude",
             # "--debug", #! disabled: triggers stack overflow in Claude Code 2.0.76 logging
             "--verbose",
-            "--output-format", "stream-json",
+            "--output-format",
+            "stream-json",
             "--dangerously-skip-permissions",  # Non-interactive: skip permission prompts
-            "-p", escaped_instruction,
+            "-p",
+            escaped_instruction,
         ]
 
         # Write MCP config to file if provided

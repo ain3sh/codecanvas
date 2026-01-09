@@ -22,14 +22,14 @@ def load_env_file(env_file: Path | str | None) -> Dict[str, str]:
     path = Path(env_file)
     if not path.exists():
         return {}
-    
+
     env_vars = {}
     for line in path.read_text().splitlines():
         line = line.strip()
-        if not line or line.startswith('#'):
+        if not line or line.startswith("#"):
             continue
-        if '=' in line:
-            key, _, value = line.partition('=')
+        if "=" in line:
+            key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip().strip('"').strip("'")
             env_vars[key] = value
@@ -428,6 +428,7 @@ class HarborRunner:
 
         # Generate unique job names per profile to avoid collisions when running in parallel
         from datetime import datetime
+
         run_timestamp = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
         job_names = {p.key: f"{run_timestamp}__{p.key}" for p in profiles}
 

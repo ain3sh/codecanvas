@@ -37,11 +37,7 @@ class FileSymbolIndex:
 
     @classmethod
     def from_nodes(cls, nodes: Sequence[GraphNode]) -> "FileSymbolIndex":
-        funcs = [
-            n
-            for n in nodes
-            if n.kind == NodeKind.FUNC and n.start_line is not None and n.end_line is not None
-        ]
+        funcs = [n for n in nodes if n.kind == NodeKind.FUNC and n.start_line is not None and n.end_line is not None]
         funcs.sort(key=lambda n: (int(n.start_line or 0), int(n.start_char or 0)))
         starts = [(int(n.start_line or 0), int(n.start_char or 0)) for n in funcs]
         return cls(funcs=funcs, starts=starts)
@@ -133,7 +129,7 @@ async def _resolve_definitions_for_callsites(
     """Resolve definition locations for callsites using LSP."""
     mgr = get_lsp_session_manager()
     workspace_root = find_workspace_root(file_path)
-    
+
     # LspSession routes to multilspy or custom backend based on language
     sess = await mgr.get(lang=lang, workspace_root=str(workspace_root))
 
@@ -203,7 +199,7 @@ def build_call_graph_edges(
         # Map callsites -> caller funcs up-front.
         file_index = func_index.get(_abs(mod.fsPath))
         pairs: List[Tuple[TsCallSite, GraphNode]] = []
-        for cs in callsites[: max_callsites_per_file]:
+        for cs in callsites[:max_callsites_per_file]:
             if remaining_total <= 0:
                 break
             if file_index is None:

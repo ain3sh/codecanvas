@@ -65,12 +65,7 @@ def main():
         init_result = run_canvas_init(cwd)
 
     # Output as additionalContext (injected into Claude's context)
-    result = {
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": init_result
-        }
-    }
+    result = {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": init_result}}
     print(json.dumps(result))
     sys.exit(0)
 

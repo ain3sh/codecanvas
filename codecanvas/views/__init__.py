@@ -94,13 +94,13 @@ class SVGCanvas:
         </marker>''')
 
     def _add_filters(self):
-        self.defs.append('''
+        self.defs.append("""
         <filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="140%">
             <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
             <feOffset dx="2" dy="2" result="offsetblur"/>
             <feComponentTransfer><feFuncA type="linear" slope="0.3"/></feComponentTransfer>
             <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
-        </filter>''')
+        </filter>""")
 
     def add_rect(self, x: float, y: float, w: float, h: float, rx: float = 0, style: Style | None = None):
         attrs = self._style_to_attrs(style or Style())
@@ -160,9 +160,14 @@ class SVGCanvas:
 
     def _style_to_attrs(self, style: Style) -> str:
         attrs = [
-            f'fill="{style.fill}"', f'stroke="{style.stroke}"', f'stroke-width="{style.stroke_width}"',
-            f'opacity="{style.opacity}"', f'font-family="{style.font_family}"', f'font-size="{style.font_size}px"',
-            f'font-weight="{style.font_weight}"', f'text-anchor="{style.text_anchor}"',
+            f'fill="{style.fill}"',
+            f'stroke="{style.stroke}"',
+            f'stroke-width="{style.stroke_width}"',
+            f'opacity="{style.opacity}"',
+            f'font-family="{style.font_family}"',
+            f'font-size="{style.font_size}px"',
+            f'font-weight="{style.font_weight}"',
+            f'text-anchor="{style.text_anchor}"',
         ]
         if style.stroke_dasharray:
             attrs.append(f'stroke-dasharray="{style.stroke_dasharray}"')
@@ -248,6 +253,7 @@ def __getattr__(name: str) -> Any:
 
         return _TaskView
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ArchitectureView",

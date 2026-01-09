@@ -1,10 +1,8 @@
 """Input/output: CLI, parsing, reports."""
 
-from .parser import TrajectoryParser, ParsedTrajectory
-from .reports import ReportGenerator
+from .parser import ParsedTrajectory, TrajectoryParser
 
 __all__ = [
     "TrajectoryParser",
     "ParsedTrajectory",
-    "ReportGenerator",
 ]

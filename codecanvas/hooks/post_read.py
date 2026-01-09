@@ -21,16 +21,16 @@ def has_canvas_state(cwd: str) -> bool:
 def extract_main_symbol(file_path: str) -> str | None:
     """Extract the main symbol from a file path (module/class name)."""
     path = Path(file_path)
-    
+
     # Skip non-code files
     code_exts = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".cpp", ".c", ".rb"}
     if path.suffix not in code_exts:
         return None
-    
+
     # For Python, use module name (filename without .py)
     if path.suffix == ".py":
         return path.stem
-    
+
     # For other languages, use filename
     return path.stem
 
@@ -40,11 +40,11 @@ def ensure_canvas_loaded() -> bool:
     try:
         from codecanvas.core.state import load_state
         from codecanvas.server import canvas_action
-        
+
         state = load_state()
         if not state.initialized:
             return False
-        
+
         # Trigger _ensure_loaded by calling canvas_action with status
         # Note: "read" action returns early BEFORE _ensure_loaded, so use "status"
         canvas_action(action="status")
@@ -57,14 +57,14 @@ def run_impact_analysis(symbol: str) -> str | None:
     """Run impact analysis on a symbol."""
     try:
         from codecanvas.server import canvas_action
-        
+
         result = canvas_action(action="impact", symbol=symbol, depth=2, max_nodes=20)
-        
+
         # Check if it's a meaningful result (not an error message)
         text = result.text or ""
         if "callers" in text.lower() or "callees" in text.lower():
             return f"[CodeCanvas IMPACT] {text}"
-        
+
         return None
     except Exception:
         return None
@@ -75,10 +75,10 @@ def find_symbols_in_file(file_path: str, cwd: str) -> list[str]:
     try:
         from codecanvas.core.models import NodeKind
         from codecanvas.server import _graph
-        
+
         if _graph is None:
             return []
-        
+
         target_path = os.path.abspath(file_path)
 
         # Find nodes in this file
@@ -88,7 +88,7 @@ def find_symbols_in_file(file_path: str, cwd: str) -> list[str]:
                 continue
             if node.kind in (NodeKind.FUNC, NodeKind.CLASS):
                 symbols.append(node.label)
-        
+
         return symbols[:3]  # Limit to top 3
     except Exception:
         return []
@@ -125,7 +125,7 @@ def main():
 
     # Find symbols in the file
     symbols = find_symbols_in_file(file_path, cwd)
-    
+
     # Fall back to module name
     if not symbols:
         main_symbol = extract_main_symbol(file_path)
@@ -147,12 +147,7 @@ def main():
 
     # Output as additionalContext
     combined = "\n".join(impact_results)
-    result = {
-        "hookSpecificOutput": {
-            "hookEventName": "PostToolUse",
-            "additionalContext": combined
-        }
-    }
+    result = {"hookSpecificOutput": {"hookEventName": "PostToolUse", "additionalContext": combined}}
     print(json.dumps(result))
     sys.exit(0)
 

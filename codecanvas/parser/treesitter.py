@@ -439,7 +439,7 @@ def _import_specs_from_schema(parsed: TsParsed, query: Query) -> List[str]:
         if parsed.language in {"typescript", "tsx", "javascript", "ruby", "bash"}:
             raw = raw.strip("\"'")
         elif parsed.language == "go":
-            raw = raw.strip("\"`")
+            raw = raw.strip('"`')
         elif parsed.language in {"c", "cpp"}:
             raw = raw.strip('<>"')
 
