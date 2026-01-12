@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -107,6 +108,40 @@ def _has_project_markers(root: Path) -> bool:
         except Exception:
             continue
     return False
+
+
+def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
+    """Copy `.codecanvas` outputs from the repo into the persisted Claude session dir."""
+
+    session_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if not session_dir:
+        return
+
+    src_dir = root / ".codecanvas"
+    if not src_dir.exists() or not src_dir.is_dir():
+        return
+
+    dest_dir = Path(session_dir) / "codecanvas"
+    try:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+    state_path = src_dir / "state.json"
+    if state_path.exists():
+        try:
+            shutil.copy2(state_path, dest_dir / "state.json")
+        except Exception:
+            pass
+
+    try:
+        for png in src_dir.glob("*.png"):
+            try:
+                shutil.copy2(png, dest_dir / png.name)
+            except Exception:
+                continue
+    except Exception:
+        return
 
 
 def _maybe_init(*, root: Path, allow_init: bool) -> tuple[bool, str]:
@@ -274,6 +309,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
 
     with _workspace_lock(root):
         _maybe_init(root=root, allow_init=allow_init)
+        _sync_canvas_artifacts_to_session(root=root)
         # Only auto-impact on Read, and only for code files.
         if tool_name != "Read" or file_path is None:
             return None
@@ -297,6 +333,8 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
         res = canvas_action(action="impact", symbol=best.id, depth=2, max_nodes=20, wait_for_call_graph_s=1.0)
         if not any(img.name == "impact" for img in res.images):
             return None
+
+        _sync_canvas_artifacts_to_session(root=root)
 
         card = _format_impact_card(root=root, node=best)
         if not card:
