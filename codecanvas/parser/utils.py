@@ -128,7 +128,13 @@ _DEFAULT_MARKERS: tuple[str, ...] = (
 )
 
 
-def find_workspace_root(start: str | Path, *, max_up: int = 30, markers: Iterable[str] = _DEFAULT_MARKERS) -> Path:
+def find_workspace_root(
+    start: str | Path,
+    *,
+    max_up: int = 30,
+    markers: Iterable[str] = _DEFAULT_MARKERS,
+    prefer_env: bool = True,
+) -> Path:
     """Find the most likely workspace root directory for a given file or folder.
 
     Resolution order:
@@ -141,21 +147,30 @@ def find_workspace_root(start: str | Path, *, max_up: int = 30, markers: Iterabl
         p = p.parent
     p = p.absolute()
 
-    env_root = os.environ.get("CANVAS_PROJECT_DIR")
-    if env_root:
-        try:
-            env_path = Path(env_root).absolute()
-            if env_path.exists() and _is_relative_to(p, env_path):
-                return env_path
-        except Exception:
-            pass
+    # Fallback behavior: return the nearest existing directory if `start` doesn't exist.
+    existing = p
+    while not existing.exists() and existing.parent != existing:
+        existing = existing.parent
+    if existing.exists():
+        p = existing
+
+    if prefer_env:
+        env_root = os.environ.get("CANVAS_PROJECT_DIR")
+        if env_root:
+            try:
+                env_path = Path(env_root).absolute()
+                if env_path.exists() and _is_relative_to(p, env_path):
+                    return env_path
+            except Exception:
+                pass
 
     return _find_workspace_root_cached(str(p), max_up=max_up, markers=tuple(markers))
 
 
 @lru_cache(maxsize=1024)
 def _find_workspace_root_cached(path_str: str, *, max_up: int, markers: tuple[str, ...]) -> Path:
-    p = Path(path_str)
+    start = Path(path_str)
+    p = start
     for _ in range(max_up):
         for m in markers:
             try:
@@ -166,7 +181,7 @@ def _find_workspace_root_cached(path_str: str, *, max_up: int, markers: tuple[st
         if p.parent == p:
             break
         p = p.parent
-    return p
+    return start
 
 
 def _is_relative_to(path: Path, base: Path) -> bool:

@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "uv run python -c \"from codecanvas.hooks.session_init import main; main()\"",
-            "timeout": 30
+            "timeout": 60
           }
         ]
       }
@@ -19,7 +19,67 @@
           {
             "type": "command",
             "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 10
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Grep",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "LS",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
           }
         ]
       }

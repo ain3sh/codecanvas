@@ -21,7 +21,7 @@ INSTALL_START=$(date +%s)
 log_start "System dependencies (apt-get)"
 apt-get update
 apt-get install -y --no-install-recommends \
-    curl git build-essential libcairo2-dev ca-certificates
+    curl git build-essential libcairo2-dev ca-certificates procps
 rm -rf /var/lib/apt/lists/*
 log_done "System dependencies"
 

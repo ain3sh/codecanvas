@@ -19,6 +19,7 @@ from .core.models import Graph
 from .core.state import AnalysisState, CanvasState, clear_state, load_state, load_tasks_yaml, pick_task, save_state
 from .parser import Parser
 from .parser.call_graph import build_call_graph_edges
+from .parser.utils import find_workspace_root
 from .views import save_png
 from .views.architecture import ArchitectureView
 from .views.impact import ImpactView
@@ -281,17 +282,7 @@ def _canvas_output_dir(project_dir: str) -> str:
 
 
 def _find_repo_root(start: Path) -> Path:
-    p = start
-    if p.is_file():
-        p = p.parent
-    p = p.absolute()
-    for _ in range(30):
-        if (p / "pyproject.toml").exists() or (p / ".git").exists():
-            return p
-        if p.parent == p:
-            break
-        p = p.parent
-    return start.absolute() if start.exists() else Path.cwd().absolute()
+    return find_workspace_root(start, prefer_env=False)
 
 
 def canvas_action(
@@ -305,6 +296,7 @@ def canvas_action(
     task_id: str | None = None,
     depth: int = 2,
     max_nodes: int = 20,
+    wait_for_call_graph_s: float = 10.0,
 ) -> CanvasResult:
     action = (action or "").strip().lower()
     if not action:
@@ -332,7 +324,13 @@ def canvas_action(
     if action == "impact":
         if not symbol:
             return CanvasResult("impact requires symbol")
-        return _action_impact(state, symbol=symbol, depth=depth, max_nodes=max_nodes)
+        return _action_impact(
+            state,
+            symbol=symbol,
+            depth=depth,
+            max_nodes=max_nodes,
+            wait_for_call_graph_s=float(wait_for_call_graph_s),
+        )
     if action == "claim":
         if text is None:
             return CanvasResult("claim requires text")
@@ -487,12 +485,19 @@ def _ensure_loaded(state: CanvasState) -> None:
         _start_call_graph_background(time_budget_s=30.0, generation=generation)
 
 
-def _action_impact(state: CanvasState, *, symbol: str, depth: int, max_nodes: int) -> CanvasResult:
+def _action_impact(
+    state: CanvasState,
+    *,
+    symbol: str,
+    depth: int,
+    max_nodes: int,
+    wait_for_call_graph_s: float,
+) -> CanvasResult:
     global _graph, _analyzer, _call_graph_result_summary
     assert _graph is not None and _analyzer is not None
 
     # Wait for background call graph to complete before analyzing
-    _wait_for_call_graph(timeout_s=10.0)
+    _wait_for_call_graph(timeout_s=float(wait_for_call_graph_s))
 
     # Save call graph summary to state for diagnostics
     state.call_graph_summary = _call_graph_diag(phase="impact")
@@ -892,6 +897,7 @@ TIPS:
             action = (args.get("action") or "").strip()
             depth = int(args.get("depth", 2) or 2)
             max_nodes = int(args.get("max_nodes", 20) or 20)
+            wait_for_call_graph_s = float(args.get("wait_for_call_graph_s", 10.0) or 10.0)
 
             use_lsp_arg = args.get("use_lsp")
             use_lsp = True if use_lsp_arg is None else bool(use_lsp_arg)
@@ -906,6 +912,7 @@ TIPS:
                 task_id=args.get("task_id"),
                 depth=depth,
                 max_nodes=max_nodes,
+                wait_for_call_graph_s=wait_for_call_graph_s,
             )
 
             contents: list[Any] = [TextContent(type="text", text=result.text)]
