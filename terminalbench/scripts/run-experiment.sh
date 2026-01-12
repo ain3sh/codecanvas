@@ -22,7 +22,7 @@ exec > >(tee -a "$LOGFILE") 2>&1
 
 # Configuration
 MODEL="${MODEL:-anthropic/claude-sonnet-4-5}"
-REASONING="${REASONING:-medium}"
+REASONING="${REASONING:-low}"
 MCP_GIT_SOURCE="${MCP_GIT_SOURCE:-https://github.com/ain3sh/codecanvas}"
 PROFILES_PARALLEL="${PROFILES_PARALLEL:-3}"
 
