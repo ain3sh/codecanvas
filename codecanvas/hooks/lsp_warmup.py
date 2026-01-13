@@ -11,6 +11,17 @@ from typing import Any
 
 from ._hookio import get_hook_event_name, get_str, read_stdin_json
 
+_ROOT_MARKERS: tuple[str, ...] = (
+    ".git",
+    "pyproject.toml",
+    "package.json",
+    "go.mod",
+    "Cargo.toml",
+    "pom.xml",
+    "build.gradle",
+    "build.gradle.kts",
+)
+
 
 def _limit(s: str, n: int) -> str:
     s = s.strip()
@@ -65,6 +76,15 @@ def _pid_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
         return True
+    except Exception:
+        return False
+
+
+def _is_marker_root(path: Path) -> bool:
+    try:
+        if not path.exists() or not path.is_dir():
+            return False
+        return any((path / m).exists() for m in _ROOT_MARKERS)
     except Exception:
         return False
 
@@ -277,7 +297,21 @@ def main() -> None:
 
     cwd = get_str(input_data, "cwd", default=os.getcwd())
     try:
-        ensure_worker_running(root=Path(cwd))
+        root = Path(cwd).absolute()
+        if _is_marker_root(root):
+            ensure_worker_running(root=root)
+        else:
+            d = _state_dir()
+            if d is not None:
+                _write_json_atomic(
+                    d / "lsp_warmup.json",
+                    {
+                        "status": "skipped",
+                        "root": str(root),
+                        "reason": "not_repo_root",
+                        "updated_at": time.time(),
+                    },
+                )
     except Exception:
         pass
 

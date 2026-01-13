@@ -349,21 +349,20 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
 
     st.write_active_root(str(root), reason=f"pre_tool_use:{tool_name}")
 
-    try:
-        from .lsp_warmup import ensure_worker_running
-
-        ensure_worker_running(root=root)
-    except Exception:
-        pass
-
     root_str = str(root)
-    allow_init = bool(
-        _has_project_markers(root)
-        or (file_path is not None and file_path.exists() and file_path.is_file())
-    )
+    has_markers = _has_project_markers(root)
+    allow_init = bool(has_markers or (file_path is not None and file_path.exists() and file_path.is_file()))
 
     if st.is_init_announced(root=root_str):
         return None
+
+    if has_markers:
+        try:
+            from .lsp_warmup import ensure_worker_running
+
+            ensure_worker_running(root=root)
+        except Exception:
+            pass
 
     now = time.time()
     cooldown_s = 120.0
