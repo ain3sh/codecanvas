@@ -24,7 +24,22 @@ from ._hookio import (
 )
 from ._workspace import resolve_workspace_root
 
-_CODE_EXTS: set[str] = {".py", ".js", ".ts", ".tsx", ".jsx", ".go", ".rs", ".java", ".cpp", ".c", ".rb"}
+_CODE_EXTS: set[str] = {
+    ".py",
+    ".pyx",
+    ".pxd",
+    ".pxi",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".cpp",
+    ".c",
+    ".rb",
+}
 
 
 def _emit(*, hook_event_name: str, additional_context: str | None = None) -> None:

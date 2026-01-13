@@ -47,6 +47,10 @@ LSP_SUPPORTED_LANGUAGES: frozenset[str] = frozenset(MULTILSPY_LANGUAGES) | froze
 EXTENSION_TO_LANG: Dict[str, str] = {
     # Python
     ".py": "py",
+    # Cython
+    ".pyx": "cython",
+    ".pxd": "cython",
+    ".pxi": "cython",
     # TypeScript/JavaScript (consolidated under 'ts')
     ".ts": "ts",
     ".tsx": "ts",
@@ -82,7 +86,7 @@ EXTENSION_TO_LANG: Dict[str, str] = {
 }
 
 # Languages with tree-sitter support
-TREESITTER_LANGUAGES: set[str] = {"py", "ts", "go", "rs", "java", "rb", "c", "sh"}
+TREESITTER_LANGUAGES: set[str] = {"py", "cython", "ts", "go", "rs", "java", "rb", "c", "sh"}
 
 
 def detect_language(path: str) -> Optional[str]:

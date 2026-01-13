@@ -102,6 +102,39 @@ def test_python_extracts_definitions_imports_and_calls():
     assert _lc(text, line_contains="Foo().bar()", needle="bar") in sites
 
 
+def test_cython_extracts_via_python_grammar():
+    text, parsed = _parse(
+        """
+        import os
+        from . import util
+
+        class Foo:
+            def bar(self):
+                helper_call()
+                return 1
+
+        def top():
+            return Foo().bar()
+        """,
+        file_path="x.pyx",
+        lang_key="cython",
+    )
+
+    defs = definitions_from_parsed(parsed)
+    defs_map = _defs_by_name(defs)
+    assert "Foo" in defs_map and defs_map["Foo"].kind == "class"
+    assert "Foo.bar" in defs_map and defs_map["Foo.bar"].parent_class == "Foo"
+    assert "top" in defs_map and defs_map["top"].kind == "func"
+
+    imports = import_specs_from_parsed(parsed)
+    assert {"os", "."}.issubset(set(imports))
+
+    sites = _call_tuples(call_sites_from_parsed(parsed))
+    assert _lc(text, line_contains="helper_call()", needle="helper_call") in sites
+    assert _lc(text, line_contains="Foo().bar()", needle="Foo") in sites
+    assert _lc(text, line_contains="Foo().bar()", needle="bar") in sites
+
+
 def test_typescript_extracts_definitions_imports_and_calls():
     text, parsed = _parse(
         """

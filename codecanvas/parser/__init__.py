@@ -89,6 +89,9 @@ class Parser:
         if extensions is None:
             extensions = {
                 ".py",
+                ".pyx",
+                ".pxd",
+                ".pxi",
                 ".ts",
                 ".tsx",
                 ".js",
@@ -493,7 +496,7 @@ class Parser:
             if not label:
                 continue
 
-            if lang == "py" and label.endswith(".py") and label not in self._known_module_labels:
+            if lang in {"py", "cython"} and label.endswith(".py") and label not in self._known_module_labels:
                 pkg_label = label[:-3] + "/__init__.py"
                 if pkg_label in self._known_module_labels:
                     label = pkg_label

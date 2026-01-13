@@ -83,7 +83,7 @@ def resolve_import_label(from_label: str, spec: str, lang: str) -> Optional[str]
         def rel(p: str) -> str:
             return normalize_path((base_dir + "/" if base_dir else "") + p)
 
-        if lang == "py":
+        if lang in {"py", "cython"}:
             if spec.startswith("."):
                 up_match = re.match(r"^\.+", spec)
                 dots = len(up_match.group(0)) if up_match else 0

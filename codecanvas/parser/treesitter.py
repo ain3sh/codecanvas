@@ -106,6 +106,11 @@ def _language_for_file(file_path: Path, lang_key: str) -> Optional[str]:
     if lang_key == "py":
         return "python"
 
+    if lang_key == "cython":
+        # tree_sitter_language_pack does not ship a dedicated Cython grammar in this repo's venv.
+        # Treat Cython sources as Python for tree-sitter extraction.
+        return "python"
+
     if lang_key == "ts":
         suf = file_path.suffix.lower()
         if suf in {".tsx", ".jsx"}:

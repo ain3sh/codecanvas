@@ -36,6 +36,33 @@ def test_python_package_import_prefers_init(tmp_path: Path):
     assert any(e.from_id == main_id and e.to_id == init_id and e.type == EdgeType.IMPORT for e in g.edges)
 
 
+def test_cython_relative_imports_create_module_edges(tmp_path: Path):
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "b.py").write_text("def b():\n    return 1\n", encoding="utf-8")
+    (pkg / "a.pyx").write_text("from .b import b\n\nprint(b())\n", encoding="utf-8")
+
+    g = Parser(use_lsp=False).parse_directory(str(tmp_path))
+
+    a_id = make_module_id("pkg/a.pyx")
+    b_id = make_module_id("pkg/b.py")
+    assert g.get_node(a_id) is not None
+    assert g.get_node(b_id) is not None
+    assert any(e.from_id == a_id and e.to_id == b_id and e.type == EdgeType.IMPORT for e in g.edges)
+
+
+def test_cython_package_import_prefers_init(tmp_path: Path):
+    (tmp_path / "mypkg").mkdir()
+    (tmp_path / "mypkg" / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "main.pyx").write_text("import mypkg\n", encoding="utf-8")
+
+    g = Parser(use_lsp=False).parse_directory(str(tmp_path))
+    main_id = make_module_id("main.pyx")
+    init_id = make_module_id("mypkg/__init__.py")
+    assert any(e.from_id == main_id and e.to_id == init_id and e.type == EdgeType.IMPORT for e in g.edges)
+
+
 def test_empty_lsp_symbols_does_not_force_fallback(monkeypatch, tmp_path: Path):
     (tmp_path / "a.py").write_text("import os\n", encoding="utf-8")
 
