@@ -110,12 +110,28 @@ def ensure_worker_running(*, root: Path) -> None:
     pid = state.get("pid") if isinstance(state, dict) else None
     existing_root = state.get("root") if isinstance(state, dict) else None
 
+    updated_at = state.get("updated_at") if isinstance(state, dict) else None
+    try:
+        updated_at_f = float(updated_at) if updated_at is not None else None
+    except Exception:
+        updated_at_f = None
+
     if (
         isinstance(status, str)
         and status in {"running", "ready"}
         and isinstance(pid, int)
         and _pid_alive(pid)
         and existing_root == str(root)
+    ):
+        return
+
+    # Avoid respawning repeatedly if we just failed for this root.
+    if (
+        isinstance(status, str)
+        and status in {"failed", "failed_stale", "skipped"}
+        and existing_root == str(root)
+        and updated_at_f is not None
+        and (time.time() - updated_at_f) < 300.0
     ):
         return
 
@@ -208,83 +224,79 @@ def worker_main() -> None:
         return
 
     root = Path(root_str)
-    max_attempts = 5
-    for attempt in range(1, max_attempts + 1):
-        try:
-            _write_json_atomic(
-                state_path,
-                {
-                    "status": "running",
-                    "root": str(root),
-                    "pid": os.getpid(),
-                    "attempt": attempt,
-                    "started_at": time.time(),
-                    "updated_at": time.time(),
-                    "ready_langs": [],
-                    "last_error": None,
-                },
-            )
+    attempt = 1
+    try:
+        _write_json_atomic(
+            state_path,
+            {
+                "status": "running",
+                "root": str(root),
+                "pid": os.getpid(),
+                "attempt": attempt,
+                "started_at": time.time(),
+                "updated_at": time.time(),
+                "ready_langs": [],
+                "last_error": None,
+            },
+        )
 
-            if not root.exists() or not root.is_dir():
-                raise RuntimeError("root_missing")
+        if not root.exists() or not root.is_dir():
+            raise RuntimeError("root_missing")
 
-            py_file, ts_file = _touch_warmup_files(root)
-            if py_file is None or ts_file is None:
-                raise RuntimeError("warmup_files_failed")
+        py_file, ts_file = _touch_warmup_files(root)
+        if py_file is None or ts_file is None:
+            raise RuntimeError("warmup_files_failed")
 
-            ready: list[str] = []
+        warm_root = py_file.parent
+        ready: list[str] = []
 
-            async def _warm():
-                from codecanvas.parser.lsp import get_lsp_session_manager
+        async def _warm():
+            from codecanvas.parser.lsp import get_lsp_session_manager
 
-                mgr = get_lsp_session_manager()
-                py_sess = await mgr.get(lang="py", workspace_root=str(root))
-                _ = await py_sess.document_symbols(str(py_file))
-                ready.append("py")
+            mgr = get_lsp_session_manager()
+            py_sess = await mgr.get(lang="py", workspace_root=str(warm_root))
+            _ = await py_sess.document_symbols(str(py_file))
+            ready.append("py")
 
-                ts_sess = await mgr.get(lang="ts", workspace_root=str(root))
-                _ = await ts_sess.document_symbols(str(ts_file))
-                ready.append("ts")
+            ts_sess = await mgr.get(lang="ts", workspace_root=str(warm_root))
+            _ = await ts_sess.document_symbols(str(ts_file))
+            ready.append("ts")
 
-            from codecanvas.parser.lsp import get_lsp_runtime
+        from codecanvas.parser.lsp import get_lsp_runtime
 
-            get_lsp_runtime().run(_warm(), timeout=300.0)
+        get_lsp_runtime().run(_warm(), timeout=60.0)
 
-            if "py" not in ready:
-                raise RuntimeError("py_not_ready")
+        if "py" not in ready:
+            raise RuntimeError("py_not_ready")
 
-            _write_json_atomic(
-                state_path,
-                {
-                    "status": "ready",
-                    "root": str(root),
-                    "pid": os.getpid(),
-                    "attempt": attempt,
-                    "started_at": time.time(),
-                    "updated_at": time.time(),
-                    "ready_langs": ready,
-                    "last_error": None,
-                },
-            )
-            return
-        except Exception as e:
-            _write_json_atomic(
-                state_path,
-                {
-                    "status": "running" if attempt < max_attempts else "failed",
-                    "root": str(root),
-                    "pid": os.getpid(),
-                    "attempt": attempt,
-                    "started_at": time.time(),
-                    "updated_at": time.time(),
-                    "ready_langs": [],
-                    "last_error": f"{type(e).__name__}: {e}",
-                    "traceback": traceback.format_exc(limit=8),
-                },
-            )
-            if attempt >= max_attempts:
-                return
-            time.sleep(120.0)
+        _write_json_atomic(
+            state_path,
+            {
+                "status": "ready",
+                "root": str(root),
+                "pid": os.getpid(),
+                "attempt": attempt,
+                "started_at": time.time(),
+                "updated_at": time.time(),
+                "ready_langs": ready,
+                "last_error": None,
+            },
+        )
+    except Exception as e:
+        _write_json_atomic(
+            state_path,
+            {
+                "status": "failed",
+                "root": str(root),
+                "pid": os.getpid(),
+                "attempt": attempt,
+                "started_at": time.time(),
+                "updated_at": time.time(),
+                "ready_langs": [],
+                "last_error": f"{type(e).__name__}: {e}",
+                "traceback": traceback.format_exc(limit=8),
+            },
+        )
 
 
 def main() -> None:

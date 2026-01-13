@@ -441,37 +441,16 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
 
     if warmup_status == "ready":
         warmup_ready = True
-    if warmup_status == "failed":
+    if warmup_status in {"failed", "failed_stale"}:
         warmup_failed = True
-    if warmup_status == "running" and warmup_updated_at is not None and (now - warmup_updated_at) > 900.0:
+    if warmup_status == "running" and warmup_updated_at is not None and (now - warmup_updated_at) > 300.0:
         warmup_failed = True
         warmup_status = "failed_stale"
 
     max_lsp_attempts = 5
     lsp_attempts = st.get_lsp_init_attempts(root=root_str)
 
-    if warmup_failed or lsp_attempts >= max_lsp_attempts:
-        use_lsp = False
-    elif lsp_attempts == 0:
-        use_lsp = True
-    elif warmup_ready:
-        use_lsp = True
-    else:
-        st.set_init_next_allowed_at(root=root_str, at=now + cooldown_s)
-        _debug_log(
-            {
-                "event": "PreToolUse",
-                "tool_name": tool_name,
-                "cwd": cwd,
-                "file_path": file_path_str,
-                "resolved_root": root_str,
-                "allow_init": allow_init,
-                "lsp_attempts": lsp_attempts,
-                "warmup_status": warmup_status,
-                "skipped": "warmup_not_ready",
-            }
-        )
-        return None
+    use_lsp = bool((not warmup_failed) and warmup_ready and lsp_attempts < max_lsp_attempts)
 
     _debug_log(
         {
