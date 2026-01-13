@@ -46,6 +46,14 @@ def _noop(hook_event_name: str) -> None:
     _emit(hook_event_name=hook_event_name)
 
 
+def _log(msg: str) -> None:
+    try:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        print(f"[codecanvas:lsp-warmup] {ts} {msg}", flush=True)
+    except Exception:
+        return
+
+
 def _state_dir() -> Path | None:
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
     if not config_dir:
@@ -249,6 +257,7 @@ def worker_main() -> None:
     root = Path(root_str)
     attempt = 1
     try:
+        _log(f"worker_start root={root} pid={os.getpid()}")
         _write_json_atomic(
             state_path,
             {
@@ -267,6 +276,8 @@ def worker_main() -> None:
 
         content_roots, present_langs, sample_by_lang = _scan_present_langs(root=root)
 
+        _log(f"scan_done content_roots={content_roots} present_langs={present_langs}")
+
         from codecanvas.parser.config import LSP_SUPPORTED_LANGUAGES, has_lsp_support
 
         warm_langs = [
@@ -274,6 +285,8 @@ def worker_main() -> None:
             for lang in present_langs
             if lang in LSP_SUPPORTED_LANGUAGES and has_lsp_support(lang)
         ]
+
+        _log(f"warm_langs={warm_langs}")
 
         langs_state: dict[str, dict[str, Any]] = {}
         for lang in present_langs:
@@ -294,19 +307,25 @@ def worker_main() -> None:
 
             t0 = time.time()
 
+            _log(f"warm_start lang={lang} sample={sample}")
+
             async def _warm_one() -> None:
                 from codecanvas.parser.lsp import get_lsp_session_manager
 
                 mgr = get_lsp_session_manager()
                 ws_root = find_workspace_root(Path(sample), prefer_env=False)
+                _log(f"warm_ws_root lang={lang} ws_root={ws_root}")
                 sess = await mgr.get(lang=lang, workspace_root=str(ws_root))
+                _log(f"warm_symbols_request lang={lang}")
                 await sess.document_symbols(str(sample))
+                _log(f"warm_symbols_ok lang={lang}")
 
             try:
                 get_lsp_runtime().run(_warm_one(), timeout=60.0)
                 langs_state[lang] = {"status": "ready", "elapsed_s": time.time() - t0}
                 ready.append(lang)
             except Exception as e:
+                _log(f"warm_failed lang={lang} error={type(e).__name__}: {e}")
                 langs_state[lang] = {
                     "status": "failed",
                     "elapsed_s": time.time() - t0,
@@ -319,6 +338,8 @@ def worker_main() -> None:
             overall = "partial"
         elif ready:
             overall = "ready"
+
+        _log(f"warm_done overall={overall} ready={ready} failed={failed}")
 
         _write_json_atomic(
             state_path,
@@ -336,6 +357,7 @@ def worker_main() -> None:
             },
         )
     except Exception as e:
+        _log(f"worker_failed error={type(e).__name__}: {e}")
         _write_json_atomic(
             state_path,
             {

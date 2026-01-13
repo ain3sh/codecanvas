@@ -13,6 +13,7 @@ import shutil
 import threading
 import time
 from concurrent.futures import Future
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -248,7 +249,11 @@ class LspRuntime:
         self.ensure_started()
         assert self._loop is not None
         fut: Future[T] = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return fut.result(timeout=timeout)
+        try:
+            return fut.result(timeout=timeout)
+        except FutureTimeoutError:
+            fut.cancel()
+            raise
 
 
 _GLOBAL_RUNTIME = LspRuntime()
@@ -304,10 +309,15 @@ class MultilspyBackend:
                 from multilspy.multilspy_config import MultilspyConfig
                 from multilspy.multilspy_logger import MultilspyLogger
 
-                config = MultilspyConfig.from_dict({"code_language": multilspy_lang})
-                logger = MultilspyLogger()
-                self._lsp = SyncLanguageServer.create(config, logger, self.workspace_root)
-                self._lsp.start_server().__enter__()
+                def _start_server() -> Any:
+                    config = MultilspyConfig.from_dict({"code_language": multilspy_lang})
+                    logger = MultilspyLogger()
+                    lsp_server = SyncLanguageServer.create(config, logger, self.workspace_root)
+                    lsp_server.start_server().__enter__()
+                    return lsp_server
+
+                loop = asyncio.get_running_loop()
+                self._lsp = await loop.run_in_executor(None, _start_server)
             except Exception as e:
                 raise LSPError(f"Failed to start multilspy for {self.lang}: {e}") from e
 
@@ -319,7 +329,8 @@ class MultilspyBackend:
         rel_path = os.path.relpath(path, self.workspace_root)
 
         try:
-            result = self._lsp.request_document_symbols(rel_path)
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, self._lsp.request_document_symbols, rel_path)
             if not result:
                 return []
             # multilspy returns (list, None) tuple - extract the list
