@@ -113,40 +113,57 @@ def ensure_worker_running(*, root: Path) -> None:
 
     root = root.absolute()
     state_path = d / "lsp_warmup.json"
-    state = _read_json(state_path)
-    status = state.get("overall") if isinstance(state, dict) else None
-    if not isinstance(status, str):
-        status = state.get("status") if isinstance(state, dict) else None
-    pid = state.get("pid") if isinstance(state, dict) else None
-    existing_root = state.get("root") if isinstance(state, dict) else None
 
-    updated_at = state.get("updated_at") if isinstance(state, dict) else None
+    # Spawn guard: hooks may call ensure_worker_running concurrently.
+    # Use a best-effort flock so we don't spawn duplicate workers.
     try:
-        updated_at_f = float(updated_at) if updated_at is not None else None
+        import fcntl
+
+        lock_path = d / "lsp_warmup.spawn.lock"
+        d.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a", encoding="utf-8") as lf:
+            try:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            except Exception:
+                pass
+
+            state = _read_json(state_path)
+            status = state.get("overall") if isinstance(state, dict) else None
+            if not isinstance(status, str):
+                status = state.get("status") if isinstance(state, dict) else None
+            pid = state.get("pid") if isinstance(state, dict) else None
+            existing_root = state.get("root") if isinstance(state, dict) else None
+
+            updated_at = state.get("updated_at") if isinstance(state, dict) else None
+            try:
+                updated_at_f = float(updated_at) if updated_at is not None else None
+            except Exception:
+                updated_at_f = None
+
+            if (
+                isinstance(status, str)
+                and status == "running"
+                and isinstance(pid, int)
+                and _pid_alive(pid)
+                and existing_root == str(root)
+            ):
+                return
+
+            if isinstance(status, str) and status in {"ready", "partial"} and existing_root == str(root):
+                return
+
+            # Avoid respawning repeatedly if we just failed for this root.
+            if (
+                isinstance(status, str)
+                and status in {"failed", "failed_stale", "skipped"}
+                and existing_root == str(root)
+                and updated_at_f is not None
+                and (time.time() - updated_at_f) < 300.0
+            ):
+                return
     except Exception:
-        updated_at_f = None
-
-    if (
-        isinstance(status, str)
-        and status == "running"
-        and isinstance(pid, int)
-        and _pid_alive(pid)
-        and existing_root == str(root)
-    ):
-        return
-
-    if isinstance(status, str) and status in {"ready", "partial"} and existing_root == str(root):
-        return
-
-    # Avoid respawning repeatedly if we just failed for this root.
-    if (
-        isinstance(status, str)
-        and status in {"failed", "failed_stale", "skipped"}
-        and existing_root == str(root)
-        and updated_at_f is not None
-        and (time.time() - updated_at_f) < 300.0
-    ):
-        return
+        # If flock isn't available, fall back to best-effort spawning.
+        state = _read_json(state_path)
 
     d.mkdir(parents=True, exist_ok=True)
     log_path = d / "lsp_warmup.log"
@@ -321,7 +338,7 @@ def worker_main() -> None:
                 _log(f"warm_symbols_ok lang={lang}")
 
             try:
-                get_lsp_runtime().run(_warm_one(), timeout=60.0)
+                get_lsp_runtime().run(_warm_one(), timeout=120.0)
                 langs_state[lang] = {"status": "ready", "elapsed_s": time.time() - t0}
                 ready.append(lang)
             except Exception as e:

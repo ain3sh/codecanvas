@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "uv run python -c \"from codecanvas.hooks.lsp_warmup import main; main()\"",
-            "timeout": 60
+            "timeout": 120
           },
           {
             "type": "command",
