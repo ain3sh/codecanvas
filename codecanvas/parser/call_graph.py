@@ -144,6 +144,7 @@ def build_call_graph_edges(
     time_budget_s: float,
     max_callsites_total: int = 500,
     max_callsites_per_file: int = 100,
+    lsp_langs: set[str] | None = None,
     should_continue: Callable[[], bool] | None = None,
 ) -> CallGraphBuildResult:
     """Build CALL edges using tree-sitter callsites + LSP definition resolution.
@@ -159,6 +160,9 @@ def build_call_graph_edges(
 
     seen_edge_keys: set[str] = set()
     remaining_total = max(0, int(max_callsites_total))
+
+    def _allow_lsp(lang: str) -> bool:
+        return True if lsp_langs is None else (lang in lsp_langs)
 
     def _ok() -> bool:
         return True if should_continue is None else bool(should_continue())
@@ -179,7 +183,7 @@ def build_call_graph_edges(
             break
 
         lang = _lang_key(file_path)
-        if not lang or not has_lsp_support(lang):
+        if not lang or not has_lsp_support(lang) or not _allow_lsp(lang):
             continue
 
         try:

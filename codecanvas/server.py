@@ -16,6 +16,7 @@ from typing import List, Optional
 
 from .core.analysis import Analyzer
 from .core.models import Graph
+from .core.paths import get_canvas_dir
 from .core.state import AnalysisState, CanvasState, clear_state, load_state, load_tasks_yaml, pick_task, save_state
 from .parser import Parser
 from .parser.call_graph import build_call_graph_edges
@@ -92,7 +93,12 @@ def _persist_call_graph_diag(diag: dict) -> None:
         return
 
 
-def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> int:
+def _build_call_graph_foreground(
+    *,
+    time_budget_s: float,
+    generation: int,
+    lsp_langs: set[str] | None = None,
+) -> int:
     global _graph
     global _call_graph_status, _call_graph_error, _call_graph_last
     global _call_graph_edges_total, _call_graph_result_summary
@@ -118,6 +124,7 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
             time_budget_s=float(time_budget_s),
             max_callsites_total=250,
             max_callsites_per_file=50,
+            lsp_langs=lsp_langs,
             should_continue=lambda: generation == _call_graph_generation,
         )
     except Exception as e:
@@ -166,7 +173,12 @@ def _build_call_graph_foreground(*, time_budget_s: float, generation: int) -> in
     return added
 
 
-def _start_call_graph_background(*, time_budget_s: float, generation: int) -> None:
+def _start_call_graph_background(
+    *,
+    time_budget_s: float,
+    generation: int,
+    lsp_langs: set[str] | None = None,
+) -> None:
     global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_thread, _call_graph_edges_total
     if _graph is None:
         return
@@ -196,6 +208,7 @@ def _start_call_graph_background(*, time_budget_s: float, generation: int) -> No
                 time_budget_s=float(time_budget_s),
                 max_callsites_total=2000,
                 max_callsites_per_file=200,
+                lsp_langs=lsp_langs,
                 should_continue=lambda: generation == _call_graph_generation,
             )
         except Exception as e:
@@ -278,7 +291,7 @@ def _wait_for_call_graph(timeout_s: float = 10.0) -> None:
 
 
 def _canvas_output_dir(project_dir: str) -> str:
-    return os.path.join(project_dir, ".codecanvas")
+    return str(get_canvas_dir(Path(project_dir)))
 
 
 def _find_repo_root(start: Path) -> Path:
@@ -290,6 +303,7 @@ def canvas_action(
     action: str,
     repo_path: str | None = None,
     use_lsp: bool = True,
+    lsp_langs: list[str] | None = None,
     symbol: str | None = None,
     text: str | None = None,
     kind: str | None = None,
@@ -305,7 +319,7 @@ def canvas_action(
     if action == "init":
         if not repo_path:
             return CanvasResult("init requires repo_path")
-        return _action_init(repo_path, use_lsp=use_lsp)
+        return _action_init(repo_path, use_lsp=use_lsp, lsp_langs=lsp_langs)
 
     state = load_state()
     if action == "read":
@@ -361,17 +375,18 @@ def _set_project_dir(project_dir: str) -> None:
     os.environ["CANVAS_PROJECT_DIR"] = project_dir
 
 
-def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
+def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) -> CanvasResult:
     global _graph, _analyzer
     global _call_graph_generation, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
 
-    abs_path = str(Path(repo_path).absolute())
-    repo_root = _find_repo_root(Path(abs_path))
-    project_dir = str(repo_root)
+    abs_p = Path(repo_path).absolute()
+    abs_path = str(abs_p)
+    project_dir = str(_find_repo_root(abs_p)) if abs_p.is_file() else str(abs_p)
     _set_project_dir(project_dir)
     clear_state()
 
-    parser = Parser(use_lsp=use_lsp)
+    allowed_lsp_langs = set(lsp_langs) if lsp_langs else None
+    parser = Parser(use_lsp=use_lsp, lsp_langs=allowed_lsp_langs)
     with _graph_lock:
         if Path(abs_path).is_file():
             _graph = parser.parse_file(abs_path)
@@ -390,8 +405,12 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
 
     call_edges_added = 0
     if use_lsp:
-        call_edges_added = _build_call_graph_foreground(time_budget_s=0.35, generation=generation)
-        _start_call_graph_background(time_budget_s=30.0, generation=generation)
+        call_edges_added = _build_call_graph_foreground(
+            time_budget_s=0.35,
+            generation=generation,
+            lsp_langs=allowed_lsp_langs,
+        )
+        _start_call_graph_background(time_budget_s=30.0, generation=generation, lsp_langs=allowed_lsp_langs)
 
     warn = ""
     backend_note = ""
@@ -417,6 +436,8 @@ def _action_init(repo_path: str, *, use_lsp: bool) -> CanvasResult:
             "fallback_samples": list(summary.fallback_samples or []),
             "skipped_samples": list(summary.skipped_samples or []),
         }
+        if allowed_lsp_langs is not None:
+            state.parse_summary["lsp_langs"] = sorted(allowed_lsp_langs)
     with _graph_lock:
         for node in _graph.nodes:
             state.symbol_files[node.id] = node.fsPath
@@ -469,7 +490,16 @@ def _ensure_loaded(state: CanvasState) -> None:
     if not state.project_path:
         return
 
-    parser = Parser(use_lsp=getattr(state, "use_lsp", True))
+    lsp_langs: set[str] | None = None
+    try:
+        parsed = getattr(state, "parse_summary", None) or {}
+        v = parsed.get("lsp_langs") if isinstance(parsed, dict) else None
+        if isinstance(v, list) and all(isinstance(x, str) for x in v):
+            lsp_langs = set(v)
+    except Exception:
+        lsp_langs = None
+
+    parser = Parser(use_lsp=getattr(state, "use_lsp", True), lsp_langs=lsp_langs)
     root = Path(state.project_path)
     with _graph_lock:
         _graph = parser.parse_file(str(root)) if root.is_file() else parser.parse_directory(str(root))
@@ -481,8 +511,8 @@ def _ensure_loaded(state: CanvasState) -> None:
         _call_graph_edges_total = 0
         global _call_graph_result_summary
         _call_graph_result_summary = None
-        _build_call_graph_foreground(time_budget_s=0.2, generation=generation)
-        _start_call_graph_background(time_budget_s=30.0, generation=generation)
+        _build_call_graph_foreground(time_budget_s=0.2, generation=generation, lsp_langs=lsp_langs)
+        _start_call_graph_background(time_budget_s=30.0, generation=generation, lsp_langs=lsp_langs)
 
 
 def _action_impact(

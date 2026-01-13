@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from codecanvas.core.models import GraphNode, NodeKind
+from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
 from codecanvas.core.state import load_state
 from codecanvas.server import canvas_action
 
@@ -17,12 +18,13 @@ from ._autocontext_state import AutoContextState
 from ._hookio import (
     extract_file_path,
     get_hook_event_name,
-    get_mapping,
     get_str,
     get_tool_name,
     read_stdin_json,
 )
-from ._workspace import resolve_workspace_root
+
+# NOTE: Complex workspace-root detection is intentionally disabled for now.
+# from ._workspace import resolve_workspace_root
 
 _CODE_EXTS: set[str] = {
     ".py",
@@ -40,6 +42,33 @@ _CODE_EXTS: set[str] = {
     ".c",
     ".rb",
 }
+
+
+def _is_under_app(cwd: str) -> bool:
+    try:
+        app = Path("/app").absolute()
+        p = Path(cwd).absolute()
+        return p == app or p.is_relative_to(app)
+    except Exception:
+        try:
+            return str(Path(cwd).absolute()).startswith("/app/")
+        except Exception:
+            return False
+
+
+def _configure_tb_artifacts(cwd: str) -> None:
+    """In TerminalBench, keep CodeCanvas artifacts outside `/app` for verifier-safety."""
+
+    if not _is_under_app(cwd):
+        return
+    if (os.environ.get("CANVAS_ARTIFACT_DIR") or "").strip():
+        return
+
+    session_dir = (os.environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+    if session_dir:
+        os.environ["CANVAS_ARTIFACT_DIR"] = str((Path(session_dir) / "codecanvas" / "canvas").absolute())
+        return
+    os.environ["CANVAS_ARTIFACT_DIR"] = "/tmp/codecanvas"
 
 
 def _emit(*, hook_event_name: str, additional_context: str | None = None) -> None:
@@ -92,7 +121,7 @@ def _workspace_lock(root: Path, *, timeout_s: float = 2.0):
     try:
         import fcntl
 
-        lock_dir = root / ".codecanvas"
+        lock_dir = get_canvas_dir(root)
         lock_dir.mkdir(parents=True, exist_ok=True)
         lock_path = lock_dir / "lock"
         f = open(lock_path, "a", encoding="utf-8")
@@ -126,26 +155,6 @@ def _workspace_lock(root: Path, *, timeout_s: float = 2.0):
             pass
 
 
-def _has_project_markers(root: Path) -> bool:
-    markers = (
-        ".git",
-        "pyproject.toml",
-        "package.json",
-        "go.mod",
-        "Cargo.toml",
-        "pom.xml",
-        "build.gradle",
-        "build.gradle.kts",
-    )
-    for m in markers:
-        try:
-            if (root / m).exists():
-                return True
-        except Exception:
-            continue
-    return False
-
-
 def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
     """Copy `.codecanvas` outputs from the repo into the persisted Claude session dir."""
 
@@ -153,7 +162,7 @@ def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
     if not session_dir:
         return
 
-    src_dir = root / ".codecanvas"
+    src_dir = get_canvas_dir(root)
     if not src_dir.exists() or not src_dir.is_dir():
         return
 
@@ -180,7 +189,7 @@ def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
         return
 
 
-def _maybe_init(*, root: Path, allow_init: bool, use_lsp: bool) -> tuple[bool, str]:
+def _maybe_init(*, root: Path, allow_init: bool, lsp_langs: list[str] | None) -> tuple[bool, str]:
     """Ensure the CodeCanvas state in `root` is initialized.
 
     Returns (did_init, reason).
@@ -189,6 +198,7 @@ def _maybe_init(*, root: Path, allow_init: bool, use_lsp: bool) -> tuple[bool, s
     os.environ["CANVAS_PROJECT_DIR"] = str(root)
     state = load_state()
     parsed = int(state.parse_summary.get("parsed_files", 0) or 0)
+    wants_lsp = bool(lsp_langs)
 
     if (
         state.initialized
@@ -196,17 +206,21 @@ def _maybe_init(*, root: Path, allow_init: bool, use_lsp: bool) -> tuple[bool, s
         and Path(state.project_path).absolute() == root.absolute()
         and parsed > 0
     ):
-        return False, "already_initialized"
+        # If we initialized without LSP but warmup later becomes ready, allow a one-time upgrade.
+        if wants_lsp and not bool(getattr(state, "use_lsp", False)):
+            pass
+        else:
+            return False, "already_initialized"
 
     if not allow_init:
         return False, "deferred"
 
     # Re-init if initialized but empty (common in clone-first workflows).
-    if state.initialized and parsed == 0 and not _has_project_markers(root):
-        # If the root isn't marker-backed, avoid repeatedly re-initializing empties.
+    if state.initialized and parsed == 0 and not (has_project_markers(root) or top_level_project_roots(root)):
+        # If the root isn't marker-backed and doesn't contain project roots, avoid churn.
         return False, "deferred_empty"
 
-    canvas_action(action="init", repo_path=str(root), use_lsp=bool(use_lsp))
+    canvas_action(action="init", repo_path=str(root), use_lsp=wants_lsp, lsp_langs=lsp_langs)
     return True, "initialized"
 
 
@@ -315,48 +329,31 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
     sticky_root = st.read_active_root()
 
     cwd = get_str(input_data, "cwd", default=os.getcwd())
+    _configure_tb_artifacts(cwd)
     tool_name = get_tool_name(input_data)
-    tool_input = get_mapping(input_data, "tool_input", "toolInput")
 
     file_path_str = extract_file_path(input_data)
     file_path = Path(file_path_str) if file_path_str else None
 
-    root = resolve_workspace_root(
-        tool_name=tool_name,
-        tool_input=tool_input,
-        tool_response={},
-        cwd=cwd,
-        sticky_root=sticky_root,
-    )
-
-    if root is None:
-        _debug_log(
-            {
-                "event": "PreToolUse",
-                "tool_name": tool_name,
-                "cwd": cwd,
-                "file_path": file_path_str,
-                "resolved_root": "",
-                "sticky_root": sticky_root,
-                "allow_init": False,
-                "needs_lock": False,
-                "attempted_init": False,
-                "attempted_impact": False,
-                "skipped": "no_root",
-            }
-        )
-        return None
+    # NOTE: Complex workspace-root detection is intentionally disabled for now.
+    # root = resolve_workspace_root(...)
+    root = Path("/app").absolute() if _is_under_app(cwd) else Path(cwd).absolute()
 
     st.write_active_root(str(root), reason=f"pre_tool_use:{tool_name}")
 
     root_str = str(root)
-    has_markers = _has_project_markers(root)
-    allow_init = bool(has_markers or (file_path is not None and file_path.exists() and file_path.is_file()))
+    has_markers = has_project_markers(root)
+    project_roots = top_level_project_roots(root)
+    allow_init = bool(
+        has_markers
+        or project_roots
+        or (file_path is not None and file_path.exists() and file_path.is_file())
+    )
 
     if st.is_init_announced(root=root_str):
         return None
 
-    if has_markers:
+    if has_markers or project_roots:
         try:
             from .lsp_warmup import ensure_worker_running
 
@@ -419,15 +416,17 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
         return None
 
     warmup_status = "missing"
-    warmup_ready = False
     warmup_failed = False
+    ready_langs: list[str] = []
     warmup_updated_at: float | None = None
     try:
         from .lsp_warmup import read_warmup_state
 
         warm = read_warmup_state()
         if isinstance(warm, dict) and warm.get("root") == root_str:
-            v = warm.get("status")
+            v = warm.get("overall")
+            if not isinstance(v, str):
+                v = warm.get("status")
             if isinstance(v, str):
                 warmup_status = v
             ua = warm.get("updated_at")
@@ -436,11 +435,16 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
                     warmup_updated_at = float(ua)
                 except Exception:
                     warmup_updated_at = None
+            langs = warm.get("langs")
+            if isinstance(langs, dict):
+                for lang, info in langs.items():
+                    if not isinstance(lang, str) or not isinstance(info, dict):
+                        continue
+                    if info.get("status") == "ready":
+                        ready_langs.append(lang)
     except Exception:
         pass
 
-    if warmup_status == "ready":
-        warmup_ready = True
     if warmup_status in {"failed", "failed_stale"}:
         warmup_failed = True
     if warmup_status == "running" and warmup_updated_at is not None and (now - warmup_updated_at) > 300.0:
@@ -450,7 +454,9 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
     max_lsp_attempts = 5
     lsp_attempts = st.get_lsp_init_attempts(root=root_str)
 
-    use_lsp = bool((not warmup_failed) and warmup_ready and lsp_attempts < max_lsp_attempts)
+    lsp_langs: list[str] | None = None
+    if ready_langs and (not warmup_failed) and lsp_attempts < max_lsp_attempts:
+        lsp_langs = sorted(set(ready_langs))
 
     _debug_log(
         {
@@ -463,7 +469,8 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
             "allow_init": allow_init,
             "lsp_attempts": lsp_attempts,
             "warmup_status": warmup_status,
-            "use_lsp": use_lsp,
+            "ready_langs": lsp_langs or [],
+            "use_lsp": bool(lsp_langs),
             "attempted_init": True,
         }
     )
@@ -476,9 +483,9 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
         attempt_no: int | None = None
         try:
             st.set_init_inflight_at(root=root_str, at=now)
-            if use_lsp:
+            if lsp_langs:
                 attempt_no = st.inc_lsp_init_attempts(root=root_str)
-            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init, use_lsp=use_lsp)
+            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init, lsp_langs=lsp_langs)
             _sync_canvas_artifacts_to_session(root=root)
             state = load_state()
             parsed_files = int(state.parse_summary.get("parsed_files", 0) or 0)
@@ -493,7 +500,7 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
                     "file_path": file_path_str,
                     "resolved_root": root_str,
                     "allow_init": allow_init,
-                    "use_lsp": use_lsp,
+                    "use_lsp": bool(lsp_langs),
                     "attempt_no": attempt_no,
                     "attempted_init": True,
                     "error": repr(e),
@@ -513,7 +520,7 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
                 "file_path": file_path_str,
                 "resolved_root": root_str,
                 "allow_init": allow_init,
-                "use_lsp": use_lsp,
+                "use_lsp": bool(lsp_langs),
                 "attempt_no": attempt_no,
                 "attempted_init": True,
                 "did_init": did_init,
@@ -549,33 +556,13 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
 
 def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
     st = AutoContextState()
-    sticky_root = st.read_active_root()
-
     cwd = get_str(input_data, "cwd", default=os.getcwd())
+    _configure_tb_artifacts(cwd)
     tool_name = get_tool_name(input_data)
-    tool_input = get_mapping(input_data, "tool_input", "toolInput")
-    tool_response = get_mapping(input_data, "tool_response", "toolResponse")
 
-    root = resolve_workspace_root(
-        tool_name=tool_name,
-        tool_input=tool_input,
-        tool_response=tool_response,
-        cwd=cwd,
-        sticky_root=sticky_root,
-    )
-    if root is None:
-        _debug_log(
-            {
-                "event": "PostToolUse",
-                "tool_name": tool_name,
-                "cwd": cwd,
-                "file_path": extract_file_path(input_data),
-                "resolved_root": "",
-                "sticky_root": sticky_root,
-                "skipped": "no_root",
-            }
-        )
-        return None
+    # NOTE: Complex workspace-root detection is intentionally disabled for now.
+    # root = resolve_workspace_root(...)
+    root = Path("/app").absolute() if _is_under_app(cwd) else Path(cwd).absolute()
 
     st.write_active_root(str(root), reason=f"post_tool_use:{tool_name}")
 

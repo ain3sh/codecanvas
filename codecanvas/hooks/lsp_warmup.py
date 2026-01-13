@@ -106,7 +106,9 @@ def ensure_worker_running(*, root: Path) -> None:
     root = root.absolute()
     state_path = d / "lsp_warmup.json"
     state = _read_json(state_path)
-    status = state.get("status") if isinstance(state, dict) else None
+    status = state.get("overall") if isinstance(state, dict) else None
+    if not isinstance(status, str):
+        status = state.get("status") if isinstance(state, dict) else None
     pid = state.get("pid") if isinstance(state, dict) else None
     existing_root = state.get("root") if isinstance(state, dict) else None
 
@@ -118,11 +120,14 @@ def ensure_worker_running(*, root: Path) -> None:
 
     if (
         isinstance(status, str)
-        and status in {"running", "ready"}
+        and status == "running"
         and isinstance(pid, int)
         and _pid_alive(pid)
         and existing_root == str(root)
     ):
+        return
+
+    if isinstance(status, str) and status in {"ready", "partial"} and existing_root == str(root):
         return
 
     # Avoid respawning repeatedly if we just failed for this root.
@@ -161,7 +166,7 @@ def ensure_worker_running(*, root: Path) -> None:
         _write_json_atomic(
             state_path,
             {
-                "status": "failed",
+                "overall": "failed",
                 "root": str(root),
                 "attempt": int(state.get("attempt") or 0) + 1 if isinstance(state, dict) else 1,
                 "started_at": time.time(),
@@ -175,29 +180,47 @@ def ensure_worker_running(*, root: Path) -> None:
     _write_json_atomic(
         state_path,
         {
-            "status": "running",
+            "overall": "running",
             "root": str(root),
             "pid": int(proc.pid),
             "attempt": int(state.get("attempt") or 0) if isinstance(state, dict) else 0,
             "started_at": time.time(),
             "updated_at": time.time(),
-            "ready_langs": state.get("ready_langs", []) if isinstance(state, dict) else [],
-            "last_error": state.get("last_error") if isinstance(state, dict) else None,
         },
     )
 
 
-def _touch_warmup_files(root: Path) -> tuple[Path, Path] | tuple[None, None]:
-    try:
-        warm_dir = root / ".codecanvas"
-        warm_dir.mkdir(parents=True, exist_ok=True)
-        py = warm_dir / "_lsp_warmup.py"
-        ts = warm_dir / "_lsp_warmup.ts"
-        py.write_text("def _cc_warmup():\n    return 1\n", encoding="utf-8")
-        ts.write_text("export function _ccWarmup(): number { return 1 }\n", encoding="utf-8")
-        return py, ts
-    except Exception:
-        return None, None
+def _scan_present_langs(*, root: Path) -> tuple[list[str], list[str], dict[str, str]]:
+    from codecanvas.core.paths import content_roots_for_scan, iter_walk_files
+    from codecanvas.parser.config import detect_language
+
+    ignore = {
+        ".git",
+        ".codecanvas",
+        "node_modules",
+        "__pycache__",
+        ".pytest_cache",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".venv",
+        "venv",
+        "env",
+        "dist",
+        "build",
+    }
+
+    content_roots = list(content_roots_for_scan(root))
+    present: set[str] = set()
+    sample_by_lang: dict[str, str] = {}
+
+    for fp in iter_walk_files(roots=content_roots, ignore_dirs=ignore):
+        lang = detect_language(str(fp))
+        if not lang:
+            continue
+        present.add(lang)
+        sample_by_lang.setdefault(lang, str(fp))
+
+    return [str(p) for p in content_roots], sorted(present), sample_by_lang
 
 
 def worker_main() -> None:
@@ -211,7 +234,7 @@ def worker_main() -> None:
         _write_json_atomic(
             state_path,
             {
-                "status": "failed",
+                "overall": "failed",
                 "root": "",
                 "pid": os.getpid(),
                 "attempt": 1,
@@ -229,70 +252,100 @@ def worker_main() -> None:
         _write_json_atomic(
             state_path,
             {
-                "status": "running",
+                "overall": "running",
                 "root": str(root),
                 "pid": os.getpid(),
                 "attempt": attempt,
                 "started_at": time.time(),
                 "updated_at": time.time(),
-                "ready_langs": [],
-                "last_error": None,
+                "langs": {},
             },
         )
 
         if not root.exists() or not root.is_dir():
             raise RuntimeError("root_missing")
 
-        py_file, ts_file = _touch_warmup_files(root)
-        if py_file is None or ts_file is None:
-            raise RuntimeError("warmup_files_failed")
+        content_roots, present_langs, sample_by_lang = _scan_present_langs(root=root)
 
-        warm_root = py_file.parent
-        ready: list[str] = []
+        from codecanvas.parser.config import LSP_SUPPORTED_LANGUAGES, has_lsp_support
 
-        async def _warm():
-            from codecanvas.parser.lsp import get_lsp_session_manager
+        warm_langs = [
+            lang
+            for lang in present_langs
+            if lang in LSP_SUPPORTED_LANGUAGES and has_lsp_support(lang)
+        ]
 
-            mgr = get_lsp_session_manager()
-            py_sess = await mgr.get(lang="py", workspace_root=str(warm_root))
-            _ = await py_sess.document_symbols(str(py_file))
-            ready.append("py")
-
-            ts_sess = await mgr.get(lang="ts", workspace_root=str(warm_root))
-            _ = await ts_sess.document_symbols(str(ts_file))
-            ready.append("ts")
+        langs_state: dict[str, dict[str, Any]] = {}
+        for lang in present_langs:
+            if lang not in LSP_SUPPORTED_LANGUAGES:
+                langs_state[lang] = {"status": "skipped", "reason": "no_lsp_support"}
 
         from codecanvas.parser.lsp import get_lsp_runtime
+        from codecanvas.parser.utils import find_workspace_root
 
-        get_lsp_runtime().run(_warm(), timeout=60.0)
+        ready: list[str] = []
+        failed: list[str] = []
 
-        if "py" not in ready:
-            raise RuntimeError("py_not_ready")
+        for lang in warm_langs:
+            sample = sample_by_lang.get(lang)
+            if not sample:
+                langs_state[lang] = {"status": "skipped", "reason": "no_sample"}
+                continue
+
+            t0 = time.time()
+
+            async def _warm_one() -> None:
+                from codecanvas.parser.lsp import get_lsp_session_manager
+
+                mgr = get_lsp_session_manager()
+                ws_root = find_workspace_root(Path(sample), prefer_env=False)
+                sess = await mgr.get(lang=lang, workspace_root=str(ws_root))
+                await sess.document_symbols(str(sample))
+
+            try:
+                get_lsp_runtime().run(_warm_one(), timeout=60.0)
+                langs_state[lang] = {"status": "ready", "elapsed_s": time.time() - t0}
+                ready.append(lang)
+            except Exception as e:
+                langs_state[lang] = {
+                    "status": "failed",
+                    "elapsed_s": time.time() - t0,
+                    "error": f"{type(e).__name__}: {e}",
+                }
+                failed.append(lang)
+
+        overall = "skipped" if not warm_langs else "failed"
+        if ready and failed:
+            overall = "partial"
+        elif ready:
+            overall = "ready"
 
         _write_json_atomic(
             state_path,
             {
-                "status": "ready",
+                "overall": overall,
                 "root": str(root),
+                "content_roots": content_roots,
+                "present_langs": present_langs,
                 "pid": os.getpid(),
                 "attempt": attempt,
                 "started_at": time.time(),
                 "updated_at": time.time(),
+                "langs": langs_state,
                 "ready_langs": ready,
-                "last_error": None,
             },
         )
     except Exception as e:
         _write_json_atomic(
             state_path,
             {
-                "status": "failed",
+                "overall": "failed",
                 "root": str(root),
                 "pid": os.getpid(),
                 "attempt": attempt,
                 "started_at": time.time(),
                 "updated_at": time.time(),
-                "ready_langs": [],
+                "langs": {},
                 "last_error": f"{type(e).__name__}: {e}",
                 "traceback": traceback.format_exc(limit=8),
             },
@@ -309,21 +362,18 @@ def main() -> None:
 
     cwd = get_str(input_data, "cwd", default=os.getcwd())
     try:
-        root = Path(cwd).absolute()
-        if _is_marker_root(root):
-            ensure_worker_running(root=root)
-        else:
-            d = _state_dir()
-            if d is not None:
-                _write_json_atomic(
-                    d / "lsp_warmup.json",
-                    {
-                        "status": "skipped",
-                        "root": str(root),
-                        "reason": "not_repo_root",
-                        "updated_at": time.time(),
-                    },
-                )
+        d = _state_dir()
+        if d is not None:
+            root = Path("/app") if str(Path(cwd).absolute()).startswith("/app") else Path(cwd).absolute()
+            _write_json_atomic(
+                d / "lsp_warmup.json",
+                {
+                    "overall": "idle",
+                    "root": str(root),
+                    "reason": "session_start",
+                    "updated_at": time.time(),
+                },
+            )
     except Exception:
         pass
 

@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
 
+from codecanvas.core.paths import top_level_project_roots
+
 from ..core.models import (
     EdgeType,
     Graph,
@@ -63,15 +65,23 @@ class Parser:
         graph = parser.parse_file("/path/to/file.py")
     """
 
-    def __init__(self, use_lsp: bool = True):
+    def __init__(self, use_lsp: bool = True, *, lsp_langs: Set[str] | None = None):
         """Initialize parser.
 
         Args:
             use_lsp: Whether to use language servers when available.
+            lsp_langs: Optional allow-list of language keys to use LSP for.
         """
         self.use_lsp = use_lsp
+        self.lsp_langs = set(lsp_langs) if lsp_langs is not None else None
         self.last_summary: ParseSummary = ParseSummary()
         self._known_module_labels: Set[str] = set()
+        self._label_strip_prefix: str | None = None
+
+    def _allow_lsp_for(self, lang: str) -> bool:
+        if self.lsp_langs is None:
+            return True
+        return lang in self.lsp_langs
 
     def parse_directory(
         self,
@@ -133,6 +143,22 @@ class Parser:
         graph = Graph()
         root = Path(path)
         self.last_summary = ParseSummary()
+        self._label_strip_prefix = None
+
+        try:
+            roots = top_level_project_roots(root.absolute())
+            if len(roots) == 1:
+                prefix = (roots[0].name or "").strip("/")
+                self._label_strip_prefix = prefix or None
+        except Exception:
+            self._label_strip_prefix = None
+
+        def _maybe_strip(rel_path: str) -> str:
+            prefix = self._label_strip_prefix
+            if not prefix:
+                return rel_path
+            prefix_slash = prefix + "/"
+            return rel_path[len(prefix_slash) :] if rel_path.startswith(prefix_slash) else rel_path
 
         # Pre-scan for import resolution.
         # Use os.walk with pruning so we don't traverse excluded directories.
@@ -168,7 +194,7 @@ class Parser:
                 rel = str(fp.relative_to(root)).replace("\\", "/")
             except ValueError:
                 rel = fp.name
-            self._known_module_labels.add(normalize_path(rel))
+            self._known_module_labels.add(normalize_path(_maybe_strip(rel)))
 
         # Parse files
         for file_path in candidates:
@@ -182,6 +208,7 @@ class Parser:
         file_path = Path(path)
         self.last_summary = ParseSummary()
         self._known_module_labels = {file_path.name}
+        self._label_strip_prefix = None
 
         self._parse_file(file_path, file_path.parent, graph)
         graph.rebuild_indexes()
@@ -199,6 +226,10 @@ class Parser:
             file_label = str(file_path.relative_to(root)).replace("\\", "/")
         except ValueError:
             file_label = file_path.name
+        if self._label_strip_prefix:
+            prefix_slash = self._label_strip_prefix + "/"
+            if file_label.startswith(prefix_slash):
+                file_label = file_label[len(prefix_slash) :]
         file_label = normalize_path(file_label)
 
         lang = detect_language(str(file_path))
@@ -222,7 +253,7 @@ class Parser:
 
         used_lsp = False
 
-        if self.use_lsp and has_lsp_support(lang):
+        if self.use_lsp and has_lsp_support(lang) and self._allow_lsp_for(lang):
             from .lsp import LSPError
 
             try:

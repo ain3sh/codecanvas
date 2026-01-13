@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from .paths import get_canvas_dir
+
 STATE_VERSION = 1
 
 
@@ -25,7 +27,7 @@ _STATE_LOCK = threading.RLock()
 def _get_state_path() -> Path:
     """Get path to state file (in .codecanvas with PNG outputs)."""
     project_dir = os.environ.get("CANVAS_PROJECT_DIR", os.getcwd())
-    return Path(project_dir) / ".codecanvas" / "state.json"
+    return get_canvas_dir(Path(project_dir)) / "state.json"
 
 
 @dataclass
