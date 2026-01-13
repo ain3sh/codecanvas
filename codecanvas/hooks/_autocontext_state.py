@@ -87,3 +87,16 @@ class AutoContextState:
             d = {}
         d[key] = ImpactThrottle(last_at=time.time(), symbol=symbol).to_dict()
         _write_json_atomic(self._cache_path, d)
+
+    def is_init_announced(self, *, root: str) -> bool:
+        key = f"init_announced::{root}"
+        d = _read_json(self._cache_path)
+        return bool(isinstance(d, dict) and d.get(key) is True)
+
+    def set_init_announced(self, *, root: str) -> None:
+        key = f"init_announced::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            d = {}
+        d[key] = True
+        _write_json_atomic(self._cache_path, d)

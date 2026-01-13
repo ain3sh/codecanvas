@@ -673,28 +673,44 @@ Hint: Run canvas(action="init", repo_path=".") first, or this may auto-trigger v
 
 ## Hooks
 
-CodeCanvas uses hooks to **automatically run** init and impact analysis. The agent doesn't need to manually invoke these actions.
+CodeCanvas uses Claude Code hooks to automatically provide “always-on” context at key lifecycle points.
 
-### Hook 1: SessionStart - Auto Init
+Design intent:
+- **AUTO-INIT** provides architecture context once the real workspace is detected (clone-first workflows).
+- **Post-edit impact summaries** help the agent understand side-effects of changes it already made.
+- If the agent wants to **preview** blast radius before editing, it should explicitly call `canvas(action="impact", ...)`.
+
+### Hook 1: SessionStart - Arm AutoContext (Deferred Init)
 
 **Trigger**: Session starts (matcher: `startup`)
 
-**Action**: Runs `canvas_action(action="init", repo_path=cwd)` unconditionally. The parser gracefully handles empty or non-code directories.
+**Action**: Records an “active root” hint but does **not** run init.
+
+Rationale: in TerminalBench/Harbor, sessions often start in a generic working directory (e.g. `/app`) before the task repo is cloned. An unconditional init at SessionStart can produce an empty graph (`parsed_files=0`) that then “sticks”.
+
+**Output**: A short “armed” message in `additionalContext`.
+
+### Hook 2: PreToolUse - Auto Init (Architecture) Once Workspace Is Clear
+
+**Trigger**: Before any tool (matcher: `*`)
+
+**Action**: Attempts `canvas(action="init")` once the workspace root is confidently detected (marker-backed root or a real file path).
+
+**Output**: `additionalContext` injected into Claude's context (once per workspace root):
+```
+[CodeCanvas AUTO-INIT] root=/path/to/repo parse: parsed=... lsp=... tree_sitter=... call_graph: phase=... edges=...
+```
+
+### Hook 3: PostToolUse - Impact Summary After Mutations
+
+**Trigger**: After `Edit` or `Write` completes successfully (matcher: `Edit|Write`)
+
+**Action**: Selects a “best” symbol from the edited file, runs `canvas(action="impact")`, and injects a short summary of callers/callees.
 
 **Output**: `additionalContext` injected into Claude's context:
 ```
-[CodeCanvas AUTO-INIT] Parsed X files, Y functions, Z classes. Call graph: N edges.
-```
-
-### Hook 2: PostToolUse - Auto Impact on Read
-
-**Trigger**: After Claude uses the Read tool (matcher: `Read`)
-
-**Action**: Extracts symbols defined in the read file and runs impact analysis.
-
-**Output**: `additionalContext` injected into Claude's context:
-```
-[CodeCanvas IMPACT] function_name: 3 callers, 2 callees. Blast radius: 5 symbols.
+[CodeCanvas IMPACT] root=/path/to/repo
+symbol=... callers=... callees=...
 ```
 
 ### Hook Configuration
@@ -709,17 +725,27 @@ CodeCanvas uses hooks to **automatically run** init and impact analysis. The age
         "hooks": [{
           "type": "command",
           "command": "uv run python -c \"from codecanvas.hooks.session_init import main; main()\"",
+          "timeout": 60
+        }]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
           "timeout": 30
         }]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Read",
+        "matcher": "Edit|Write",
         "hooks": [{
           "type": "command",
           "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-          "timeout": 10
+          "timeout": 30
         }]
       }
     ]
@@ -791,11 +817,11 @@ This:
 
 ### State Persistence
 
-All state is saved to `.codecanvas/` in the task repository:
-- `state.json` - Evidence, claims, decisions, focus, plus durable call graph diagnostics (`call_graph_summary`)
-- `architecture.png` - Init visualization
-- `impact_*.png` - Impact visualizations
-- `task.png` - Evidence Board
+CodeCanvas writes state and images to `.codecanvas/` under `CANVAS_PROJECT_DIR`.
+
+In TerminalBench/Harbor runs, the task workspace is not persisted, so hooks also mirror artifacts into the session directory (`$CLAUDE_CONFIG_DIR/codecanvas/`, i.e. `agent/sessions/codecanvas/`). This includes:
+- `state.json`, `architecture.png`, `impact_*.png`, `task.png`
+- `hook_debug.jsonl` (hook instrumentation)
 
 ---
 

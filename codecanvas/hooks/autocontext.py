@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import time
+import traceback
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Optional
@@ -47,6 +48,26 @@ def _limit(s: str, n: int) -> str:
     if len(s) <= n:
         return s
     return (s[: max(0, n - 1)] + "…").strip()
+
+
+def _debug_log(payload: dict[str, Any]) -> None:
+    """Best-effort, append-only debug log persisted under CLAUDE_CONFIG_DIR."""
+
+    try:
+        session_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+        if not session_dir:
+            return
+        d = Path(session_dir) / "codecanvas"
+        d.mkdir(parents=True, exist_ok=True)
+        p = d / "hook_debug.jsonl"
+
+        payload = dict(payload)
+        payload.setdefault("ts", time.time())
+        line = json.dumps(payload, ensure_ascii=False)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        return
 
 
 @contextmanager
@@ -263,7 +284,154 @@ def handle_session_start(input_data: dict[str, Any]) -> str | None:
     cwd = get_str(input_data, "cwd", default=os.getcwd())
     st = AutoContextState()
     st.write_active_root(cwd, reason="session_start")
+    _debug_log({"event": "SessionStart", "cwd": cwd})
     return "[CodeCanvas] AutoContext armed. Init deferred until workspace is detected."
+
+
+def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
+    """PreToolUse: auto-init (architecture) when workspace becomes clear.
+
+    This is intentionally limited to init/architecture. Blast-radius messaging runs
+    on PostToolUse(Edit|Write) so it reflects the side-effects of actual changes.
+    """
+
+    started = time.time()
+    st = AutoContextState()
+    sticky_root = st.read_active_root()
+
+    cwd = get_str(input_data, "cwd", default=os.getcwd())
+    tool_name = get_tool_name(input_data)
+    tool_input = get_mapping(input_data, "tool_input", "toolInput")
+
+    file_path_str = extract_file_path(input_data)
+    file_path = Path(file_path_str) if file_path_str else None
+
+    root = resolve_workspace_root(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_response={},
+        cwd=cwd,
+        sticky_root=sticky_root,
+    )
+
+    if root is None:
+        _debug_log(
+            {
+                "event": "PreToolUse",
+                "tool_name": tool_name,
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": "",
+                "sticky_root": sticky_root,
+                "allow_init": False,
+                "needs_lock": False,
+                "attempted_init": False,
+                "attempted_impact": False,
+                "skipped": "no_root",
+            }
+        )
+        return None
+
+    st.write_active_root(str(root), reason=f"pre_tool_use:{tool_name}")
+
+    allow_init = bool(
+        _has_project_markers(root)
+        or (file_path is not None and file_path.exists() and file_path.is_file())
+    )
+    needs_lock = allow_init
+
+    announced = st.is_init_announced(root=str(root))
+
+    _debug_log(
+        {
+            "event": "PreToolUse",
+            "tool_name": tool_name,
+            "cwd": cwd,
+            "file_path": file_path_str,
+            "resolved_root": str(root),
+            "sticky_root": sticky_root,
+            "allow_init": allow_init,
+            "needs_lock": needs_lock,
+            "attempted_init": False,
+            "attempted_impact": False,
+            "announced": announced,
+        }
+    )
+
+    if not needs_lock:
+        return None
+
+    with _workspace_lock(root):
+        did_init = False
+        init_reason = ""
+        state = None
+        parsed_files = 0
+        try:
+            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init)
+            _sync_canvas_artifacts_to_session(root=root)
+            state = load_state()
+            parsed_files = int(state.parse_summary.get("parsed_files", 0) or 0)
+        except Exception as e:
+            _debug_log(
+                {
+                    "event": "PreToolUse",
+                    "tool_name": tool_name,
+                    "phase": "init",
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "allow_init": allow_init,
+                    "needs_lock": needs_lock,
+                    "attempted_init": True,
+                    "error": repr(e),
+                    "traceback": traceback.format_exc(limit=8),
+                }
+            )
+            return None
+
+        _debug_log(
+            {
+                "event": "PreToolUse",
+                "tool_name": tool_name,
+                "phase": "init",
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": str(root),
+                "allow_init": allow_init,
+                "needs_lock": needs_lock,
+                "attempted_init": True,
+                "did_init": did_init,
+                "init_reason": init_reason,
+                "initialized": bool(state.initialized) if state is not None else False,
+                "parsed_files": parsed_files,
+                "elapsed_s": time.time() - started,
+            }
+        )
+
+        # Only inject architecture context once per root per session.
+        if announced:
+            return None
+
+        if state is None or not state.initialized or parsed_files <= 0:
+            return None
+
+        st.set_init_announced(root=str(root))
+
+        ps = state.parse_summary or {}
+        cs = state.call_graph_summary or {}
+        parsed = ps.get("parsed_files", 0)
+        lsp_files = ps.get("lsp_files", 0)
+        ts_files = ps.get("tree_sitter_files", 0)
+        cg_phase = cs.get("phase", "")
+        cg_edges = cs.get("call_edges_total", 0)
+        root_str = state.project_path or str(root)
+
+        return (
+            "[CodeCanvas AUTO-INIT] "
+            f"root={root_str} "
+            f"parse: parsed={parsed} lsp={lsp_files} tree_sitter={ts_files} "
+            f"call_graph: phase={cg_phase} edges={cg_edges}"
+        )
 
 
 def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
@@ -283,6 +451,17 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
         sticky_root=sticky_root,
     )
     if root is None:
+        _debug_log(
+            {
+                "event": "PostToolUse",
+                "tool_name": tool_name,
+                "cwd": cwd,
+                "file_path": extract_file_path(input_data),
+                "resolved_root": "",
+                "sticky_root": sticky_root,
+                "skipped": "no_root",
+            }
+        )
         return None
 
     st.write_active_root(str(root), reason=f"post_tool_use:{tool_name}")
@@ -291,50 +470,168 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
     file_path = Path(file_path_str) if file_path_str else None
 
     allow_init = bool(
-        (file_path is not None and file_path.exists() and file_path.is_file()) or _has_project_markers(root)
+        (file_path is not None and file_path.exists() and file_path.is_file())
+        or _has_project_markers(root)
     )
 
-    # Avoid creating .codecanvas/ or doing any work until we have strong evidence.
-    if tool_name == "Read" and file_path is not None and file_path.exists() and file_path.is_dir():
-        return (
-            "[CodeCanvas] Read target is a directory; use LS/Glob to discover files. "
-            "Auto-init runs on first file read."
-        )
-
-    needs_lock = allow_init or (
-        tool_name == "Read" and file_path is not None and file_path.suffix.lower() in _CODE_EXTS
+    want_impact = bool(
+        tool_name in {"Edit", "Write"}
+        and file_path is not None
+        and file_path.exists()
+        and file_path.is_file()
+        and file_path.suffix.lower() in _CODE_EXTS
     )
+
+    needs_lock = allow_init or want_impact
     if not needs_lock:
+        _debug_log(
+            {
+                "event": "PostToolUse",
+                "tool_name": tool_name,
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": str(root),
+                "allow_init": allow_init,
+                "want_impact": want_impact,
+                "needs_lock": False,
+                "skipped": "no_lock",
+            }
+        )
         return None
 
     with _workspace_lock(root):
-        _maybe_init(root=root, allow_init=allow_init)
-        _sync_canvas_artifacts_to_session(root=root)
-        # Only auto-impact on Read, and only for code files.
-        if tool_name != "Read" or file_path is None:
+        did_init = False
+        init_reason = ""
+        try:
+            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init)
+            _sync_canvas_artifacts_to_session(root=root)
+        except Exception as e:
+            _debug_log(
+                {
+                    "event": "PostToolUse",
+                    "tool_name": tool_name,
+                    "phase": "init",
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "error": repr(e),
+                    "traceback": traceback.format_exc(limit=8),
+                }
+            )
             return None
 
-        if file_path.suffix.lower() not in _CODE_EXTS:
+        if not want_impact:
+            _debug_log(
+                {
+                    "event": "PostToolUse",
+                    "tool_name": tool_name,
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "allow_init": allow_init,
+                    "want_impact": want_impact,
+                    "needs_lock": True,
+                    "did_init": did_init,
+                    "init_reason": init_reason,
+                    "skipped": "no_impact",
+                }
+            )
             return None
 
-        # If we couldn't init and we have no state, there's nothing to do.
         state = load_state()
         if not state.initialized:
+            _debug_log(
+                {
+                    "event": "PostToolUse",
+                    "tool_name": tool_name,
+                    "phase": "impact",
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "skipped": "not_initialized",
+                    "did_init": did_init,
+                    "init_reason": init_reason,
+                }
+            )
             return None
 
-        best = _select_best_symbol_in_file(file_path=file_path)
+        best = _select_best_symbol_in_file(file_path=file_path) if file_path is not None else None
         if best is None:
+            _debug_log(
+                {
+                    "event": "PostToolUse",
+                    "tool_name": tool_name,
+                    "phase": "impact",
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "skipped": "no_symbol",
+                }
+            )
             return None
 
         throttle = st.get_impact_throttle(root=str(root), file_path=str(file_path))
         if throttle is not None and (time.time() - throttle.last_at) < 60.0 and throttle.symbol == best.id:
+            _debug_log(
+                {
+                    "event": "PostToolUse",
+                    "tool_name": tool_name,
+                    "phase": "impact",
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "symbol": best.id,
+                    "skipped": "throttled",
+                }
+            )
             return None
 
-        res = canvas_action(action="impact", symbol=best.id, depth=2, max_nodes=20, wait_for_call_graph_s=1.0)
-        if not any(img.name == "impact" for img in res.images):
+        started = time.time()
+        try:
+            res = canvas_action(
+                action="impact",
+                symbol=best.id,
+                depth=2,
+                max_nodes=20,
+                wait_for_call_graph_s=0.5,
+            )
+        except Exception as e:
+            _debug_log(
+                {
+                    "event": "PostToolUse",
+                    "tool_name": tool_name,
+                    "phase": "impact",
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": str(root),
+                    "symbol": best.id,
+                    "error": repr(e),
+                    "traceback": traceback.format_exc(limit=8),
+                }
+            )
             return None
 
         _sync_canvas_artifacts_to_session(root=root)
+
+        ok = any(img.name == "impact" for img in res.images)
+        _debug_log(
+            {
+                "event": "PostToolUse",
+                "tool_name": tool_name,
+                "phase": "impact",
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": str(root),
+                "symbol": best.id,
+                "impact_ok": ok,
+                "did_init": did_init,
+                "init_reason": init_reason,
+                "elapsed_s": time.time() - started,
+            }
+        )
+
+        if not ok:
+            return None
 
         card = _format_impact_card(root=root, node=best)
         if not card:
@@ -352,6 +649,10 @@ def main() -> None:
         if event == "SessionStart":
             ctx = handle_session_start(input_data)
             _emit(hook_event_name="SessionStart", additional_context=ctx)
+            return
+        if event == "PreToolUse":
+            ctx = handle_pre_tool_use(input_data)
+            _emit(hook_event_name="PreToolUse", additional_context=ctx)
             return
         if event == "PostToolUse":
             ctx = handle_post_tool_use(input_data)

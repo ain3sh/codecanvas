@@ -12,69 +12,21 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
-        "matcher": "Read",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Edit",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Grep",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Glob",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "LS",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-            "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "Bash",
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
