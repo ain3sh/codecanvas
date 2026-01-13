@@ -100,3 +100,75 @@ class AutoContextState:
             d = {}
         d[key] = True
         _write_json_atomic(self._cache_path, d)
+
+    def get_init_inflight_at(self, *, root: str) -> Optional[float]:
+        key = f"init_inflight::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            return None
+        v = d.get(key)
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    def set_init_inflight_at(self, *, root: str, at: float) -> None:
+        key = f"init_inflight::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            d = {}
+        d[key] = float(at)
+        _write_json_atomic(self._cache_path, d)
+
+    def clear_init_inflight(self, *, root: str) -> None:
+        key = f"init_inflight::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict) or key not in d:
+            return
+        d.pop(key, None)
+        _write_json_atomic(self._cache_path, d)
+
+    def get_init_next_allowed_at(self, *, root: str) -> Optional[float]:
+        key = f"init_next_allowed_at::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            return None
+        v = d.get(key)
+        try:
+            return float(v)
+        except Exception:
+            return None
+
+    def set_init_next_allowed_at(self, *, root: str, at: float) -> None:
+        key = f"init_next_allowed_at::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            d = {}
+        d[key] = float(at)
+        _write_json_atomic(self._cache_path, d)
+
+    def get_lsp_init_attempts(self, *, root: str) -> int:
+        key = f"lsp_init_attempts::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            return 0
+        v = d.get(key)
+        try:
+            return int(v)
+        except Exception:
+            return 0
+
+    def inc_lsp_init_attempts(self, *, root: str) -> int:
+        key = f"lsp_init_attempts::{root}"
+        d = _read_json(self._cache_path)
+        if not isinstance(d, dict):
+            d = {}
+        cur = 0
+        try:
+            cur = int(d.get(key) or 0)
+        except Exception:
+            cur = 0
+        cur += 1
+        d[key] = cur
+        _write_json_atomic(self._cache_path, d)
+        return cur

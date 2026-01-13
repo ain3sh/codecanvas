@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from codecanvas.core.models import EdgeType, GraphEdge
-from codecanvas.hooks.autocontext import handle_post_tool_use
+from codecanvas.hooks.autocontext import handle_post_tool_use, handle_pre_tool_use
 from codecanvas.parser.utils import find_workspace_root
 from codecanvas.server import canvas_action
 
@@ -24,23 +24,40 @@ def test_find_workspace_root_prefer_env_false_ignores_env(tmp_path: Path, monkey
     assert find_workspace_root(f, prefer_env=False) == repo
 
 
-def test_autocontext_post_tool_use_inits_marker_backed_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_autocontext_pre_tool_use_inits_marker_backed_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
     (repo / "a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
 
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("CODECANVAS_DISABLE_LSP_WARMUP", "1")
 
-    ctx = handle_post_tool_use(
+    warmup_dir = tmp_path / "sessions" / "codecanvas"
+    warmup_dir.mkdir(parents=True, exist_ok=True)
+    (warmup_dir / "lsp_warmup.json").write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "root": str(repo),
+                "attempt": 5,
+                "updated_at": 0.0,
+                "ready_langs": [],
+                "last_error": "forced_by_test",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ctx = handle_pre_tool_use(
         {
-            "hook_event_name": "PostToolUse",
+            "hook_event_name": "PreToolUse",
             "tool_name": "Grep",
             "cwd": str(repo),
             "tool_input": {"path": str(repo)},
         }
     )
-    assert ctx is None
+    assert ctx is None or "[CodeCanvas AUTO-INIT]" in ctx
 
     state_path = repo / ".codecanvas" / "state.json"
     assert state_path.exists()

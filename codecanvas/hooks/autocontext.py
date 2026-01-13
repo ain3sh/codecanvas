@@ -165,7 +165,7 @@ def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
         return
 
 
-def _maybe_init(*, root: Path, allow_init: bool) -> tuple[bool, str]:
+def _maybe_init(*, root: Path, allow_init: bool, use_lsp: bool) -> tuple[bool, str]:
     """Ensure the CodeCanvas state in `root` is initialized.
 
     Returns (did_init, reason).
@@ -191,7 +191,7 @@ def _maybe_init(*, root: Path, allow_init: bool) -> tuple[bool, str]:
         # If the root isn't marker-backed, avoid repeatedly re-initializing empties.
         return False, "deferred_empty"
 
-    canvas_action(action="init", repo_path=str(root))
+    canvas_action(action="init", repo_path=str(root), use_lsp=bool(use_lsp))
     return True, "initialized"
 
 
@@ -334,13 +334,130 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
 
     st.write_active_root(str(root), reason=f"pre_tool_use:{tool_name}")
 
+    try:
+        from .lsp_warmup import ensure_worker_running
+
+        ensure_worker_running(root=root)
+    except Exception:
+        pass
+
+    root_str = str(root)
     allow_init = bool(
         _has_project_markers(root)
         or (file_path is not None and file_path.exists() and file_path.is_file())
     )
-    needs_lock = allow_init
 
-    announced = st.is_init_announced(root=str(root))
+    if st.is_init_announced(root=root_str):
+        return None
+
+    now = time.time()
+    cooldown_s = 120.0
+
+    inflight_at = st.get_init_inflight_at(root=root_str)
+    if inflight_at is not None:
+        age_s = now - float(inflight_at)
+        if age_s < cooldown_s:
+            _debug_log(
+                {
+                    "event": "PreToolUse",
+                    "tool_name": tool_name,
+                    "cwd": cwd,
+                    "file_path": file_path_str,
+                    "resolved_root": root_str,
+                    "allow_init": allow_init,
+                    "skipped": "init_inflight",
+                    "inflight_age_s": age_s,
+                }
+            )
+            return None
+        st.clear_init_inflight(root=root_str)
+
+    next_allowed_at = st.get_init_next_allowed_at(root=root_str)
+    if next_allowed_at is not None and now < float(next_allowed_at):
+        _debug_log(
+            {
+                "event": "PreToolUse",
+                "tool_name": tool_name,
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": root_str,
+                "allow_init": allow_init,
+                "skipped": "cooldown",
+                "next_allowed_in_s": float(next_allowed_at) - now,
+            }
+        )
+        return None
+
+    if not allow_init:
+        _debug_log(
+            {
+                "event": "PreToolUse",
+                "tool_name": tool_name,
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": root_str,
+                "sticky_root": sticky_root,
+                "allow_init": allow_init,
+                "attempted_init": False,
+                "skipped": "deferred",
+            }
+        )
+        return None
+
+    warmup_status = "missing"
+    warmup_ready = False
+    warmup_failed = False
+    warmup_updated_at: float | None = None
+    try:
+        from .lsp_warmup import read_warmup_state
+
+        warm = read_warmup_state()
+        if isinstance(warm, dict) and warm.get("root") == root_str:
+            v = warm.get("status")
+            if isinstance(v, str):
+                warmup_status = v
+            ua = warm.get("updated_at")
+            if ua is not None:
+                try:
+                    warmup_updated_at = float(ua)
+                except Exception:
+                    warmup_updated_at = None
+    except Exception:
+        pass
+
+    if warmup_status == "ready":
+        warmup_ready = True
+    if warmup_status == "failed":
+        warmup_failed = True
+    if warmup_status == "running" and warmup_updated_at is not None and (now - warmup_updated_at) > 900.0:
+        warmup_failed = True
+        warmup_status = "failed_stale"
+
+    max_lsp_attempts = 5
+    lsp_attempts = st.get_lsp_init_attempts(root=root_str)
+
+    if warmup_failed or lsp_attempts >= max_lsp_attempts:
+        use_lsp = False
+    elif lsp_attempts == 0:
+        use_lsp = True
+    elif warmup_ready:
+        use_lsp = True
+    else:
+        st.set_init_next_allowed_at(root=root_str, at=now + cooldown_s)
+        _debug_log(
+            {
+                "event": "PreToolUse",
+                "tool_name": tool_name,
+                "cwd": cwd,
+                "file_path": file_path_str,
+                "resolved_root": root_str,
+                "allow_init": allow_init,
+                "lsp_attempts": lsp_attempts,
+                "warmup_status": warmup_status,
+                "skipped": "warmup_not_ready",
+            }
+        )
+        return None
 
     _debug_log(
         {
@@ -348,30 +465,32 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
             "tool_name": tool_name,
             "cwd": cwd,
             "file_path": file_path_str,
-            "resolved_root": str(root),
+            "resolved_root": root_str,
             "sticky_root": sticky_root,
             "allow_init": allow_init,
-            "needs_lock": needs_lock,
-            "attempted_init": False,
-            "attempted_impact": False,
-            "announced": announced,
+            "lsp_attempts": lsp_attempts,
+            "warmup_status": warmup_status,
+            "use_lsp": use_lsp,
+            "attempted_init": True,
         }
     )
-
-    if not needs_lock:
-        return None
 
     with _workspace_lock(root):
         did_init = False
         init_reason = ""
         state = None
         parsed_files = 0
+        attempt_no: int | None = None
         try:
-            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init)
+            st.set_init_inflight_at(root=root_str, at=now)
+            if use_lsp:
+                attempt_no = st.inc_lsp_init_attempts(root=root_str)
+            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init, use_lsp=use_lsp)
             _sync_canvas_artifacts_to_session(root=root)
             state = load_state()
             parsed_files = int(state.parse_summary.get("parsed_files", 0) or 0)
         except Exception as e:
+            st.set_init_next_allowed_at(root=root_str, at=time.time() + cooldown_s)
             _debug_log(
                 {
                     "event": "PreToolUse",
@@ -379,15 +498,18 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
                     "phase": "init",
                     "cwd": cwd,
                     "file_path": file_path_str,
-                    "resolved_root": str(root),
+                    "resolved_root": root_str,
                     "allow_init": allow_init,
-                    "needs_lock": needs_lock,
+                    "use_lsp": use_lsp,
+                    "attempt_no": attempt_no,
                     "attempted_init": True,
                     "error": repr(e),
                     "traceback": traceback.format_exc(limit=8),
                 }
             )
             return None
+        finally:
+            st.clear_init_inflight(root=root_str)
 
         _debug_log(
             {
@@ -396,9 +518,10 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
                 "phase": "init",
                 "cwd": cwd,
                 "file_path": file_path_str,
-                "resolved_root": str(root),
+                "resolved_root": root_str,
                 "allow_init": allow_init,
-                "needs_lock": needs_lock,
+                "use_lsp": use_lsp,
+                "attempt_no": attempt_no,
                 "attempted_init": True,
                 "did_init": did_init,
                 "init_reason": init_reason,
@@ -408,14 +531,11 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
             }
         )
 
-        # Only inject architecture context once per root per session.
-        if announced:
-            return None
-
         if state is None or not state.initialized or parsed_files <= 0:
+            st.set_init_next_allowed_at(root=root_str, at=time.time() + cooldown_s)
             return None
 
-        st.set_init_announced(root=str(root))
+        st.set_init_announced(root=root_str)
 
         ps = state.parse_summary or {}
         cs = state.call_graph_summary or {}
@@ -469,11 +589,6 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
     file_path_str = extract_file_path(input_data)
     file_path = Path(file_path_str) if file_path_str else None
 
-    allow_init = bool(
-        (file_path is not None and file_path.exists() and file_path.is_file())
-        or _has_project_markers(root)
-    )
-
     want_impact = bool(
         tool_name in {"Edit", "Write"}
         and file_path is not None
@@ -482,8 +597,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
         and file_path.suffix.lower() in _CODE_EXTS
     )
 
-    needs_lock = allow_init or want_impact
-    if not needs_lock:
+    if not want_impact:
         _debug_log(
             {
                 "event": "PostToolUse",
@@ -491,53 +605,15 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                 "cwd": cwd,
                 "file_path": file_path_str,
                 "resolved_root": str(root),
-                "allow_init": allow_init,
                 "want_impact": want_impact,
-                "needs_lock": False,
-                "skipped": "no_lock",
+                "skipped": "no_impact",
             }
         )
         return None
 
+    os.environ["CANVAS_PROJECT_DIR"] = str(root)
+
     with _workspace_lock(root):
-        did_init = False
-        init_reason = ""
-        try:
-            did_init, init_reason = _maybe_init(root=root, allow_init=allow_init)
-            _sync_canvas_artifacts_to_session(root=root)
-        except Exception as e:
-            _debug_log(
-                {
-                    "event": "PostToolUse",
-                    "tool_name": tool_name,
-                    "phase": "init",
-                    "cwd": cwd,
-                    "file_path": file_path_str,
-                    "resolved_root": str(root),
-                    "error": repr(e),
-                    "traceback": traceback.format_exc(limit=8),
-                }
-            )
-            return None
-
-        if not want_impact:
-            _debug_log(
-                {
-                    "event": "PostToolUse",
-                    "tool_name": tool_name,
-                    "cwd": cwd,
-                    "file_path": file_path_str,
-                    "resolved_root": str(root),
-                    "allow_init": allow_init,
-                    "want_impact": want_impact,
-                    "needs_lock": True,
-                    "did_init": did_init,
-                    "init_reason": init_reason,
-                    "skipped": "no_impact",
-                }
-            )
-            return None
-
         state = load_state()
         if not state.initialized:
             _debug_log(
@@ -549,8 +625,6 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                     "file_path": file_path_str,
                     "resolved_root": str(root),
                     "skipped": "not_initialized",
-                    "did_init": did_init,
-                    "init_reason": init_reason,
                 }
             )
             return None
@@ -624,8 +698,6 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                 "resolved_root": str(root),
                 "symbol": best.id,
                 "impact_ok": ok,
-                "did_init": did_init,
-                "init_reason": init_reason,
                 "elapsed_s": time.time() - started,
             }
         )
