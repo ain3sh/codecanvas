@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 import time
 import traceback
 from pathlib import Path
@@ -54,6 +52,18 @@ def _log(msg: str) -> None:
         return
 
 
+def _log_file(path: Path, msg: str) -> None:
+    try:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        line = f"[codecanvas:lsp-warmup] {ts} {msg}\n"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
+    except Exception:
+        return
+
+
 def _state_dir() -> Path | None:
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
     if not config_dir:
@@ -78,14 +88,6 @@ def _write_json_atomic(path: Path, data: dict[str, Any]) -> None:
         tmp.replace(path)
     except Exception:
         return
-
-
-def _pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except Exception:
-        return False
 
 
 def _is_marker_root(path: Path) -> bool:
@@ -114,8 +116,35 @@ def ensure_worker_running(*, root: Path) -> None:
     root = root.absolute()
     state_path = d / "lsp_warmup.json"
 
-    # Spawn guard: hooks may call ensure_worker_running concurrently.
-    # Use a best-effort flock so we don't spawn duplicate workers.
+    def _should_skip(state: dict[str, Any]) -> bool:
+        status = state.get("overall") if isinstance(state, dict) else None
+        if not isinstance(status, str):
+            status = state.get("status") if isinstance(state, dict) else None
+        existing_root = state.get("root") if isinstance(state, dict) else None
+
+        updated_at = state.get("updated_at") if isinstance(state, dict) else None
+        try:
+            updated_at_f = float(updated_at) if updated_at is not None else None
+        except Exception:
+            updated_at_f = None
+
+        if isinstance(status, str) and status in {"ready", "partial"} and existing_root == str(root):
+            return True
+
+        # Avoid rerunning repeatedly if we just failed for this root.
+        if (
+            isinstance(status, str)
+            and status in {"failed", "failed_stale", "skipped"}
+            and existing_root == str(root)
+            and updated_at_f is not None
+            and (time.time() - updated_at_f) < 300.0
+        ):
+            return True
+
+        return False
+
+    # Guard: hooks may call ensure_worker_running concurrently.
+    # Use a best-effort flock so only one warmup runs at a time.
     try:
         import fcntl
 
@@ -128,91 +157,20 @@ def ensure_worker_running(*, root: Path) -> None:
                 pass
 
             state = _read_json(state_path)
-            status = state.get("overall") if isinstance(state, dict) else None
-            if not isinstance(status, str):
-                status = state.get("status") if isinstance(state, dict) else None
-            pid = state.get("pid") if isinstance(state, dict) else None
-            existing_root = state.get("root") if isinstance(state, dict) else None
-
-            updated_at = state.get("updated_at") if isinstance(state, dict) else None
-            try:
-                updated_at_f = float(updated_at) if updated_at is not None else None
-            except Exception:
-                updated_at_f = None
-
-            if (
-                isinstance(status, str)
-                and status == "running"
-                and isinstance(pid, int)
-                and _pid_alive(pid)
-                and existing_root == str(root)
-            ):
+            if _should_skip(state):
                 return
 
-            if isinstance(status, str) and status in {"ready", "partial"} and existing_root == str(root):
-                return
-
-            # Avoid respawning repeatedly if we just failed for this root.
-            if (
-                isinstance(status, str)
-                and status in {"failed", "failed_stale", "skipped"}
-                and existing_root == str(root)
-                and updated_at_f is not None
-                and (time.time() - updated_at_f) < 300.0
-            ):
-                return
+            attempt = int(state.get("attempt") or 0) + 1 if isinstance(state, dict) else 1
+            _run_warmup(root=root, state_path=state_path, attempt=attempt)
+            return
     except Exception:
-        # If flock isn't available, fall back to best-effort spawning.
+        # If flock isn't available, fall back to best-effort execution.
         state = _read_json(state_path)
+        if _should_skip(state):
+            return
 
-    d.mkdir(parents=True, exist_ok=True)
-    log_path = d / "lsp_warmup.log"
-
-    env = dict(os.environ)
-    env["CODECANVAS_LSP_WARMUP_ROOT"] = str(root)
-
-    cmd = [
-        sys.executable,
-        "-c",
-        "from codecanvas.hooks.lsp_warmup import worker_main; worker_main()",
-    ]
-
-    try:
-        with open(log_path, "a", encoding="utf-8") as log:
-            proc = subprocess.Popen(
-                cmd,
-                env=env,
-                stdout=log,
-                stderr=log,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-    except Exception:
-        _write_json_atomic(
-            state_path,
-            {
-                "overall": "failed",
-                "root": str(root),
-                "attempt": int(state.get("attempt") or 0) + 1 if isinstance(state, dict) else 1,
-                "started_at": time.time(),
-                "updated_at": time.time(),
-                "ready_langs": [],
-                "last_error": "spawn_failed",
-            },
-        )
-        return
-
-    _write_json_atomic(
-        state_path,
-        {
-            "overall": "running",
-            "root": str(root),
-            "pid": int(proc.pid),
-            "attempt": int(state.get("attempt") or 0) if isinstance(state, dict) else 0,
-            "started_at": time.time(),
-            "updated_at": time.time(),
-        },
-    )
+        attempt = int(state.get("attempt") or 0) + 1 if isinstance(state, dict) else 1
+        _run_warmup(root=root, state_path=state_path, attempt=attempt)
 
 
 def _scan_present_langs(*, root: Path) -> tuple[list[str], list[str], dict[str, str]]:
@@ -250,33 +208,19 @@ def _scan_present_langs(*, root: Path) -> tuple[list[str], list[str], dict[str, 
     return [str(p) for p in content_roots], sorted(present), sample_by_lang
 
 
-def worker_main() -> None:
+def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
     d = _state_dir()
     if d is None:
         return
 
-    state_path = d / "lsp_warmup.json"
-    root_str = os.environ.get("CODECANVAS_LSP_WARMUP_ROOT", "").strip()
-    if not root_str:
-        _write_json_atomic(
-            state_path,
-            {
-                "overall": "failed",
-                "root": "",
-                "pid": os.getpid(),
-                "attempt": 1,
-                "started_at": time.time(),
-                "updated_at": time.time(),
-                "ready_langs": [],
-                "last_error": "missing_root",
-            },
-        )
-        return
+    log_path = d / "lsp_warmup.log"
+    started_at = time.time()
+    total_timeout_s = float(os.environ.get("CODECANVAS_LSP_WARMUP_TOTAL_TIMEOUT_S", "300"))
+    cushion_s = 2.0
+    deadline = started_at + total_timeout_s
 
-    root = Path(root_str)
-    attempt = 1
     try:
-        _log(f"worker_start root={root} pid={os.getpid()}")
+        _log_file(log_path, f"warmup_start root={root} pid={os.getpid()} total_timeout_s={total_timeout_s}")
         _write_json_atomic(
             state_path,
             {
@@ -284,8 +228,8 @@ def worker_main() -> None:
                 "root": str(root),
                 "pid": os.getpid(),
                 "attempt": attempt,
-                "started_at": time.time(),
-                "updated_at": time.time(),
+                "started_at": started_at,
+                "updated_at": started_at,
                 "langs": {},
             },
         )
@@ -295,7 +239,7 @@ def worker_main() -> None:
 
         content_roots, present_langs, sample_by_lang = _scan_present_langs(root=root)
 
-        _log(f"scan_done content_roots={content_roots} present_langs={present_langs}")
+        _log_file(log_path, f"scan_done content_roots={content_roots} present_langs={present_langs}")
 
         from codecanvas.parser.config import LSP_SUPPORTED_LANGUAGES, has_lsp_support
 
@@ -305,7 +249,7 @@ def worker_main() -> None:
             if lang in LSP_SUPPORTED_LANGUAGES and has_lsp_support(lang)
         ]
 
-        _log(f"warm_langs={warm_langs}")
+        _log_file(log_path, f"warm_langs={warm_langs}")
 
         langs_state: dict[str, dict[str, Any]] = {}
         for lang in present_langs:
@@ -324,27 +268,36 @@ def worker_main() -> None:
                 langs_state[lang] = {"status": "skipped", "reason": "no_sample"}
                 continue
 
+            remaining_s = deadline - time.time() - cushion_s
+            if remaining_s <= 0:
+                langs_state[lang] = {"status": "failed", "error": "TimeoutError: warmup_budget_exhausted"}
+                failed.append(lang)
+                continue
+
             t0 = time.time()
 
-            _log(f"warm_start lang={lang} sample={sample}")
+            _log_file(log_path, f"warm_start lang={lang} sample={sample}")
 
             async def _warm_one() -> None:
                 from codecanvas.parser.lsp import get_lsp_session_manager
 
                 mgr = get_lsp_session_manager()
                 ws_root = find_workspace_root(Path(sample), prefer_env=False)
-                _log(f"warm_ws_root lang={lang} ws_root={ws_root}")
+                _log_file(log_path, f"warm_ws_root lang={lang} ws_root={ws_root}")
                 sess = await mgr.get(lang=lang, workspace_root=str(ws_root))
-                _log(f"warm_symbols_request lang={lang}")
+                _log_file(log_path, f"warm_symbols_request lang={lang}")
                 await sess.document_symbols(str(sample))
-                _log(f"warm_symbols_ok lang={lang}")
+                _log_file(log_path, f"warm_symbols_ok lang={lang}")
 
             try:
-                get_lsp_runtime().run(_warm_one(), timeout=300.0)
+                per_lang_max_s = float(os.environ.get("CODECANVAS_LSP_WARMUP_TIMEOUT_S", "300"))
+                timeout_s = max(1.0, min(per_lang_max_s, remaining_s))
+                _log_file(log_path, f"warm_timeout lang={lang} timeout_s={timeout_s:.3f} remaining_s={remaining_s:.3f}")
+                get_lsp_runtime().run(_warm_one(), timeout=timeout_s)
                 langs_state[lang] = {"status": "ready", "elapsed_s": time.time() - t0}
                 ready.append(lang)
             except Exception as e:
-                _log(f"warm_failed lang={lang} error={type(e).__name__}: {e}")
+                _log_file(log_path, f"warm_failed lang={lang} error={type(e).__name__}: {e}")
                 langs_state[lang] = {
                     "status": "failed",
                     "elapsed_s": time.time() - t0,
@@ -358,7 +311,7 @@ def worker_main() -> None:
         elif ready:
             overall = "ready"
 
-        _log(f"warm_done overall={overall} ready={ready} failed={failed}")
+        _log_file(log_path, f"warm_done overall={overall} ready={ready} failed={failed}")
 
         _write_json_atomic(
             state_path,
@@ -376,7 +329,7 @@ def worker_main() -> None:
             },
         )
     except Exception as e:
-        _log(f"worker_failed error={type(e).__name__}: {e}")
+        _log_file(log_path, f"warmup_failed error={type(e).__name__}: {e}")
         _write_json_atomic(
             state_path,
             {
@@ -384,7 +337,7 @@ def worker_main() -> None:
                 "root": str(root),
                 "pid": os.getpid(),
                 "attempt": attempt,
-                "started_at": time.time(),
+                "started_at": started_at,
                 "updated_at": time.time(),
                 "langs": {},
                 "last_error": f"{type(e).__name__}: {e}",
@@ -415,12 +368,9 @@ def main() -> None:
                     "updated_at": time.time(),
                 },
             )
-            # Start (or confirm) the warmup worker. Any actual warmup work is gated
-            # only by language extensions detected under `root`.
-            try:
-                ensure_worker_running(root=root)
-            except Exception:
-                pass
+            # Run warmup synchronously during SessionStart so the hook can spend its
+            # full timeout budget attempting to initialize LSP(s).
+            ensure_worker_running(root=root)
     except Exception:
         pass
 
