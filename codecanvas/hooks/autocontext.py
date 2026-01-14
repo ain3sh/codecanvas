@@ -353,7 +353,16 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
     if st.is_init_announced(root=root_str):
         return None
 
-    if has_markers or project_roots:
+    # LSP warmup spawn gating should be based only on detected language extensions
+    # under the `/app` root (TerminalBench protocol). Do not require markers.
+    if _is_under_app(cwd):
+        try:
+            from .lsp_warmup import ensure_worker_running
+
+            ensure_worker_running(root=root)
+        except Exception:
+            pass
+    elif has_markers or project_roots:
         try:
             from .lsp_warmup import ensure_worker_running
 

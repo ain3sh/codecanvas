@@ -216,7 +216,7 @@ def ensure_worker_running(*, root: Path) -> None:
 
 
 def _scan_present_langs(*, root: Path) -> tuple[list[str], list[str], dict[str, str]]:
-    from codecanvas.core.paths import content_roots_for_scan, iter_walk_files
+    from codecanvas.core.paths import iter_walk_files
     from codecanvas.parser.config import detect_language
 
     ignore = {
@@ -234,7 +234,9 @@ def _scan_present_langs(*, root: Path) -> tuple[list[str], list[str], dict[str, 
         "build",
     }
 
-    content_roots = list(content_roots_for_scan(root))
+    # Warmup gating is based only on file extensions under the provided root.
+    # For TerminalBench, this root is `/app`.
+    content_roots = [root]
     present: set[str] = set()
     sample_by_lang: dict[str, str] = {}
 
@@ -413,6 +415,12 @@ def main() -> None:
                     "updated_at": time.time(),
                 },
             )
+            # Start (or confirm) the warmup worker. Any actual warmup work is gated
+            # only by language extensions detected under `root`.
+            try:
+                ensure_worker_running(root=root)
+            except Exception:
+                pass
     except Exception:
         pass
 
