@@ -340,7 +340,7 @@ def worker_main() -> None:
                 _log(f"warm_symbols_ok lang={lang}")
 
             try:
-                get_lsp_runtime().run(_warm_one(), timeout=120.0)
+                get_lsp_runtime().run(_warm_one(), timeout=300.0)
                 langs_state[lang] = {"status": "ready", "elapsed_s": time.time() - t0}
                 ready.append(lang)
             except Exception as e:
