@@ -375,6 +375,20 @@ class MultilspyBackend:
                         or os.environ.get("CODECANVAS_LSP_DEBUG") == "1"
                     )
 
+                    # TerminalBench runs hooks with /opt/venv Python but without
+                    # /opt/venv/bin on PATH, so language-server entrypoints like
+                    # `jedi-language-server` may be missing. Prepend sys.executable
+                    # bin dir to PATH to make installed console scripts discoverable.
+                    try:
+                        import sys
+
+                        exe_bin = str(Path(sys.executable).parent)
+                        parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+                        if exe_bin and exe_bin not in parts:
+                            os.environ["PATH"] = os.pathsep.join([exe_bin] + parts)
+                    except Exception:
+                        pass
+
                     _configure_multilspy_logging(
                         trace_log=trace_log,
                         debug_log=debug_log,
