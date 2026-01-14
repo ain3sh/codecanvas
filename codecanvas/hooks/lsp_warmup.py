@@ -214,12 +214,37 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
         return
 
     log_path = d / "lsp_warmup.log"
+    debug_log_path = d / "lsp_debug.log"
+    trace_log_path = d / "multilspy_trace.log"
     started_at = time.time()
     total_timeout_s = float(os.environ.get("CODECANVAS_LSP_WARMUP_TOTAL_TIMEOUT_S", "300"))
     cushion_s = 2.0
     deadline = started_at + total_timeout_s
 
     try:
+        # Enable detailed LSP logs for TerminalBench (/app) so we can pinpoint hangs.
+        if str(root).startswith("/app"):
+            os.environ.setdefault("CODECANVAS_LSP_DEBUG", "1")
+            os.environ.setdefault("CODECANVAS_LSP_TRACE", "1")
+            os.environ.setdefault("CODECANVAS_LSP_DEBUG_LOG", str(debug_log_path))
+            os.environ.setdefault("CODECANVAS_MULTILSPY_TRACE_LOG", str(trace_log_path))
+
+        try:
+            import shutil
+            import sys
+
+            _log_file(
+                log_path,
+                "env "
+                f"py={sys.version.split()[0]} "
+                f"exe={sys.executable} "
+                f"jedi_ls={shutil.which('jedi-language-server')} "
+                f"debug_log={debug_log_path} "
+                f"trace_log={trace_log_path}",
+            )
+        except Exception:
+            pass
+
         _log_file(log_path, f"warmup_start root={root} pid={os.getpid()} total_timeout_s={total_timeout_s}")
         _write_json_atomic(
             state_path,
@@ -284,7 +309,11 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
                 mgr = get_lsp_session_manager()
                 ws_root = find_workspace_root(Path(sample), prefer_env=False)
                 _log_file(log_path, f"warm_ws_root lang={lang} ws_root={ws_root}")
+
+                t_get = time.monotonic()
                 sess = await mgr.get(lang=lang, workspace_root=str(ws_root))
+                _log_file(log_path, f"warm_session_ready lang={lang} elapsed_s={time.monotonic() - t_get:.3f}")
+
                 _log_file(log_path, f"warm_symbols_request lang={lang}")
                 await sess.document_symbols(str(sample))
                 _log_file(log_path, f"warm_symbols_ok lang={lang}")

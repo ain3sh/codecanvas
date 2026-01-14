@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import threading
@@ -31,6 +32,63 @@ from .config import (
 
 T = TypeVar("T")
 FileSig = Tuple[int, int]  # (mtime_ns, size)
+
+
+def _lsp_debug_enabled() -> bool:
+    return os.environ.get("CODECANVAS_LSP_DEBUG") == "1" or os.environ.get("CODECANVAS_LSP_TRACE") == "1"
+
+
+def _lsp_debug_log_path() -> Path | None:
+    p = os.environ.get("CODECANVAS_LSP_DEBUG_LOG")
+    if p:
+        return Path(p)
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
+    if config_dir:
+        return Path(config_dir) / "codecanvas" / "lsp_debug.log"
+    return None
+
+
+def _multilspy_trace_log_path() -> Path | None:
+    p = os.environ.get("CODECANVAS_MULTILSPY_TRACE_LOG")
+    if p:
+        return Path(p)
+    return None
+
+
+def _append_debug_line(path: Path | None, msg: str) -> None:
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"[codecanvas:lsp] {ts} {msg}\n")
+            f.flush()
+    except Exception:
+        return
+
+
+def _configure_multilspy_logging(*, trace_log: Path | None, debug_log: Path | None, enable_trace: bool) -> None:
+    if not enable_trace:
+        return
+    target = trace_log or debug_log
+    if target is None:
+        return
+
+    try:
+        logger = logging.getLogger("multilspy")
+        logger.setLevel(logging.DEBUG)
+
+        for h in logger.handlers:
+            if isinstance(h, logging.FileHandler) and Path(getattr(h, "baseFilename", "")) == target:
+                return
+
+        fh = logging.FileHandler(target, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter("%(message)s"))
+        logger.addHandler(fh)
+    except Exception:
+        return
 
 
 # =============================================================================
@@ -310,10 +368,51 @@ class MultilspyBackend:
                 from multilspy.multilspy_logger import MultilspyLogger
 
                 def _start_server() -> Any:
-                    config = MultilspyConfig.from_dict({"code_language": multilspy_lang})
+                    debug_log = _lsp_debug_log_path()
+                    trace_log = _multilspy_trace_log_path()
+                    enable_trace = (
+                        os.environ.get("CODECANVAS_LSP_TRACE") == "1"
+                        or os.environ.get("CODECANVAS_LSP_DEBUG") == "1"
+                    )
+
+                    _configure_multilspy_logging(
+                        trace_log=trace_log,
+                        debug_log=debug_log,
+                        enable_trace=enable_trace,
+                    )
+
+                    config = MultilspyConfig.from_dict(
+                        {
+                            "code_language": multilspy_lang,
+                            "trace_lsp_communication": bool(enable_trace),
+                        }
+                    )
                     logger = MultilspyLogger()
+                    try:
+                        logger.logger.setLevel(logging.DEBUG if enable_trace else logging.INFO)
+                    except Exception:
+                        pass
+
+                    t0 = time.monotonic()
+                    if _lsp_debug_enabled():
+                        jedi_path = shutil.which("jedi-language-server")
+                        _append_debug_line(
+                            debug_log,
+                            (
+                                f"multilspy_start lang={self.lang} "
+                                f"multilspy_lang={multilspy_lang} "
+                                f"workspace_root={self.workspace_root} "
+                                f"cmd_jedi={jedi_path}"
+                            ),
+                        )
                     lsp_server = SyncLanguageServer.create(config, logger, self.workspace_root)
+                    if _lsp_debug_enabled():
+                        _append_debug_line(debug_log, f"multilspy_created elapsed_s={time.monotonic() - t0:.3f}")
+
+                    t1 = time.monotonic()
                     lsp_server.start_server().__enter__()
+                    if _lsp_debug_enabled():
+                        _append_debug_line(debug_log, f"multilspy_started elapsed_s={time.monotonic() - t1:.3f}")
                     return lsp_server
 
                 loop = asyncio.get_running_loop()
@@ -330,7 +429,40 @@ class MultilspyBackend:
 
         try:
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, self._lsp.request_document_symbols, rel_path)
+            debug_log = _lsp_debug_log_path() if _lsp_debug_enabled() else None
+            if debug_log is not None:
+                _append_debug_line(debug_log, f"document_symbols_begin lang={self.lang} rel_path={rel_path}")
+
+            ticker: asyncio.Task[None] | None = None
+
+            async def _tick() -> None:
+                start = time.monotonic()
+                while True:
+                    await asyncio.sleep(5.0)
+                    elapsed_s = time.monotonic() - start
+                    _append_debug_line(
+                        debug_log,
+                        (
+                            f"document_symbols_waiting lang={self.lang} "
+                            f"rel_path={rel_path} elapsed_s={elapsed_s:.1f}"
+                        ),
+                    )
+
+            if debug_log is not None:
+                ticker = asyncio.create_task(_tick())
+
+            try:
+                result = await loop.run_in_executor(None, self._lsp.request_document_symbols, rel_path)
+            finally:
+                if ticker is not None:
+                    ticker.cancel()
+                    try:
+                        await ticker
+                    except Exception:
+                        pass
+
+            if debug_log is not None:
+                _append_debug_line(debug_log, f"document_symbols_done lang={self.lang} rel_path={rel_path}")
             if not result:
                 return []
             # multilspy returns (list, None) tuple - extract the list
@@ -339,7 +471,15 @@ class MultilspyBackend:
             if not result:
                 return []
             return [_parse_document_symbol(s) for s in result]
-        except Exception:
+        except Exception as e:
+            if _lsp_debug_enabled():
+                _append_debug_line(
+                    _lsp_debug_log_path(),
+                    (
+                        f"document_symbols_error lang={self.lang} "
+                        f"rel_path={rel_path} err={type(e).__name__}: {e}"
+                    ),
+                )
             return []
 
     async def definition(self, uri_or_path: str, *, line: int, char: int) -> List[Dict[str, Any]]:
