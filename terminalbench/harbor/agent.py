@@ -10,7 +10,9 @@ from typing import Any
 
 from harbor.agents.installed.base import ExecInput
 from harbor.agents.installed.claude_code import ClaudeCode
+from harbor.environments.base import BaseEnvironment
 from harbor.models.trial.paths import EnvironmentPaths
+from jinja2 import Environment
 
 
 def _ensure_json_string(value: Any) -> str | None:
@@ -45,7 +47,6 @@ class ClaudeCodeMCP(ClaudeCode):
         claude_version: str | None = None,
         mcp_git_source: str | None = None,
         mcp_extras: str | None = None,
-        github_token: str | None = None,
         system_prompt: str | None = None,
         **kwargs: Any,
     ):
@@ -57,8 +58,6 @@ class ClaudeCodeMCP(ClaudeCode):
         self.claude_version = claude_version
         self.mcp_git_source = mcp_git_source
         self.mcp_extras = mcp_extras
-        # GitHub token for private repos - from kwarg or env var
-        self.github_token = github_token or os.environ.get("GITHUB_TOKEN")
         self.system_prompt = system_prompt
 
     @staticmethod
@@ -77,8 +76,40 @@ class ClaudeCodeMCP(ClaudeCode):
             "claude_version": self.claude_version or self._version,
             "mcp_git_source": self.mcp_git_source,
             "mcp_extras": self.mcp_extras,
-            "github_token": self.github_token,
         }
+
+    async def setup(self, environment: BaseEnvironment) -> None:
+        await environment.exec(command="mkdir -p /installed-agent")
+
+        if not self._install_agent_template_path.exists():
+            raise FileNotFoundError(f"Install agent template file not found: {self._install_agent_template_path}")
+
+        env = Environment()
+        template = env.from_string(self._install_agent_template_path.read_text())
+        rendered_script = template.render(**self._template_variables)
+
+        script_path = self.logs_dir / "install.sh"
+        script_path.write_text(rendered_script)
+
+        await environment.upload_file(
+            source_path=script_path,
+            target_path="/installed-agent/install.sh",
+        )
+
+        install_env = None
+        github_token = os.environ.get("GITHUB_TOKEN")
+        if github_token:
+            install_env = {"GITHUB_TOKEN": github_token}
+
+        result = await environment.exec(command="bash /installed-agent/install.sh", env=install_env)
+
+        setup_dir = self.logs_dir / "setup"
+        setup_dir.mkdir(parents=True, exist_ok=True)
+        (setup_dir / "return-code.txt").write_text(str(result.return_code))
+        if result.stdout:
+            (setup_dir / "stdout.txt").write_text(result.stdout)
+        if result.stderr:
+            (setup_dir / "stderr.txt").write_text(result.stderr)
 
     def _get_session_dir(self) -> Path | None:
         """Select the best Claude Code session directory deterministically.

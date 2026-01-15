@@ -62,12 +62,12 @@ log_done "Python 3.13"
 log_start "Git clone MCP: {{ mcp_git_source }}"
 cd /tmp
 
-# Clone repo (use token in URL for private repos)
-{% if github_token %}
-git clone $(echo "{{ mcp_git_source }}" | sed "s|https://github.com|https://x-access-token:{{ github_token }}@github.com|") mcp-repo
-{% else %}
-git clone {{ mcp_git_source }} mcp-repo
-{% endif %}
+# Clone repo (optional token via env var, without embedding secrets in the script).
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+    git clone $(echo "{{ mcp_git_source }}" | sed "s|https://github.com|https://x-access-token:${GITHUB_TOKEN}@github.com|") mcp-repo
+else
+    git clone {{ mcp_git_source }} mcp-repo
+fi
 cd mcp-repo
 log_done "Git clone MCP"
 
@@ -98,9 +98,13 @@ log "Skipping build-time multilspy warmup; CodeCanvas warms at SessionStart"
 # r: requires R base + languageserver package.
 log_start "R languageserver (custom LSP)"
 apt-get update
-apt-get install -y --no-install-recommends r-base
+if apt-get install -y --no-install-recommends r-base r-cran-languageserver; then
+    log "Installed R languageserver via apt"
+else
+    apt-get install -y --no-install-recommends r-base
+    R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+fi
 rm -rf /var/lib/apt/lists/*
-R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
 log_done "R languageserver (custom LSP)"
 {% else %}
 log "CodeCanvas not enabled; skipping R languageserver"
