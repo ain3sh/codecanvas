@@ -123,7 +123,7 @@ terminalbench/
 ├── ui/
 │   ├── cli.py         # argparse CLI with config-set support
 │   └── display.py     # Output formatting
-└── analytics/         # Post-run analysis (see RUNANALYTICS.md)
+└── analytics/         # Post-run analysis (see docs/usage/RUNANALYTICS.md)
 ```
 
 ### ClaudeCodeMCP Agent
@@ -135,20 +135,23 @@ class ClaudeCodeMCP(ClaudeCode):
     def __init__(self, mcp_git_source, mcp_servers, mcp_config, ...):
         # Clone MCP repo into container
         # Install via pip
-        # Configure .mcp.json
+        # Pass MCP config to claude
         # Auto-approve mcp__* tools
+
+    # Trajectory extraction: selects a deterministic Claude session dir
+    # even when multiple session directories exist.
 ```
 
 **Install Template** (`install-claude-code-utils.sh.j2`):
-1. Install Node.js (via fnm) and Claude Code CLI
-2. Install uv for Python package management
+1. Install Node.js (via nvm), Claude Code CLI, and `bash-language-server`
+2. Install `uv`, Python 3.13, and create `/opt/venv`
 3. Clone MCP source repository (with optional GitHub token)
-4. `pip install -e .` the MCP package
-5. Write adapted `.mcp.json` to container
+4. Install only the required MCP extras into `/opt/venv` (based on enabled `--mcp-server` names), e.g. `uv pip install --python /opt/venv/bin/python ".[codecanvas]"` or `.[locagent]`
+5. If CodeCanvas is enabled: install custom (non-multilspy) LSP dependencies (currently R `languageserver`)
 
-**MCP Config Adaptation:**
-- Converts `uv run python -m` to `python3 -m` for container compatibility
-- Discovers `<server>/USAGE.md` and appends to system prompt
+**MCP config + prompts:**
+- The profile's MCP config JSON is written to `/tmp/mcp-config.json` and passed to Claude Code via `--mcp-config`.
+- `<server>/USAGE.md` prompts are discovered on the host and passed via `--append-system-prompt`.
 
 ### HarborRunner
 

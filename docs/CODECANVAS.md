@@ -252,6 +252,13 @@ LANGUAGE_SERVERS: Dict[str, Dict[str, Any]] = {
 - Slower startup (server initialization)
 - May fail on malformed code
 
+**Multilspy downloads:**
+- Some language-server binaries are large (notably clangd). Set `MULTILSPY_DOWNLOAD_TIMEOUT` to increase the download timeout if needed.
+
+**Per-file behavior (reliability-focused):**
+- Empty / whitespace-only files skip both LSP and tree-sitter parsing.
+- If LSP returns no symbols for a non-empty file, CodeCanvas falls back to tree-sitter definition extraction for that file (LSP stays enabled for the rest of the repo).
+
 ### Phase 2: Tree-Sitter Fallback (Three-Tier Extraction)
 
 When LSP fails or is unavailable, tree-sitter provides AST-based parsing with a **three-tier extraction strategy**:
@@ -684,11 +691,23 @@ Design intent:
 
 **Trigger**: Session starts (matcher: `startup`)
 
-**Action**: Records an “active root” hint but does **not** run init.
+**Action**:
+1. Runs a best-effort “first-pass” LSP warmup to reduce first-use LSP flakiness.
+2. Records an “active root” hint but does **not** run init.
 
 Rationale: in TerminalBench/Harbor, sessions often start in a generic working directory (e.g. `/app`) before the task repo is cloned. An unconditional init at SessionStart can produce an empty graph (`parsed_files=0`) that then “sticks”.
 
 **Output**: A short “armed” message in `additionalContext`.
+
+**Cost / latency notes:**
+- In the worst case (fresh LSP downloads), this can delay SessionStart up to the hook timeout.
+- In TerminalBench clone-first workflows, it typically short-circuits quickly (e.g., empty `/app`, no detectable languages) and won’t meaningfully slow anything down.
+
+**Warmup artifacts** (best-effort, for debugging):
+- `$CLAUDE_CONFIG_DIR/codecanvas/lsp_warmup.json` (status + languages)
+- `$CLAUDE_CONFIG_DIR/codecanvas/lsp_warmup.log`, `$CLAUDE_CONFIG_DIR/codecanvas/lsp_debug.log`, `$CLAUDE_CONFIG_DIR/codecanvas/multilspy_trace.log`
+
+Disable warmup by setting `CODECANVAS_DISABLE_LSP_WARMUP=1`.
 
 ### Hook 2: PreToolUse - Auto Init (Architecture) Once Workspace Is Clear
 
@@ -722,11 +741,18 @@ symbol=... callers=... callees=...
     "SessionStart": [
       {
         "matcher": "startup",
-        "hooks": [{
-          "type": "command",
-          "command": "uv run python -c \"from codecanvas.hooks.session_init import main; main()\"",
-          "timeout": 60
-        }]
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.lsp_warmup import main; main()\"",
+            "timeout": 300
+          },
+          {
+            "type": "command",
+            "command": "uv run python -c \"from codecanvas.hooks.session_init import main; main()\"",
+            "timeout": 60
+          }
+        ]
       }
     ],
     "PreToolUse": [
@@ -735,7 +761,7 @@ symbol=... callers=... callees=...
         "hooks": [{
           "type": "command",
           "command": "uv run python -c \"from codecanvas.hooks.post_read import main; main()\"",
-          "timeout": 30
+          "timeout": 60
         }]
       }
     ],
@@ -817,7 +843,11 @@ This:
 
 ### State Persistence
 
-CodeCanvas writes state and images to `.codecanvas/` under `CANVAS_PROJECT_DIR`.
+CodeCanvas writes state and images to the artifacts directory:
+- Default: `<CANVAS_PROJECT_DIR>/.codecanvas/`
+- Override: `CANVAS_ARTIFACT_DIR` (absolute path recommended)
+
+In TerminalBench/Harbor runs under `/app`, hooks set `CANVAS_ARTIFACT_DIR` to `$CLAUDE_CONFIG_DIR/codecanvas/canvas` to keep artifacts outside `/app` for verifier safety.
 
 In TerminalBench/Harbor runs, the task workspace is not persisted, so hooks also mirror artifacts into the session directory (`$CLAUDE_CONFIG_DIR/codecanvas/`, i.e. `agent/sessions/codecanvas/`). This includes:
 - `state.json`, `architecture.png`, `impact_*.png`, `task.png`
@@ -887,7 +917,7 @@ In TerminalBench/Harbor runs, the task workspace is not persisted, so hooks also
 
 ### 9. Hooks That Actually Do Things
 
-**Decision**: SessionStart runs init, PostToolUse:Read runs impact. Both output `additionalContext`.
+**Decision**: SessionStart arms autocontext and runs best-effort warmup; PreToolUse runs init when a real workspace is detected; PostToolUse(Edit|Write) runs impact. All output `additionalContext`.
 
 **Rationale**: `systemMessage` is shown to user only - Claude doesn't see it (useless). `additionalContext` is injected into Claude's context (useful). Auto-running actions means small models don't need to be smart enough to invoke them manually.
 

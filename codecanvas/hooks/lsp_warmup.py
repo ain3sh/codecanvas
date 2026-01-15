@@ -315,18 +315,18 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
 
         from codecanvas.parser.config import LSP_SUPPORTED_LANGUAGES, has_lsp_support
 
-        warm_langs = [
-            lang
-            for lang in present_langs
-            if lang in LSP_SUPPORTED_LANGUAGES and has_lsp_support(lang)
-        ]
-
-        _log_file(log_path, f"warm_langs={warm_langs}")
-
+        warm_langs: list[str] = []
         langs_state: dict[str, dict[str, Any]] = {}
         for lang in present_langs:
             if lang not in LSP_SUPPORTED_LANGUAGES:
                 langs_state[lang] = {"status": "skipped", "reason": "no_lsp_support"}
+                continue
+            if has_lsp_support(lang):
+                warm_langs.append(lang)
+            else:
+                langs_state[lang] = {"status": "skipped", "reason": "server_missing"}
+
+        _log_file(log_path, f"warm_langs={warm_langs}")
 
         from codecanvas.parser.lsp import get_lsp_runtime
         from codecanvas.parser.utils import find_workspace_root

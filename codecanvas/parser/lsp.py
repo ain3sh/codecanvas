@@ -92,6 +92,79 @@ def _configure_multilspy_logging(*, trace_log: Path | None, debug_log: Path | No
         return
 
 
+_MULTILSPY_DOWNLOAD_TIMEOUT_PATCHED = False
+
+
+def _multilspy_download_timeout_s() -> int:
+    """Return the download timeout used by multilspy.
+
+    Env var: MULTILSPY_DOWNLOAD_TIMEOUT.
+    """
+
+    v = (os.environ.get("MULTILSPY_DOWNLOAD_TIMEOUT") or "").strip()
+    if v:
+        try:
+            return int(v)
+        except Exception:
+            return 300
+
+    return 300
+
+
+def _patch_multilspy_download_timeout(*, timeout_s: int, debug_log: Path | None = None) -> None:
+    """Increase multilspy download timeout for large language server binaries.
+
+    multilspy's default download timeout can be too short for large assets (e.g. clangd).
+    We patch the internal downloader in-process so this works even when we skip any
+    build-time prewarming.
+    """
+
+    global _MULTILSPY_DOWNLOAD_TIMEOUT_PATCHED
+    if _MULTILSPY_DOWNLOAD_TIMEOUT_PATCHED:
+        return
+
+    try:
+        import importlib
+        import urllib.request
+
+        utils_mod = importlib.import_module("multilspy.multilspy_utils")
+        exc_mod = importlib.import_module("multilspy.multilspy_exceptions")
+        FileUtils = getattr(utils_mod, "FileUtils", None)
+        MultilspyException = getattr(exc_mod, "MultilspyException", Exception)
+        if FileUtils is None:
+            return
+
+        existing = getattr(FileUtils, "download_file", None)
+        if getattr(existing, "__codecanvas_patched__", False):
+            _MULTILSPY_DOWNLOAD_TIMEOUT_PATCHED = True
+            return
+
+        def _download_file(logger: Any, url: str, target_path: str) -> None:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "codecanvas"})
+                with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+                    status = getattr(resp, "status", 200)
+                    if status != 200:
+                        raise RuntimeError(f"HTTP {status}")
+                    with open(target_path, "wb") as f:
+                        shutil.copyfileobj(resp, f)
+            except Exception as exc:
+                try:
+                    logger.log(f"Error downloading file '{url}': {exc}", logging.ERROR)
+                except Exception:
+                    pass
+                raise MultilspyException("Error downloading file.") from None
+
+        _download_file.__codecanvas_patched__ = True  # type: ignore[attr-defined]
+        FileUtils.download_file = staticmethod(_download_file)
+        _MULTILSPY_DOWNLOAD_TIMEOUT_PATCHED = True
+
+        if _lsp_debug_enabled():
+            _append_debug_line(debug_log, f"multilspy_download_timeout_patched timeout_s={timeout_s}")
+    except Exception:
+        return
+
+
 # =============================================================================
 # Exceptions
 # =============================================================================
@@ -349,6 +422,7 @@ class MultilspyBackend:
         self.workspace_root = os.path.abspath(workspace_root)
         self._lsp: Any = None
         self._lock = asyncio.Lock()
+        self._request_lock = asyncio.Lock()
 
     async def _ensure_started(self):
         """Lazily initialize the multilspy server."""
@@ -401,6 +475,8 @@ class MultilspyBackend:
                         debug_log=debug_log,
                         enable_trace=enable_trace,
                     )
+
+                    _patch_multilspy_download_timeout(timeout_s=_multilspy_download_timeout_s(), debug_log=debug_log)
 
                     config = MultilspyConfig.from_dict(
                         {
@@ -473,7 +549,8 @@ class MultilspyBackend:
                 ticker = asyncio.create_task(_tick())
 
             try:
-                result = await loop.run_in_executor(None, self._lsp.request_document_symbols, rel_path)
+                async with self._request_lock:
+                    result = await loop.run_in_executor(None, self._lsp.request_document_symbols, rel_path)
             finally:
                 if ticker is not None:
                     ticker.cancel()
@@ -493,6 +570,31 @@ class MultilspyBackend:
                 return []
             return [_parse_document_symbol(s) for s in result]
         except Exception as e:
+            # LSP allows `null` results for documentSymbols when there are no symbols.
+            # jedi-language-server returns `null` (e.g. for empty `__init__.py`), but
+            # multilspy asserts this is unexpected and raises AssertionError.
+            if isinstance(e, AssertionError) and "Unexpected response from Language Server: None" in str(e):
+                is_effectively_empty = False
+                try:
+                    st = os.stat(path)
+                    if st.st_size == 0:
+                        is_effectively_empty = True
+                    elif st.st_size <= 512:
+                        is_effectively_empty = Path(path).read_text(encoding="utf-8").strip() == ""
+                except Exception:
+                    is_effectively_empty = False
+
+                if is_effectively_empty:
+                    if _lsp_debug_enabled():
+                        _append_debug_line(
+                            _lsp_debug_log_path(),
+                            f"document_symbols_null_empty lang={self.lang} rel_path={rel_path}",
+                        )
+                    return []
+
+                raise LSPError(
+                    f"multilspy returned null documentSymbols for non-empty file: {rel_path}"
+                ) from e
             if _lsp_debug_enabled():
                 _append_debug_line(
                     _lsp_debug_log_path(),
@@ -513,7 +615,8 @@ class MultilspyBackend:
         try:
             # Run sync multilspy call in thread pool to allow true parallelism
             loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(None, self._lsp.request_definition, rel_path, line, char)
+            async with self._request_lock:
+                result = await loop.run_in_executor(None, self._lsp.request_definition, rel_path, line, char)
             return _parse_definition_locations(result)
         except Exception:
             return []

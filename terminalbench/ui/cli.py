@@ -262,10 +262,18 @@ def run_cli(argv: Iterable[str] | None = None) -> int:
         local_mcp_path = None if no_mcp_flag else (set_mcp_config or mcp_config_path)
 
         set_hooks = getattr(set_ns, "hooks", None) if set_ns else None
-        local_hooks_path = set_hooks or hooks_path
+        # Default: disable hooks when --no-mcp, unless explicitly provided per config-set.
+        if no_mcp_flag and set_hooks is None:
+            local_hooks_path = None
+        else:
+            local_hooks_path = set_hooks or hooks_path
 
         set_git_source = getattr(set_ns, "mcp_git_source", None) if set_ns else None
-        local_git_source = set_git_source or getattr(args, "mcp_git_source", None)
+        # Default: don't clone/install MCP repo when --no-mcp.
+        if no_mcp_flag and set_git_source is None:
+            local_git_source = None
+        else:
+            local_git_source = set_git_source or getattr(args, "mcp_git_source", None)
 
         set_github_token = getattr(set_ns, "github_token", None) if set_ns else None
         local_github_token = set_github_token or github_token

@@ -44,6 +44,7 @@ class ClaudeCodeMCP(ClaudeCode):
         reasoning: str = "medium",
         claude_version: str | None = None,
         mcp_git_source: str | None = None,
+        mcp_extras: str | None = None,
         github_token: str | None = None,
         system_prompt: str | None = None,
         **kwargs: Any,
@@ -55,6 +56,7 @@ class ClaudeCodeMCP(ClaudeCode):
         self.reasoning = reasoning
         self.claude_version = claude_version
         self.mcp_git_source = mcp_git_source
+        self.mcp_extras = mcp_extras
         # GitHub token for private repos - from kwarg or env var
         self.github_token = github_token or os.environ.get("GITHUB_TOKEN")
         self.system_prompt = system_prompt
@@ -69,21 +71,13 @@ class ClaudeCodeMCP(ClaudeCode):
         return Path(__file__).parent / "install-claude-code-utils.sh.j2"
 
     @property
-    def _needs_codecanvas(self) -> bool:
-        """Check if codecanvas MCP server is configured (requires multilspy warmup)."""
-        if not self.mcp_config:
-            return False
-        config = json.loads(self.mcp_config) if isinstance(self.mcp_config, str) else self.mcp_config
-        return "codecanvas" in config.get("mcpServers", {})
-
-    @property
     def _template_variables(self) -> dict[str, str | bool | None]:
         """Variables to pass to the install template."""
         return {
             "claude_version": self.claude_version or self._version,
             "mcp_git_source": self.mcp_git_source,
+            "mcp_extras": self.mcp_extras,
             "github_token": self.github_token,
-            "needs_codecanvas": self._needs_codecanvas,
         }
 
     def _get_session_dir(self) -> Path | None:

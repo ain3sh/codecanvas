@@ -3,8 +3,6 @@ set -e
 
 # =============================================================================
 # Install Claude Code with MCP support
-# Tier 1: Profile-based skip (only codecanvas needs LSP warmup)
-# Tier 2: Language detection (only warmup languages present in /app)
 # =============================================================================
 
 # Timestamped logging helper
@@ -75,142 +73,37 @@ log_done "Git clone MCP"
 
 log_start "Python venv + pip install MCP packages"
 uv venv /opt/venv --python 3.13
-uv pip install --python /opt/venv/bin/python ".[codecanvas,locagent]"
+{% if mcp_extras %}
+uv pip install --python /opt/venv/bin/python ".[{{ mcp_extras }}]"
+{% else %}
+uv pip install --python /opt/venv/bin/python "."
+{% endif %}
 log_done "Python venv + pip install MCP packages"
 
 # Add venv bin to PATH
 export PATH="/opt/venv/bin:$PATH"
 echo 'export PATH="/opt/venv/bin:$PATH"' >> /etc/profile.d/venv-path.sh
 
-{% if needs_codecanvas %}
-# =============================================================================
-# CodeCanvas LSP warmup: Detect languages in /app, download LSP binaries
-# Uses codecanvas.parser.config as source of truth for all language mappings
-# =============================================================================
-log_start "LSP warmup (detect + download)"
-/opt/venv/bin/python3 << 'WARMUP_EOF'
-import os, time, tempfile, shutil, logging
-import requests
+log "Skipping build-time multilspy warmup; CodeCanvas warms at SessionStart"
 
-# =============================================================================
-# Monkeypatch multilspy download timeout (default 60s is too short for clangd)
-# Must be done BEFORE importing multilspy
-# =============================================================================
-from multilspy.multilspy_utils import FileUtils
-from multilspy.multilspy_exceptions import MultilspyException
-
-DOWNLOAD_TIMEOUT = int(os.environ.get("MULTILSPY_DOWNLOAD_TIMEOUT", "300"))
-
-@staticmethod
-def _patched_download_file(logger, url: str, target_path: str) -> None:
-    try:
-        response = requests.get(url, stream=True, timeout=DOWNLOAD_TIMEOUT)
-        if response.status_code != 200:
-            logger.log(f"Error downloading file '{url}': {response.status_code} {response.text}", logging.ERROR)
-            raise MultilspyException("Error downloading file.")
-        with open(target_path, "wb") as f:
-            shutil.copyfileobj(response.raw, f)
-    except Exception as exc:
-        logger.log(f"Error downloading file '{url}': {exc}", logging.ERROR)
-        raise MultilspyException("Error downloading file.") from None
-
-FileUtils.download_file = _patched_download_file
-
-# =============================================================================
-# Auto-install LSP servers for languages where multilspy only checks existence
-# (Harbor provides the base toolchain, we just need the language server)
-# =============================================================================
-import subprocess
-
-LSP_INSTALL_COMMANDS = {
-    'go': ['go', 'install', 'golang.org/x/tools/gopls@latest'],
-    'ruby': ['gem', 'install', 'solargraph', '--no-document'],
-}
-
-def try_install_lsp(lang: str) -> bool:
-    """Try to install LSP server for languages that need it. Returns True if installed."""
-    cmd = LSP_INSTALL_COMMANDS.get(lang)
-    if not cmd:
-        return False
-    # Check if base toolchain exists
-    if shutil.which(cmd[0]) is None:
-        return False
-    try:
-        print(f'[{time.strftime("%H:%M:%S")}] {lang}: installing {cmd[0]} LSP server...', flush=True)
-        subprocess.run(cmd, check=True, capture_output=True, timeout=120)
-        return True
-    except Exception as e:
-        print(f'[{time.strftime("%H:%M:%S")}] {lang}: install failed: {e}', flush=True)
-        return False
-# =============================================================================
-
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from codecanvas.parser.config import EXTENSION_TO_LANG, MULTILSPY_LANGUAGES, CUSTOM_LSP_SERVERS
-from multilspy import SyncLanguageServer
-from multilspy.multilspy_config import MultilspyConfig
-from multilspy.multilspy_logger import MultilspyLogger
-
-def ts(): return time.strftime('%H:%M:%S')
-
-# Detect languages from /app file extensions
-exts = {('.' + f.rsplit('.', 1)[-1]) for r, _, fs in os.walk('/app') for f in fs if '.' in f}
-lang_keys = {EXTENSION_TO_LANG[e] for e in exts if e in EXTENSION_TO_LANG}
-
-# Split into multilspy vs custom LSP
-multilspy_langs = {MULTILSPY_LANGUAGES[k] for k in lang_keys if k in MULTILSPY_LANGUAGES}
-custom_lsp_langs = {k for k in lang_keys if k in CUSTOM_LSP_SERVERS}
-
-print(f'[{ts()}] Detected multilspy: {sorted(multilspy_langs) or "none"}', flush=True)
-print(f'[{ts()}] Detected custom LSP: {sorted(custom_lsp_langs) or "none"}', flush=True)
-
-# Warmup multilspy languages (downloads LSP binaries, auto-installs if needed)
-if multilspy_langs:
-    def warmup(lang):
-        start = time.time()
-        with tempfile.TemporaryDirectory() as td:
-            open(f'{td}/f.txt', 'w').close()
-            try:
-                SyncLanguageServer.create(MultilspyConfig.from_dict({'code_language': lang}), MultilspyLogger(), td)
-            except Exception as e:
-                # If LSP not found, try to install it and retry once
-                if 'not found' in str(e).lower() or 'not installed' in str(e).lower():
-                    if try_install_lsp(lang):
-                        SyncLanguageServer.create(MultilspyConfig.from_dict({'code_language': lang}), MultilspyLogger(), td)
-                    else:
-                        raise
-                else:
-                    raise
-        return lang, time.time() - start
-
-    with ThreadPoolExecutor(max_workers=min(4, len(multilspy_langs))) as ex:
-        for f in as_completed([ex.submit(warmup, l) for l in multilspy_langs]):
-            try:
-                lang, elapsed = f.result(timeout=180)
-                print(f'[{ts()}] {lang}: ready ({elapsed:.1f}s)', flush=True)
-            except Exception as e:
-                print(f'[{ts()}] WARNING: {lang} warmup failed: {e}', flush=True)
-
-# Signal custom LSP languages to shell (for apt-get installs like R)
-for lang in custom_lsp_langs:
-    open(f'/tmp/.needs_lsp_{lang}', 'w').close()
-
-print(f'[{ts()}] LSP warmup complete', flush=True)
-WARMUP_EOF
-log_done "LSP warmup"
-
-# Fallback language servers (not multilspy, may need apt)
-# sh: bash-language-server already installed via npm above
-# r: needs R base + languageserver package
-if [ -f /tmp/.needs_lsp_r ]; then
-    rm /tmp/.needs_lsp_r
-    log_start "R languageserver"
-    apt-get update && apt-get install -y --no-install-recommends r-base && rm -rf /var/lib/apt/lists/*
-    R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
-    log_done "R languageserver"
-fi
-# Add new fallback languages here as needed (check /tmp/.needs_lsp_<lang>)
+{% if mcp_extras %}
+{% set _extras = (mcp_extras.split(',') | map('trim') | list) %}
 {% else %}
-log "CodeCanvas not configured, skipping LSP warmup"
+{% set _extras = [] %}
+{% endif %}
+
+{% if 'codecanvas' in _extras %}
+# CodeCanvas custom (non-multilspy) language servers.
+# sh: bash-language-server already installed via npm above.
+# r: requires R base + languageserver package.
+log_start "R languageserver (custom LSP)"
+apt-get update
+apt-get install -y --no-install-recommends r-base
+rm -rf /var/lib/apt/lists/*
+R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
+log_done "R languageserver (custom LSP)"
+{% else %}
+log "CodeCanvas not enabled; skipping R languageserver"
 {% endif %}
 
 cd /

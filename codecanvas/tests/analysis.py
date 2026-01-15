@@ -29,8 +29,9 @@ def test_find_target_prefers_symbol_with_edges() -> None:
     g.add_edge(GraphEdge(from_id=caller.id, to_id=defin.id, type=EdgeType.CALL))
 
     a = Analyzer(g)
-    assert a.find_target("foo") is not None
-    assert a.find_target("foo").id == defin.id
+    target = a.find_target("foo")
+    assert target is not None
+    assert target.id == defin.id
 
 
 def test_impact_call_counts_aggregates_class_methods() -> None:

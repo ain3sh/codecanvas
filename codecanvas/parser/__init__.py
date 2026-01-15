@@ -222,6 +222,22 @@ class Parser:
             self.last_summary.add_skip(file_path, "decode")
             return
 
+        # Avoid LSP + tree-sitter work for empty files.
+        if text.strip() == "":
+            try:
+                file_label = str(file_path.relative_to(root)).replace("\\", "/")
+            except ValueError:
+                file_label = file_path.name
+            if self._label_strip_prefix:
+                prefix_slash = self._label_strip_prefix + "/"
+                if file_label.startswith(prefix_slash):
+                    file_label = file_label[len(prefix_slash) :]
+            file_label = normalize_path(file_label)
+            module_id = make_module_id(normalize_path(file_label))
+            graph.add_node(GraphNode(id=module_id, kind=NodeKind.MODULE, label=file_label, fsPath=str(file_path)))
+            self.last_summary.parsed_files += 1
+            return
+
         try:
             file_label = str(file_path.relative_to(root)).replace("\\", "/")
         except ValueError:
@@ -257,8 +273,7 @@ class Parser:
             from .lsp import LSPError
 
             try:
-                self._parse_with_lsp(file_path, file_label, text, lang, graph, module_id=module_id)
-                used_lsp = True
+                used_lsp = self._parse_with_lsp(file_path, file_label, text, lang, graph, module_id=module_id)
             except LSPError as e:
                 msg = str(e).lower()
                 if "missing" in msg or "not found" in msg or "not supported" in msg:
@@ -302,7 +317,7 @@ class Parser:
         graph: Graph,
         *,
         module_id: str,
-    ) -> None:
+    ) -> bool:
         """Parse defs using LSP document symbols."""
         from .lsp import get_lsp_runtime, get_lsp_session_manager, path_to_uri
         from .utils import find_workspace_root
@@ -317,6 +332,8 @@ class Parser:
             return await sess.document_symbols(uri, text=text)
 
         symbols = get_lsp_runtime().run(_fetch_symbols())
+        if not symbols:
+            return False
 
         lines = text.split("\n")
 
@@ -330,6 +347,7 @@ class Parser:
             lines=lines,
             graph=graph,
         )
+        return True
 
     def _process_lsp_symbols(
         self,

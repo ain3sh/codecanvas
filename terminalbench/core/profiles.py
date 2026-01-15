@@ -18,6 +18,21 @@ MCP_USAGE_ALIASES = {
     "codegraph": "locagent",
 }
 
+# Aliases for MCP server names -> Python extras names (for selective install)
+MCP_EXTRAS_ALIASES = {
+    "codegraph": "locagent",
+}
+
+
+def mcp_python_extras_for_servers(server_names: List[str]) -> List[str]:
+    """Map enabled MCP server names to Python extras to install."""
+
+    extras: list[str] = []
+    for name in server_names:
+        extras.append(MCP_EXTRAS_ALIASES.get(name, name))
+    # Stable + unique
+    return sorted(set(extras))
+
 
 def load_mcp_config(config_path: Path) -> Dict[str, Any]:
     """Load and parse MCP config file."""
@@ -71,6 +86,7 @@ class AgentProfile:
     mcp_config_json: Optional[str] = None  # JSON string of MCP config
     hooks_config_json: Optional[str] = None  # JSON string of hooks config
     mcp_git_source: Optional[str] = None  # Git URL for MCP server installation
+    mcp_extras: Optional[str] = None  # Comma-separated extras (e.g. "codecanvas,locagent")
     system_prompt: Optional[str] = None  # System prompt (e.g., from USAGE.md)
     extra_env: Dict[str, str] = field(default_factory=dict)
 
@@ -100,6 +116,10 @@ class AgentProfile:
         # Pass MCP git source for installation in container
         if self.mcp_git_source:
             args.extend(["--ak", f"mcp_git_source={self.mcp_git_source}"])
+
+        # Pass MCP extras to the install template (selective pip install)
+        if self.mcp_extras:
+            args.extend(["--ak", f"mcp_extras={self.mcp_extras}"])
 
         # Pass system prompt
         if self.system_prompt:
@@ -155,12 +175,15 @@ def build_profile(
 
     # Load and filter MCP config, adapting for Harbor environment
     mcp_config_json = None
+    mcp_extras = None
     if mcp_config_path and mcp_config_path.exists():
         config = load_mcp_config(mcp_config_path)
         filtered = filter_mcp_servers(config, enabled_mcp_servers)
         adapted = adapt_mcp_config_for_harbor(filtered)
         if adapted.get("mcpServers"):
             mcp_config_json = json.dumps(adapted)
+            extras = mcp_python_extras_for_servers(list(adapted.get("mcpServers", {}).keys()))
+            mcp_extras = ",".join(extras) if extras else None
 
     # Load hooks config, adapting for Harbor environment
     hooks_config_json = None
@@ -172,6 +195,14 @@ def build_profile(
     if github_token:
         env["GITHUB_TOKEN"] = github_token
 
+    # Hooks are only meaningful when MCP is enabled.
+    if not mcp_config_json:
+        hooks_config_json = None
+
+    # Don't bother installing MCP repo inside Harbor unless we will actually use it.
+    if not mcp_config_json and not hooks_config_json:
+        mcp_git_source = None
+
     return AgentProfile(
         key=key,
         model=model,
@@ -180,6 +211,7 @@ def build_profile(
         mcp_config_json=mcp_config_json,
         hooks_config_json=hooks_config_json,
         mcp_git_source=mcp_git_source,
+        mcp_extras=mcp_extras,
         system_prompt=system_prompt,
         extra_env=env,
     )

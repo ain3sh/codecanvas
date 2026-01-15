@@ -63,7 +63,7 @@ def test_cython_package_import_prefers_init(tmp_path: Path):
     assert any(e.from_id == main_id and e.to_id == init_id and e.type == EdgeType.IMPORT for e in g.edges)
 
 
-def test_empty_lsp_symbols_does_not_force_fallback(monkeypatch, tmp_path: Path):
+def test_empty_lsp_symbols_falls_back_to_treesitter(monkeypatch, tmp_path: Path):
     (tmp_path / "a.py").write_text("import os\n", encoding="utf-8")
 
     import codecanvas.parser as parser_mod
@@ -87,8 +87,8 @@ def test_empty_lsp_symbols_does_not_force_fallback(monkeypatch, tmp_path: Path):
     parser = Parser(use_lsp=True)
     parser.parse_directory(str(tmp_path))
 
-    assert parser.last_summary.lsp_files == 1
-    assert parser.last_summary.tree_sitter_files == 0
+    assert parser.last_summary.lsp_files == 0
+    assert parser.last_summary.tree_sitter_files == 1
     assert parser.last_summary.lsp_failures == {}
 
 
