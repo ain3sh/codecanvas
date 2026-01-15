@@ -86,6 +86,46 @@ class ClaudeCodeMCP(ClaudeCode):
             "needs_codecanvas": self._needs_codecanvas,
         }
 
+    def _get_session_dir(self) -> Path | None:
+        """Select the best Claude Code session directory deterministically.
+
+        Harbor's default implementation prints a warning and returns None when
+        multiple session directories exist; that breaks trajectory extraction.
+        """
+
+        sessions_root = self.logs_dir / "sessions"
+        project_root = sessions_root / "projects"
+        if not project_root.exists():
+            return None
+
+        try:
+            candidate_files = list(project_root.glob("**/*.jsonl"))
+        except Exception:
+            return None
+        if not candidate_files:
+            return None
+
+        candidate_dirs = sorted({f.parent for f in candidate_files if f.parent.is_dir()})
+        if not candidate_dirs:
+            return None
+        if len(candidate_dirs) == 1:
+            return candidate_dirs[0]
+
+        app_root = project_root / "-app"
+        preferred = [d for d in candidate_dirs if (d == app_root or app_root in d.parents)]
+        dirs = preferred or candidate_dirs
+
+        def _score(d: Path) -> tuple[float, int]:
+            try:
+                files = list(d.glob("*.jsonl"))
+                newest = max((f.stat().st_mtime for f in files), default=0.0)
+                total_size = sum((f.stat().st_size for f in files), 0)
+                return (float(newest), int(total_size))
+            except Exception:
+                return (0.0, 0)
+
+        return max(dirs, key=_score)
+
     def create_run_agent_commands(self, instruction: str) -> list[ExecInput]:
         escaped_instruction = shlex.quote(instruction)
 

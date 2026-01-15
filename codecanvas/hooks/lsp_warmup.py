@@ -116,6 +116,29 @@ def ensure_worker_running(*, root: Path) -> None:
     root = root.absolute()
     state_path = d / "lsp_warmup.json"
 
+    def _has_non_ignored_entry(path: Path) -> bool:
+        ignore_top = {
+            ".git",
+            ".codecanvas",
+            "node_modules",
+            "__pycache__",
+            ".pytest_cache",
+            ".mypy_cache",
+            ".ruff_cache",
+            ".venv",
+            "venv",
+            "env",
+            "dist",
+            "build",
+        }
+        try:
+            for p in path.iterdir():
+                if p.name not in ignore_top:
+                    return True
+        except Exception:
+            return False
+        return False
+
     def _should_skip(state: dict[str, Any]) -> bool:
         status = state.get("overall") if isinstance(state, dict) else None
         if not isinstance(status, str):
@@ -131,14 +154,26 @@ def ensure_worker_running(*, root: Path) -> None:
         if isinstance(status, str) and status in {"ready", "partial"} and existing_root == str(root):
             return True
 
+        if not (isinstance(status, str) and existing_root == str(root) and updated_at_f is not None):
+            return False
+
+        age_s = time.time() - updated_at_f
+
         # Avoid rerunning repeatedly if we just failed for this root.
-        if (
-            isinstance(status, str)
-            and status in {"failed", "failed_stale", "skipped"}
-            and existing_root == str(root)
-            and updated_at_f is not None
-            and (time.time() - updated_at_f) < 300.0
-        ):
+        if status in {"failed", "failed_stale"} and age_s < 300.0:
+            return True
+
+        if status == "skipped" and age_s < 300.0:
+            # If the previous warmup skipped because `/app` was empty at SessionStart,
+            # allow an immediate rerun as soon as content exists.
+            reason = state.get("reason") if isinstance(state, dict) else None
+            present_langs = state.get("present_langs") if isinstance(state, dict) else None
+            skipped_no_content = (
+                reason == "no_content"
+                or (isinstance(present_langs, list) and len(present_langs) == 0)
+            )
+            if skipped_no_content:
+                return not _has_non_ignored_entry(root)
             return True
 
         return False
@@ -347,6 +382,12 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
                 failed.append(lang)
 
         overall = "skipped" if not warm_langs else "failed"
+        reason = None
+        if overall == "skipped":
+            if not present_langs:
+                reason = "no_content"
+            elif not warm_langs:
+                reason = "no_lsp_langs"
         if ready and failed:
             overall = "partial"
         elif ready:
@@ -359,6 +400,7 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
             {
                 "overall": overall,
                 "root": str(root),
+                "reason": reason,
                 "content_roots": content_roots,
                 "present_langs": present_langs,
                 "pid": os.getpid(),
