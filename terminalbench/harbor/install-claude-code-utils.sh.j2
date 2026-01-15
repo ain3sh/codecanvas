@@ -98,13 +98,9 @@ log "Skipping build-time multilspy warmup; CodeCanvas warms at SessionStart"
 # r: requires R base + languageserver package.
 log_start "R languageserver (custom LSP)"
 apt-get update
-if apt-get install -y --no-install-recommends r-base r-cran-languageserver; then
-    log "Installed R languageserver via apt"
-else
-    apt-get install -y --no-install-recommends r-base
-    R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
-fi
+apt-get install -y --no-install-recommends r-base
 rm -rf /var/lib/apt/lists/*
+R --slave -e "install.packages('languageserver', repos='https://cloud.r-project.org')"
 log_done "R languageserver (custom LSP)"
 {% else %}
 log "CodeCanvas not enabled; skipping R languageserver"

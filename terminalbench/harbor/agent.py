@@ -81,6 +81,9 @@ class ClaudeCodeMCP(ClaudeCode):
     async def setup(self, environment: BaseEnvironment) -> None:
         await environment.exec(command="mkdir -p /installed-agent")
 
+        setup_dir = self.logs_dir / "setup"
+        setup_dir.mkdir(parents=True, exist_ok=True)
+
         if not self._install_agent_template_path.exists():
             raise FileNotFoundError(f"Install agent template file not found: {self._install_agent_template_path}")
 
@@ -101,15 +104,32 @@ class ClaudeCodeMCP(ClaudeCode):
         if github_token:
             install_env = {"GITHUB_TOKEN": github_token}
 
-        result = await environment.exec(command="bash /installed-agent/install.sh", env=install_env)
-
-        setup_dir = self.logs_dir / "setup"
-        setup_dir.mkdir(parents=True, exist_ok=True)
-        (setup_dir / "return-code.txt").write_text(str(result.return_code))
-        if result.stdout:
-            (setup_dir / "stdout.txt").write_text(result.stdout)
-        if result.stderr:
-            (setup_dir / "stderr.txt").write_text(result.stderr)
+        try:
+            result = await environment.exec(
+                command='bash -lc "bash /installed-agent/install.sh 2>&1 | tee /installed-agent/install.log"',
+                env=install_env,
+            )
+            (setup_dir / "return-code.txt").write_text(str(result.return_code))
+            if result.stdout:
+                (setup_dir / "stdout.txt").write_text(result.stdout)
+            if result.stderr:
+                (setup_dir / "stderr.txt").write_text(result.stderr)
+        except Exception as exc:
+            (setup_dir / "return-code.txt").write_text("timeout")
+            (setup_dir / "exception.txt").write_text(str(exc))
+            try:
+                tail = await environment.exec(
+                    command="tail -n 200 /installed-agent/install.log || true",
+                    env=install_env,
+                    timeout_sec=30,
+                )
+                if tail.stdout:
+                    (setup_dir / "stdout.txt").write_text(tail.stdout)
+                if tail.stderr:
+                    (setup_dir / "stderr.txt").write_text(tail.stderr)
+            except Exception:
+                pass
+            raise
 
     def _get_session_dir(self) -> Path | None:
         """Select the best Claude Code session directory deterministically.
