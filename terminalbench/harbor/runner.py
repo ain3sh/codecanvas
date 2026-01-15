@@ -363,6 +363,7 @@ class HarborRunner:
             if attempt <= self.retries:
                 print(f"[RETRY] {task.id} attempt {attempt + 1}/{self.retries + 1}")
 
+        assert last_result is not None
         self._update_index(last_result)
         return last_result
 

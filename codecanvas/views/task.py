@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Optional, cast
 
 from ..core.models import Graph
 from ..core.state import CanvasState, Claim, Decision, Evidence, TaskSpec, pick_task
@@ -279,13 +279,14 @@ def _png_to_data_url(png_path: str) -> Optional[str]:
 def _metrics_line(metrics: object) -> str:
     if not isinstance(metrics, dict):
         return ""
+    metrics_dict = cast(dict[str, Any], metrics)
     out: List[str] = []
-    if "depth" in metrics:
-        out.append(f"d={metrics.get('depth')}")
-    if "node_count" in metrics:
-        out.append(f"nodes={metrics.get('node_count')}")
-    if "edge_count" in metrics:
-        out.append(f"edges={metrics.get('edge_count')}")
+    if "depth" in metrics_dict:
+        out.append(f"d={metrics_dict.get('depth')}")
+    if "node_count" in metrics_dict:
+        out.append(f"nodes={metrics_dict.get('node_count')}")
+    if "edge_count" in metrics_dict:
+        out.append(f"edges={metrics_dict.get('edge_count')}")
     return " ".join(out)
 
 

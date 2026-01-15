@@ -5,7 +5,7 @@ import time
 from bisect import bisect_right
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, cast
 
 from ..core.models import EdgeType, GraphEdge, GraphNode, NodeKind
 from .config import detect_language, has_lsp_support
@@ -272,7 +272,9 @@ def build_call_graph_edges(
                 if not isinstance(loc, dict):
                     reasons.add("non_dict_location")
                     continue
-                target_uri = loc.get("uri")
+
+                loc_dict = cast(Dict[str, Any], loc)
+                target_uri = loc_dict.get("uri")
                 if not target_uri:
                     reasons.add("missing_uri")
                     continue
@@ -286,14 +288,17 @@ def build_call_graph_edges(
                     reasons.add("target_not_indexed")
                     continue
 
-                r = loc.get("range") or {}
-                start_pos = (r.get("start") or {}) if isinstance(r, dict) else {}
+                r = loc_dict.get("range") or {}
+                r_dict = cast(Dict[str, Any], r) if isinstance(r, dict) else {}
+                start_pos = r_dict.get("start") or {}
                 if not isinstance(start_pos, dict):
                     reasons.add("missing_range")
                     continue
 
-                dl = _safe_int(start_pos.get("line"))
-                dc = _safe_int(start_pos.get("character"))
+                start_pos_dict = cast(Dict[str, Any], start_pos)
+
+                dl = _safe_int(start_pos_dict.get("line"))
+                dc = _safe_int(start_pos_dict.get("character"))
                 if dl is None or dc is None:
                     reasons.add("missing_range")
                     continue

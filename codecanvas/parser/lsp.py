@@ -13,6 +13,7 @@ import os
 import shutil
 import threading
 import time
+from asyncio.subprocess import PIPE, Process
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
@@ -363,11 +364,17 @@ class MultilspyBackend:
                 raise LSPError(f"Language {self.lang} not supported by multilspy")
 
             try:
-                from multilspy import SyncLanguageServer
-                from multilspy.multilspy_config import MultilspyConfig
-                from multilspy.multilspy_logger import MultilspyLogger
+                import importlib
 
                 def _start_server() -> Any:
+                    multilspy_module = importlib.import_module("multilspy")
+                    multilspy_config_module = importlib.import_module("multilspy.multilspy_config")
+                    multilspy_logger_module = importlib.import_module("multilspy.multilspy_logger")
+
+                    SyncLanguageServer = getattr(multilspy_module, "SyncLanguageServer")
+                    MultilspyConfig = getattr(multilspy_config_module, "MultilspyConfig")
+                    MultilspyLogger = getattr(multilspy_logger_module, "MultilspyLogger")
+
                     debug_log = _lsp_debug_log_path()
                     trace_log = _multilspy_trace_log_path()
                     enable_trace = (
@@ -472,7 +479,7 @@ class MultilspyBackend:
                     ticker.cancel()
                     try:
                         await ticker
-                    except Exception:
+                    except (asyncio.CancelledError, Exception):
                         pass
 
             if debug_log is not None:
@@ -543,7 +550,7 @@ class CustomLSPClient:
         self.workspace = os.path.abspath(workspace)
         self.config = config or LSPConfig()
 
-        self._process: Optional[asyncio.subprocess.Process] = None
+        self._process: Optional[Process] = None
         self._request_id = 0
         self._pending: Dict[int, asyncio.Future] = {}
         self._reader_task: Optional[asyncio.Task] = None
@@ -556,9 +563,9 @@ class CustomLSPClient:
         """Start the language server process and initialize."""
         self._process = await asyncio.create_subprocess_exec(
             *self.cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stdin=PIPE,
+            stdout=PIPE,
+            stderr=PIPE,
         )
         self._reader_task = asyncio.create_task(self._read_responses())
         self._stderr_task = asyncio.create_task(self._drain_stderr())
