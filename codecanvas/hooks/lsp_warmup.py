@@ -233,12 +233,24 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
             import shutil
             import sys
 
+            exe_bin = str(Path(sys.executable).parent)
+            path_parts = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+            path_has_exe_bin = bool(exe_bin and exe_bin in path_parts)
+
+            jedi_ls_pre = shutil.which("jedi-language-server")
+            if exe_bin and not path_has_exe_bin:
+                os.environ["PATH"] = os.pathsep.join([exe_bin] + path_parts)
+            jedi_ls_post = shutil.which("jedi-language-server")
+
             _log_file(
                 log_path,
                 "env "
                 f"py={sys.version.split()[0]} "
                 f"exe={sys.executable} "
-                f"jedi_ls={shutil.which('jedi-language-server')} "
+                f"exe_bin={exe_bin} "
+                f"path_has_exe_bin={path_has_exe_bin} "
+                f"jedi_ls_pre={jedi_ls_pre} "
+                f"jedi_ls={jedi_ls_post} "
                 f"debug_log={debug_log_path} "
                 f"trace_log={trace_log_path}",
             )

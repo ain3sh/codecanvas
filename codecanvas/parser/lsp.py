@@ -537,7 +537,7 @@ class MultilspyBackend:
 class LSPConfig:
     """Configuration for custom LSP client."""
 
-    retry_attempts: int = 3
+    retry_attempts: int = 1
     retry_delay_ms: int = 100
     request_timeout: float = 30.0
 
@@ -656,15 +656,21 @@ class CustomLSPClient:
             raise
 
     async def _request_with_retry(self, method: str, params: Dict[str, Any]) -> Any:
-        """Send request with retry logic for flaky servers."""
+        """Send request, optionally retrying for flaky servers."""
+        attempts = max(1, int(self.config.retry_attempts))
+        if attempts == 1:
+            return await self._request(method, params)
+
         last_error = None
-        for attempt in range(self.config.retry_attempts):
+        for attempt in range(attempts):
             try:
                 return await self._request(method, params)
             except LSPError as e:
                 last_error = e
-                if attempt < self.config.retry_attempts - 1:
-                    await asyncio.sleep(self.config.retry_delay_ms / 1000.0)
+                if attempt < attempts - 1:
+                    delay_s = max(0.0, float(self.config.retry_delay_ms) / 1000.0)
+                    if delay_s:
+                        await asyncio.sleep(delay_s)
         raise last_error or LSPError(f"Request {method} failed after retries")
 
     async def _notify(self, method: str, params: Dict[str, Any]) -> None:
