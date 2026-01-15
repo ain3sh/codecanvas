@@ -114,7 +114,7 @@ class ClaudeCodeMCP(ClaudeCode):
                 (setup_dir / "stdout.txt").write_text(result.stdout)
             if result.stderr:
                 (setup_dir / "stderr.txt").write_text(result.stderr)
-        except Exception as exc:
+        except BaseException as exc:
             (setup_dir / "return-code.txt").write_text("timeout")
             (setup_dir / "exception.txt").write_text(str(exc))
             try:
@@ -127,7 +127,7 @@ class ClaudeCodeMCP(ClaudeCode):
                     (setup_dir / "stdout.txt").write_text(tail.stdout)
                 if tail.stderr:
                     (setup_dir / "stderr.txt").write_text(tail.stderr)
-            except Exception:
+            except BaseException:
                 pass
             raise
 
