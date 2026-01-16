@@ -7,9 +7,8 @@ import time
 import traceback
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from codecanvas.core.models import GraphNode, NodeKind
 from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
 from codecanvas.core.state import load_state
 from codecanvas.server import canvas_action
@@ -224,61 +223,63 @@ def _maybe_init(*, root: Path, allow_init: bool, lsp_langs: list[str] | None) ->
     return True, "initialized"
 
 
-def _select_best_symbol_in_file(*, file_path: Path) -> Optional[GraphNode]:
+def _select_best_symbol_in_file(*, file_path: Path) -> str | None:
     try:
-        from codecanvas.server import _ensure_loaded, _graph
-
         state = load_state()
         if not state.initialized:
             return None
-        _ensure_loaded(state)
-        if _graph is None:
-            return None
 
         target = str(file_path.absolute())
-        candidates: list[GraphNode] = []
-        for node in _graph.nodes:
+
+        # Prefer selecting by `state.symbol_files` (cheap and stable) so we don't have
+        # to rebuild the graph inside hook processes.
+        by_file = state.symbol_files or {}
+        candidates: list[tuple[int, int, str]] = []
+        for symbol_id, fs_path in by_file.items():
             try:
-                if str(Path(node.fsPath).absolute()) != target:
+                if str(Path(fs_path).absolute()) != target:
                     continue
             except Exception:
                 continue
-            if node.kind not in {NodeKind.FUNC, NodeKind.CLASS}:
+
+            # Prefer funcs, then classes. (Skip module ids.)
+            if symbol_id.startswith("fn_"):
+                kind_rank = 0
+                try:
+                    line_rank = int(symbol_id.rsplit("_", 1)[1])
+                except Exception:
+                    line_rank = 1_000_000_000
+            elif symbol_id.startswith("cls_"):
+                kind_rank = 1
+                line_rank = 1_000_000_000
+            else:
                 continue
-            candidates.append(node)
+
+            candidates.append((kind_rank, line_rank, symbol_id))
 
         if not candidates:
             return None
 
-        def _score(n: GraphNode) -> tuple[int, int, int, int, int]:
-            kind_score = {
-                NodeKind.FUNC: 300,
-                NodeKind.CLASS: 200,
-                NodeKind.MODULE: 100,
-            }.get(n.kind, 0)
-
-            deg = len(_graph.get_edges_from(n.id)) + len(_graph.get_edges_to(n.id))
-            child_count = len(_graph.get_children(n.id))
-
-            suffix = Path(n.fsPath).suffix.lower()
-            header_suffixes = {".h", ".hh", ".hpp", ".hxx"}
-            ext_score = 0 if suffix in header_suffixes else 1
-
-            has_range = 1 if (n.start_line is not None and n.end_line is not None) else 0
-            return (kind_score, deg, child_count, ext_score, has_range)
-
-        return max(candidates, key=_score)
+        candidates.sort()
+        return candidates[0][2]
     except Exception:
         return None
 
 
-def _format_impact_card(*, root: Path, node: GraphNode) -> str:
+def _format_impact_card(*, root: Path, symbol_id: str) -> str:
     try:
-        from codecanvas.server import _analyzer, _graph
+        import codecanvas.server as server
 
-        if _analyzer is None or _graph is None:
+        analyzer = server._analyzer
+        graph = server._graph
+
+        if analyzer is None or graph is None:
             return ""
-        callers, callees = _analyzer.impact_call_counts(node.id)
+        node = analyzer.find_target(symbol_id)
+        if node is None:
+            return ""
+
+        callers, callees = analyzer.impact_call_counts(node.id)
         callers_n = len(callers)
         callees_n = len(callees)
 
@@ -289,7 +290,7 @@ def _format_impact_card(*, root: Path, node: GraphNode) -> str:
             if not d:
                 return ""
             top_id = max(d, key=lambda k: d[k])
-            n = _graph.get_node(top_id)
+            n = graph.get_node(top_id)
             return n.label if n is not None else top_id
 
         top_caller = _top_label(callers)
@@ -618,8 +619,8 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
             )
             return None
 
-        best = _select_best_symbol_in_file(file_path=file_path) if file_path is not None else None
-        if best is None:
+        symbol_id = _select_best_symbol_in_file(file_path=file_path) if file_path is not None else None
+        if symbol_id is None:
             _debug_log(
                 {
                     "event": "PostToolUse",
@@ -634,7 +635,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
             return None
 
         throttle = st.get_impact_throttle(root=str(root), file_path=str(file_path))
-        if throttle is not None and (time.time() - throttle.last_at) < 60.0 and throttle.symbol == best.id:
+        if throttle is not None and (time.time() - throttle.last_at) < 60.0 and throttle.symbol == symbol_id:
             _debug_log(
                 {
                     "event": "PostToolUse",
@@ -643,7 +644,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                     "cwd": cwd,
                     "file_path": file_path_str,
                     "resolved_root": str(root),
-                    "symbol": best.id,
+                    "symbol": symbol_id,
                     "skipped": "throttled",
                 }
             )
@@ -653,7 +654,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
         try:
             res = canvas_action(
                 action="impact",
-                symbol=best.id,
+                symbol=symbol_id,
                 depth=2,
                 max_nodes=20,
                 wait_for_call_graph_s=0.5,
@@ -667,7 +668,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                     "cwd": cwd,
                     "file_path": file_path_str,
                     "resolved_root": str(root),
-                    "symbol": best.id,
+                    "symbol": symbol_id,
                     "error": repr(e),
                     "traceback": traceback.format_exc(limit=8),
                 }
@@ -685,7 +686,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                 "cwd": cwd,
                 "file_path": file_path_str,
                 "resolved_root": str(root),
-                "symbol": best.id,
+                "symbol": symbol_id,
                 "impact_ok": ok,
                 "elapsed_s": time.time() - started,
             }
@@ -694,11 +695,11 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
         if not ok:
             return None
 
-        card = _format_impact_card(root=root, node=best)
+        card = _format_impact_card(root=root, symbol_id=symbol_id)
         if not card:
             return None
 
-        st.set_impact_throttle(root=str(root), file_path=str(file_path), symbol=best.id)
+        st.set_impact_throttle(root=str(root), file_path=str(file_path), symbol=symbol_id)
         return card
 
 
