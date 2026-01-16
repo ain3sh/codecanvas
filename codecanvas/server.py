@@ -6,6 +6,7 @@ This is intentionally explicit (no backwards-compat shims): callers provide an
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -15,7 +16,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from .core.analysis import Analyzer
-from .core.models import Graph
+from .core.models import EdgeType, Graph, GraphEdge
 from .core.paths import get_canvas_dir
 from .core.state import AnalysisState, CanvasState, clear_state, load_state, load_tasks_yaml, pick_task, save_state
 from .parser import Parser
@@ -52,8 +53,107 @@ _call_graph_thread: threading.Thread | None = None
 _call_graph_generation: int = 0
 _call_graph_edges_total: int = 0
 _call_graph_result_summary: dict | None = None  # Detailed result for diagnostics
+_call_graph_cache_info: dict | None = None
 
 _SERVER_INSTANCE_ID = uuid.uuid4().hex
+_CALL_EDGE_CACHE_VERSION = 1
+_CALL_EDGE_CACHE_NAME = "call_edges.json"
+
+
+def _normalize_project_path(project_dir: Path) -> str:
+    try:
+        return str(project_dir.resolve())
+    except Exception:
+        return str(project_dir)
+
+
+def _call_edge_cache_path(project_dir: Path) -> Path:
+    return get_canvas_dir(project_dir) / _CALL_EDGE_CACHE_NAME
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def _load_call_edge_cache(project_dir: Path) -> tuple[list[GraphEdge], dict]:
+    path = _call_edge_cache_path(project_dir)
+    if not path.exists():
+        return [], {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return [], {}
+    if int(data.get("version", 0) or 0) != _CALL_EDGE_CACHE_VERSION:
+        return [], {}
+    cached_project = data.get("project_path")
+    if cached_project:
+        cached_path = _normalize_project_path(Path(str(cached_project)))
+        if cached_path != _normalize_project_path(project_dir):
+            return [], {}
+    edges_raw = data.get("edges") or []
+    edges: list[GraphEdge] = []
+    for item in edges_raw:
+        if not isinstance(item, dict):
+            continue
+        from_id = item.get("from_id")
+        to_id = item.get("to_id")
+        if not from_id or not to_id:
+            continue
+        edges.append(GraphEdge(from_id=str(from_id), to_id=str(to_id), type=EdgeType.CALL))
+    meta = {
+        "cache_path": str(path),
+        "cache_edges_total": len(edges),
+        "cache_generated_at": data.get("generated_at"),
+        "cache_generation": data.get("generation"),
+        "cache_source": data.get("source"),
+    }
+    return edges, meta
+
+
+def _merge_cached_call_edges(graph: Graph, project_dir: Path) -> dict | None:
+    edges, meta = _load_call_edge_cache(project_dir)
+    if not edges:
+        return None
+    added = 0
+    missing_nodes = 0
+    for edge in edges:
+        if graph.get_node(edge.from_id) is None or graph.get_node(edge.to_id) is None:
+            missing_nodes += 1
+            continue
+        if graph.add_edge(edge):
+            added += 1
+    meta["cache_edges_added"] = int(added)
+    meta["cache_edges_missing_nodes"] = int(missing_nodes)
+    return meta
+
+
+def _persist_call_edge_cache(graph: Graph, project_dir: Path, *, generation: int | None, source: str) -> None:
+    try:
+        edges_payload: list[dict[str, str]] = []
+        for edge in graph.edges:
+            if edge.type != EdgeType.CALL:
+                continue
+            if graph.get_node(edge.from_id) is None or graph.get_node(edge.to_id) is None:
+                continue
+            edges_payload.append({"from_id": edge.from_id, "to_id": edge.to_id})
+        if not edges_payload:
+            return
+        payload = {
+            "version": _CALL_EDGE_CACHE_VERSION,
+            "project_path": _normalize_project_path(project_dir),
+            "generated_at": time.time(),
+            "generation": int(generation) if generation is not None else None,
+            "source": str(source),
+            "instance_id": _SERVER_INSTANCE_ID,
+            "edges": edges_payload,
+            "stats": {"edges_total": len(edges_payload)},
+        }
+        _write_json_atomic(_call_edge_cache_path(project_dir), payload)
+    except Exception:
+        return
 
 
 def _call_graph_diag(*, phase: str | None = None) -> dict:
@@ -98,12 +198,15 @@ def _build_call_graph_foreground(
     time_budget_s: float,
     generation: int,
     lsp_langs: set[str] | None = None,
+    project_dir: Path | None = None,
 ) -> int:
     global _graph
     global _call_graph_status, _call_graph_error, _call_graph_last
     global _call_graph_edges_total, _call_graph_result_summary
     if _graph is None:
         return 0
+
+    cache_info = dict(_call_graph_cache_info) if _call_graph_cache_info else None
 
     with _graph_lock:
         graph_ref = _graph
@@ -119,6 +222,8 @@ def _build_call_graph_foreground(
                 "max_callsites_total": 250,
                 "max_callsites_per_file": 50,
             }
+            if cache_info:
+                _call_graph_result_summary["cache"] = cache_info
         result = build_call_graph_edges(
             nodes_snapshot,
             time_budget_s=float(time_budget_s),
@@ -136,6 +241,8 @@ def _build_call_graph_foreground(
                 "time_budget_s": float(time_budget_s),
                 "error": f"{type(e).__name__}: {e}",
             }
+            if cache_info:
+                _call_graph_result_summary["cache"] = cache_info
             _persist_call_graph_diag(_call_graph_diag(phase="foreground"))
         return 0
 
@@ -168,7 +275,11 @@ def _build_call_graph_foreground(
                 "lsp_failures": dict(result.lsp_failures),
                 "duration_s": result.duration_s,
             }
+            if cache_info:
+                _call_graph_result_summary["cache"] = cache_info
             _persist_call_graph_diag(_call_graph_diag(phase="foreground"))
+            if project_dir is not None:
+                _persist_call_edge_cache(_graph, project_dir, generation=generation, source="foreground")
 
     return added
 
@@ -178,6 +289,7 @@ def _start_call_graph_background(
     time_budget_s: float,
     generation: int,
     lsp_langs: set[str] | None = None,
+    project_dir: Path | None = None,
 ) -> None:
     global _graph, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_thread, _call_graph_edges_total
     if _graph is None:
@@ -191,6 +303,7 @@ def _start_call_graph_background(
         global _graph
         global _call_graph_status, _call_graph_error, _call_graph_last
         global _call_graph_edges_total, _call_graph_result_summary
+        cache_info = dict(_call_graph_cache_info) if _call_graph_cache_info else None
 
         try:
             if generation == _call_graph_generation:
@@ -202,6 +315,8 @@ def _start_call_graph_background(
                     "max_callsites_total": 2000,
                     "max_callsites_per_file": 200,
                 }
+                if cache_info:
+                    _call_graph_result_summary["cache"] = cache_info
                 _persist_call_graph_diag(_call_graph_diag(phase="background"))
             result = build_call_graph_edges(
                 nodes_snapshot,
@@ -220,6 +335,8 @@ def _start_call_graph_background(
                     "time_budget_s": float(time_budget_s),
                     "error": f"{type(e).__name__}: {e}",
                 }
+                if cache_info:
+                    _call_graph_result_summary["cache"] = cache_info
                 _persist_call_graph_diag(_call_graph_diag(phase="background"))
             return
 
@@ -253,7 +370,11 @@ def _start_call_graph_background(
                     "lsp_failures": dict(result.lsp_failures),
                     "duration_s": result.duration_s,
                 }
+                if cache_info:
+                    _call_graph_result_summary["cache"] = cache_info
                 _persist_call_graph_diag(_call_graph_diag(phase="background"))
+                if project_dir is not None:
+                    _persist_call_edge_cache(_graph, project_dir, generation=generation, source="background")
 
     _call_graph_thread = threading.Thread(target=_worker, name="codecanvas-call-graph", daemon=True)
     _call_graph_thread.start()
@@ -378,6 +499,7 @@ def _set_project_dir(project_dir: str) -> None:
 def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) -> CanvasResult:
     global _graph, _analyzer
     global _call_graph_generation, _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_edges_total
+    global _call_graph_cache_info
 
     abs_p = Path(repo_path).absolute()
     abs_path = str(abs_p)
@@ -402,6 +524,20 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
     _call_graph_edges_total = 0
     global _call_graph_result_summary
     _call_graph_result_summary = None
+    _call_graph_cache_info = None
+
+    cache_info = None
+    with _graph_lock:
+        cache_info = _merge_cached_call_edges(_graph, Path(project_dir))
+        if cache_info:
+            _call_graph_edges_total = int(_graph.stats().get("call_edges", 0))
+    if cache_info:
+        _call_graph_cache_info = {**cache_info, "edges_total": int(_call_graph_edges_total)}
+        _call_graph_result_summary = {"phase": "cache_load", **_call_graph_cache_info}
+        if _call_graph_edges_total:
+            _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": 0.0, "source": "cache"}
+        if not use_lsp and _call_graph_edges_total:
+            _call_graph_status = "completed"
 
     call_edges_added = 0
     if use_lsp:
@@ -409,8 +545,14 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
             time_budget_s=0.35,
             generation=generation,
             lsp_langs=allowed_lsp_langs,
+            project_dir=Path(project_dir),
         )
-        _start_call_graph_background(time_budget_s=30.0, generation=generation, lsp_langs=allowed_lsp_langs)
+        _start_call_graph_background(
+            time_budget_s=30.0,
+            generation=generation,
+            lsp_langs=allowed_lsp_langs,
+            project_dir=Path(project_dir),
+        )
 
     warn = ""
     backend_note = ""
@@ -485,10 +627,18 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
 def _ensure_loaded(state: CanvasState) -> None:
     global _graph, _analyzer
     global _call_graph_generation, _call_graph_edges_total
+    global _call_graph_status, _call_graph_error, _call_graph_last, _call_graph_result_summary, _call_graph_cache_info
     if _graph is not None and _analyzer is not None:
         return
     if not state.project_path:
         return
+
+    _set_project_dir(state.project_path)
+    _call_graph_status = "idle"
+    _call_graph_error = None
+    _call_graph_last = None
+    _call_graph_edges_total = 0
+    _call_graph_result_summary = None
 
     lsp_langs: set[str] | None = None
     try:
@@ -505,14 +655,25 @@ def _ensure_loaded(state: CanvasState) -> None:
         _graph = parser.parse_file(str(root)) if root.is_file() else parser.parse_directory(str(root))
         _analyzer = Analyzer(_graph)
 
+    _call_graph_cache_info = None
+    cache_info = None
+    with _graph_lock:
+        cache_info = _merge_cached_call_edges(_graph, root)
+        if cache_info:
+            _call_graph_edges_total = int(_graph.stats().get("call_edges", 0))
+    if cache_info:
+        _call_graph_cache_info = {**cache_info, "edges_total": int(_call_graph_edges_total)}
+        _call_graph_result_summary = {"phase": "cache_load", **_call_graph_cache_info}
+        if _call_graph_edges_total:
+            _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": 0.0, "source": "cache"}
+        if not getattr(state, "use_lsp", True) and _call_graph_edges_total:
+            _call_graph_status = "completed"
+
     if getattr(state, "use_lsp", True):
         _call_graph_generation += 1
         generation = _call_graph_generation
-        _call_graph_edges_total = 0
-        global _call_graph_result_summary
-        _call_graph_result_summary = None
-        _build_call_graph_foreground(time_budget_s=0.2, generation=generation, lsp_langs=lsp_langs)
-        _start_call_graph_background(time_budget_s=30.0, generation=generation, lsp_langs=lsp_langs)
+        _build_call_graph_foreground(time_budget_s=0.2, generation=generation, lsp_langs=lsp_langs, project_dir=root)
+        _start_call_graph_background(time_budget_s=30.0, generation=generation, lsp_langs=lsp_langs, project_dir=root)
 
 
 def _action_impact(

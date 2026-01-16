@@ -28,6 +28,14 @@ def _limit(s: str, n: int) -> str:
     return (s[: max(0, n - 1)] + "…").strip()
 
 
+def _debug_logs_enabled() -> bool:
+    return (
+        os.environ.get("CODECANVAS_DEBUG_LOGS") == "1"
+        or os.environ.get("CODECANVAS_LSP_DEBUG") == "1"
+        or os.environ.get("CODECANVAS_LSP_TRACE") == "1"
+    )
+
+
 def _emit(*, hook_event_name: str, additional_context: str | None = None) -> None:
     out: dict[str, Any] = {
         "suppressOutput": True,
@@ -45,6 +53,8 @@ def _noop(hook_event_name: str) -> None:
 
 
 def _log(msg: str) -> None:
+    if not _debug_logs_enabled():
+        return
     try:
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         print(f"[codecanvas:lsp-warmup] {ts} {msg}", flush=True)
@@ -53,6 +63,8 @@ def _log(msg: str) -> None:
 
 
 def _log_file(path: Path, msg: str) -> None:
+    if not _debug_logs_enabled():
+        return
     try:
         ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
         line = f"[codecanvas:lsp-warmup] {ts} {msg}\n"
@@ -259,10 +271,12 @@ def _run_warmup(*, root: Path, state_path: Path, attempt: int) -> None:
     try:
         # Enable detailed LSP logs for TerminalBench (/app) so we can pinpoint hangs.
         if str(root).startswith("/app"):
-            os.environ.setdefault("CODECANVAS_LSP_DEBUG", "1")
-            os.environ.setdefault("CODECANVAS_LSP_TRACE", "1")
-            os.environ.setdefault("CODECANVAS_LSP_DEBUG_LOG", str(debug_log_path))
-            os.environ.setdefault("CODECANVAS_MULTILSPY_TRACE_LOG", str(trace_log_path))
+            if os.environ.get("CODECANVAS_DEBUG_LOGS") == "1":
+                os.environ.setdefault("CODECANVAS_LSP_DEBUG", "1")
+                os.environ.setdefault("CODECANVAS_LSP_TRACE", "1")
+            if _debug_logs_enabled():
+                os.environ.setdefault("CODECANVAS_LSP_DEBUG_LOG", str(debug_log_path))
+                os.environ.setdefault("CODECANVAS_MULTILSPY_TRACE_LOG", str(trace_log_path))
 
         try:
             import shutil

@@ -65,7 +65,7 @@ def _configure_tb_artifacts(cwd: str) -> None:
 
     session_dir = (os.environ.get("CLAUDE_CONFIG_DIR") or "").strip()
     if session_dir:
-        os.environ["CANVAS_ARTIFACT_DIR"] = str((Path(session_dir) / "codecanvas" / "canvas").absolute())
+        os.environ["CANVAS_ARTIFACT_DIR"] = str((Path(session_dir) / "codecanvas").absolute())
         return
     os.environ["CANVAS_ARTIFACT_DIR"] = "/tmp/codecanvas"
 
@@ -93,9 +93,15 @@ def _limit(s: str, n: int) -> str:
     return (s[: max(0, n - 1)] + "…").strip()
 
 
+def _debug_logs_enabled() -> bool:
+    return os.environ.get("CODECANVAS_DEBUG_LOGS") == "1"
+
+
 def _debug_log(payload: dict[str, Any]) -> None:
     """Best-effort, append-only debug log persisted under CLAUDE_CONFIG_DIR."""
 
+    if not _debug_logs_enabled():
+        return
     try:
         session_dir = os.environ.get("CLAUDE_CONFIG_DIR")
         if not session_dir:
@@ -166,6 +172,13 @@ def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
         return
 
     dest_dir = Path(session_dir) / "codecanvas"
+    try:
+        src_resolved = src_dir.resolve()
+        dest_resolved = dest_dir.resolve()
+        if src_resolved == dest_resolved or dest_resolved in src_resolved.parents:
+            return
+    except Exception:
+        pass
     try:
         dest_dir.mkdir(parents=True, exist_ok=True)
     except Exception:
