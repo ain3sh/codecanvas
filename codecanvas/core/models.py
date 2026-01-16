@@ -88,10 +88,16 @@ class Graph:
 
             if e.type == EdgeType.CONTAINS:
                 existing = self._contains_parent.get(e.to_id)
-                if existing is not None and existing != e.from_id:
-                    raise ValueError(f"Multiple CONTAINS parents for {e.to_id}: {existing} and {e.from_id}")
-                self._contains_parent[e.to_id] = e.from_id
-                self._contains_children.setdefault(e.from_id, []).append(e.to_id)
+                # Some parsers (notably tree-sitter for generated/Cython code) can
+                # emit ambiguous containment relationships. Keep the first parent
+                # and ignore subsequent conflicting parents rather than crashing.
+                if existing is None:
+                    self._contains_parent[e.to_id] = e.from_id
+                    self._contains_children.setdefault(e.from_id, []).append(e.to_id)
+                elif existing == e.from_id:
+                    self._contains_children.setdefault(e.from_id, []).append(e.to_id)
+                else:
+                    continue
 
     def get_node(self, node_id: str) -> Optional[GraphNode]:
         """Get node by ID (O(1))."""
@@ -132,10 +138,13 @@ class Graph:
 
         if edge.type == EdgeType.CONTAINS:
             existing = self._contains_parent.get(edge.to_id)
-            if existing is not None and existing != edge.from_id:
-                raise ValueError(f"Multiple CONTAINS parents for {edge.to_id}: {existing} and {edge.from_id}")
-            self._contains_parent[edge.to_id] = edge.from_id
-            self._contains_children.setdefault(edge.from_id, []).append(edge.to_id)
+            if existing is None:
+                self._contains_parent[edge.to_id] = edge.from_id
+                self._contains_children.setdefault(edge.from_id, []).append(edge.to_id)
+            elif existing == edge.from_id:
+                self._contains_children.setdefault(edge.from_id, []).append(edge.to_id)
+            else:
+                return False
 
         return True
 
