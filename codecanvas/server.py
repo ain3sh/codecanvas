@@ -229,6 +229,8 @@ def _refresh_graph_for_dirty_files(
     removed_call_edges = 0
     call_edges_added = 0
     call_edges_skipped_reason = None
+    call_edges_skipped_at = None
+    call_edges_refresh_ok = False
 
     lsp_langs = set(state.parse_summary.get("lsp_langs") or []) if state.parse_summary else None
     parser = Parser(use_lsp=state.use_lsp, lsp_langs=lsp_langs)
@@ -297,6 +299,7 @@ def _refresh_graph_for_dirty_files(
 
     if _call_graph_thread is not None and _call_graph_thread.is_alive():
         call_edges_skipped_reason = "call_graph_thread_active"
+        call_edges_skipped_at = time.time()
     else:
         try:
             result = build_call_graph_edges(
@@ -319,8 +322,10 @@ def _refresh_graph_for_dirty_files(
                         generation=_call_graph_generation,
                         source="refresh",
                     )
+                    call_edges_refresh_ok = True
         except Exception as e:
             call_edges_skipped_reason = f"error:{type(e).__name__}"
+            call_edges_skipped_at = time.time()
 
     with _graph_lock:
         if graph_ref is not None:
@@ -338,8 +343,24 @@ def _refresh_graph_for_dirty_files(
         "call_edges_added": call_edges_added,
         "skipped_paths": skipped_paths,
     }
+    metrics = dict(state.refresh_metrics or {})
+    metrics.setdefault("refresh_total", 0)
+    metrics["refresh_total"] += 1
+    if call_edges_refresh_ok:
+        metrics.setdefault("call_edges_refresh_ok", 0)
+        metrics["call_edges_refresh_ok"] += 1
+        metrics["last_call_edges_refresh_ok_at"] = time.time()
+    if call_edges_skipped_reason:
+        metrics.setdefault("call_edges_skipped_total", 0)
+        metrics["call_edges_skipped_total"] += 1
+        metrics["last_call_edges_skipped_reason"] = call_edges_skipped_reason
+        metrics["last_call_edges_skipped_at"] = call_edges_skipped_at or time.time()
+    state.refresh_metrics = metrics
     if call_edges_skipped_reason:
         summary["call_edges_skipped"] = call_edges_skipped_reason
+        if call_edges_skipped_at is not None:
+            summary["call_edges_skipped_at"] = call_edges_skipped_at
+    summary["refresh_metrics"] = metrics
 
     return summary
 
