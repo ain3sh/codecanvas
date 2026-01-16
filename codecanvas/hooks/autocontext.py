@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from codecanvas.core.models import NodeKind
+from codecanvas.core.models import EdgeType, NodeKind
 from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
 from codecanvas.core.state import load_state
 from codecanvas.server import canvas_action
@@ -237,45 +237,106 @@ def _maybe_init(*, root: Path, allow_init: bool, lsp_langs: list[str] | None) ->
     return True, "initialized"
 
 
+def _symbol_visibility(label: str) -> int:
+    name = label.rsplit(".", 1)[-1]
+    if name.startswith("__") and name.endswith("__"):
+        return 2
+    if name.startswith("_"):
+        return 1
+    return 0
+
+
+def _parse_symbol_id(symbol_id: str) -> tuple[str, str, int] | None:
+    if symbol_id.startswith("fn_"):
+        parts = symbol_id.split("_")
+        if len(parts) < 4:
+            return None
+        name = "_".join(parts[2:-1])
+        try:
+            line = int(parts[-1])
+        except Exception:
+            line = 1_000_000_000
+        return "func", name, line
+    if symbol_id.startswith("cls_"):
+        parts = symbol_id.split("_")
+        if len(parts) < 3:
+            return None
+        name = "_".join(parts[2:])
+        return "class", name, 1_000_000_000
+    return None
+
+
+def _descendant_funcs(graph, node_id: str) -> set[str]:
+    out: set[str] = set()
+    queue = [node_id]
+    seen = {node_id}
+    while queue:
+        cur = queue.pop(0)
+        for child_id in graph.get_children_ids(cur):
+            if child_id in seen:
+                continue
+            seen.add(child_id)
+            child = graph.get_node(child_id)
+            if child is None:
+                continue
+            if child.kind == NodeKind.FUNC:
+                out.add(child.id)
+            elif child.kind in {NodeKind.CLASS, NodeKind.MODULE}:
+                queue.append(child.id)
+    return out
+
+
+def _call_edge_degree(graph, node_id: str) -> int:
+    outbound = sum(1 for e in graph.get_edges_from(node_id) if e.type == EdgeType.CALL)
+    inbound = sum(1 for e in graph.get_edges_to(node_id) if e.type == EdgeType.CALL)
+    return outbound + inbound
+
+
+def _call_edge_score(graph, node_id: str, kind: NodeKind) -> int:
+    if kind == NodeKind.FUNC:
+        return _call_edge_degree(graph, node_id)
+    if kind in {NodeKind.CLASS, NodeKind.MODULE}:
+        return sum(_call_edge_degree(graph, fid) for fid in _descendant_funcs(graph, node_id))
+    return 0
+
+
 def _select_best_symbol_in_file(*, file_path: Path) -> str | None:
+    symbol_id = _select_symbol_from_graph(file_path)
+    if symbol_id:
+        return symbol_id
+    return _select_symbol_from_state(file_path)
+
+
+def _select_symbol_from_state(file_path: Path) -> str | None:
     try:
         state = load_state()
         if not state.initialized:
             return None
 
         target = str(file_path.absolute())
-
-        # Prefer selecting by `state.symbol_files` (cheap and stable) so we don't have
-        # to rebuild the graph inside hook processes.
-        by_file = state.symbol_files or {}
-        candidates: list[tuple[int, int, str]] = []
-        for symbol_id, fs_path in by_file.items():
+        candidates: list[tuple[int, int, int, str]] = []
+        for symbol_id, fs_path in (state.symbol_files or {}).items():
             try:
                 if str(Path(fs_path).absolute()) != target:
                     continue
             except Exception:
                 continue
 
-            # Prefer funcs, then classes. (Skip module ids.)
-            if symbol_id.startswith("fn_"):
-                kind_rank = 0
-                try:
-                    line_rank = int(symbol_id.rsplit("_", 1)[1])
-                except Exception:
-                    line_rank = 1_000_000_000
-            elif symbol_id.startswith("cls_"):
-                kind_rank = 1
-                line_rank = 1_000_000_000
-            else:
+            parsed = _parse_symbol_id(symbol_id)
+            if parsed is None:
                 continue
+            kind, name, line_rank = parsed
+            kind_rank = 0 if kind == "func" else 1
+            vis_rank = _symbol_visibility(name)
+            candidates.append((vis_rank, kind_rank, line_rank, symbol_id))
 
-            candidates.append((kind_rank, line_rank, symbol_id))
+        if not candidates:
+            return None
 
-        if candidates:
-            candidates.sort()
-            return candidates[0][2]
-
-        return _select_symbol_from_graph(file_path)
+        best_vis = min(c[0] for c in candidates)
+        filtered = [c for c in candidates if c[0] == best_vis]
+        filtered.sort(key=lambda c: (c[1], c[2], c[3]))
+        return filtered[0][3]
     except Exception:
         return None
 
@@ -289,7 +350,7 @@ def _select_symbol_from_graph(file_path: Path) -> str | None:
             return None
 
         target = str(file_path.absolute())
-        candidates: list[tuple[int, int, str]] = []
+        candidates: list[tuple[int, int, int, int, int, str]] = []
         for node in graph.nodes:
             try:
                 if str(Path(node.fsPath).absolute()) != target:
@@ -297,21 +358,23 @@ def _select_symbol_from_graph(file_path: Path) -> str | None:
             except Exception:
                 continue
 
-            if node.kind == NodeKind.FUNC:
-                kind_rank = 0
-            elif node.kind == NodeKind.CLASS:
-                kind_rank = 1
-            else:
+            if node.kind not in {NodeKind.FUNC, NodeKind.CLASS}:
                 continue
 
+            vis_rank = _symbol_visibility(node.label)
+            call_score = _call_edge_score(graph, node.id, node.kind)
+            child_score = len(_descendant_funcs(graph, node.id)) if node.kind != NodeKind.FUNC else 0
+            kind_rank = 0 if node.kind == NodeKind.FUNC else 1
             line_rank = int(node.start_line or 1_000_000_000)
-            candidates.append((kind_rank, line_rank, node.id))
+            candidates.append((-call_score, -child_score, kind_rank, line_rank, vis_rank, node.id))
 
         if not candidates:
             return None
 
-        candidates.sort()
-        return candidates[0][2]
+        best_vis = min(c[4] for c in candidates)
+        filtered = [c for c in candidates if c[4] == best_vis]
+        filtered.sort()
+        return filtered[0][5]
     except Exception:
         return None
 

@@ -337,7 +337,7 @@ class Parser:
 
         lines = text.split("\n")
 
-        self._process_lsp_symbols(
+        added = self._process_lsp_symbols(
             symbols,
             container_id=module_id,
             container_qualname=None,
@@ -347,7 +347,7 @@ class Parser:
             lines=lines,
             graph=graph,
         )
-        return True
+        return added > 0
 
     def _process_lsp_symbols(
         self,
@@ -360,12 +360,14 @@ class Parser:
         fs_path: str,
         lines: List[str],
         graph: Graph,
-    ) -> None:
+    ) -> int:
         """Process LSP DocumentSymbol tree into graph nodes."""
         from lsprotocol.types import SymbolKind
 
         if not symbols:
-            return
+            return 0
+
+        added = 0
 
         def snippet_from(line: int, span: int = 20) -> str:
             end = min(len(lines), line + span)
@@ -402,9 +404,10 @@ class Parser:
                     )
                 )
                 graph.add_edge(GraphEdge(from_id=container_id, to_id=class_id, type=EdgeType.CONTAINS))
+                added += 1
                 # Recurse into children
                 if hasattr(sym, "children") and sym.children:
-                    self._process_lsp_symbols(
+                    added += self._process_lsp_symbols(
                         sym.children,
                         container_id=class_id,
                         container_qualname=qualname,
@@ -436,11 +439,12 @@ class Parser:
                     )
                 )
                 graph.add_edge(GraphEdge(from_id=container_id, to_id=func_id, type=EdgeType.CONTAINS))
+                added += 1
 
             elif kind in CONTAINER_KINDS:
                 # Containers (Module, Namespace, Package) - recurse into children
                 if hasattr(sym, "children") and sym.children:
-                    self._process_lsp_symbols(
+                    added += self._process_lsp_symbols(
                         sym.children,
                         container_id=container_id,
                         container_qualname=container_qualname,
@@ -450,6 +454,8 @@ class Parser:
                         lines=lines,
                         graph=graph,
                     )
+
+        return added
 
     def _add_def_nodes(
         self,
