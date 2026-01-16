@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Set
@@ -319,19 +320,68 @@ class Parser:
         module_id: str,
     ) -> bool:
         """Parse defs using LSP document symbols."""
-        from .lsp import get_lsp_runtime, get_lsp_session_manager, path_to_uri
+        from .lsp import (
+            _append_debug_line,
+            _lsp_debug_enabled,
+            _lsp_debug_log_path,
+            get_lsp_runtime,
+            get_lsp_session_manager,
+            path_to_uri,
+        )
         from .utils import find_workspace_root
 
         workspace = str(find_workspace_root(file_path))
         uri = path_to_uri(str(file_path))
 
-        async def _fetch_symbols():
+        def _log_empty(*, attempt: int, recovered: bool) -> None:
+            if not _lsp_debug_enabled():
+                return
+            log_path = _lsp_debug_log_path()
+            rel_path = os.path.relpath(str(file_path), workspace)
+            note = "recovered" if recovered else "empty"
+            _append_debug_line(
+                log_path,
+                (
+                    f"document_symbols_{note} lang={lang} "
+                    f"rel_path={rel_path} attempt={attempt} workspace={workspace}"
+                ),
+            )
+
+        def _parse_retry_attempts() -> int:
+            raw = os.environ.get("CODECANVAS_LSP_EMPTY_RETRY_ATTEMPTS", "1")
+            try:
+                return max(0, int(raw))
+            except Exception:
+                return 1
+
+        def _parse_retry_delay_s() -> float:
+            raw = os.environ.get("CODECANVAS_LSP_EMPTY_RETRY_DELAY_S", "0.2")
+            try:
+                return max(0.0, float(raw))
+            except Exception:
+                return 0.2
+
+        async def _fetch_symbols(*, force_refresh: bool) -> list:
             mgr = get_lsp_session_manager()
             # LspSession routes to multilspy or fallback based on language
             sess = await mgr.get(lang=lang, workspace_root=workspace)
-            return await sess.document_symbols(uri, text=text)
+            return await sess.document_symbols(uri, text=text, force_refresh=force_refresh, cache_empty=False)
 
-        symbols = get_lsp_runtime().run(_fetch_symbols())
+        symbols = get_lsp_runtime().run(_fetch_symbols(force_refresh=False))
+        if not symbols:
+            _log_empty(attempt=1, recovered=False)
+            retry_attempts = _parse_retry_attempts()
+            retry_delay_s = _parse_retry_delay_s()
+            for attempt in range(retry_attempts):
+                if retry_delay_s > 0:
+                    time.sleep(retry_delay_s)
+                symbols = get_lsp_runtime().run(_fetch_symbols(force_refresh=True))
+                if symbols:
+                    _log_empty(attempt=attempt + 2, recovered=True)
+                    break
+            if not symbols:
+                self.last_summary.add_lsp_fallback(file_path, "empty_symbols", detail=f"lang={lang}")
+                return False
         if not symbols:
             return False
 

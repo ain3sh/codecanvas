@@ -968,20 +968,31 @@ class LspSession:
         except Exception:
             return None
 
-    async def document_symbols(self, uri_or_path: str, *, text: str | None = None) -> List[Any]:
+    async def document_symbols(
+        self,
+        uri_or_path: str,
+        *,
+        text: str | None = None,
+        force_refresh: bool = False,
+        cache_empty: bool = True,
+    ) -> List[Any]:
         """Get document symbols with caching."""
         self._last_used = time.monotonic()
         sig = self._file_sig(uri_or_path)
 
-        if sig is not None:
+        if sig is not None and not force_refresh:
             cached = self._doc_symbol_cache.get(uri_or_path)
             if cached is not None and cached.sig == sig:
-                return cached.symbols
+                if cached.symbols or cache_empty:
+                    return cached.symbols
+
+        if force_refresh:
+            self._doc_symbol_cache.pop(uri_or_path, None)
 
         async with self._semaphore:
             symbols = await self._backend.document_symbols(uri_or_path)
 
-        if sig is not None:
+        if sig is not None and (cache_empty or symbols):
             self._doc_symbol_cache[uri_or_path] = _CachedSymbols(sig=sig, symbols=symbols)
         return symbols
 
