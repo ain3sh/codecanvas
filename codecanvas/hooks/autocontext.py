@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import shutil
 import time
 import traceback
@@ -11,6 +13,7 @@ from typing import Any
 
 from codecanvas.core.models import EdgeType, NodeKind
 from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
+from codecanvas.core.refresh import mark_dirty
 from codecanvas.core.state import load_state
 from codecanvas.server import canvas_action
 
@@ -19,6 +22,7 @@ from ._hookio import (
     extract_file_path,
     get_hook_event_name,
     get_str,
+    get_tool_input,
     get_tool_name,
     read_stdin_json,
 )
@@ -69,6 +73,66 @@ def _configure_tb_artifacts(cwd: str) -> None:
         os.environ["CANVAS_ARTIFACT_DIR"] = str((Path(session_dir) / "codecanvas").absolute())
         return
     os.environ["CANVAS_ARTIFACT_DIR"] = "/tmp/codecanvas"
+
+
+def _extract_bash_modified_paths(command: str, cwd: str) -> list[Path]:
+    if not command:
+        return []
+
+    out: list[Path] = []
+
+    def _add(path_str: str) -> None:
+        p = (path_str or "").strip().strip("\"'")
+        if not p:
+            return
+        path = Path(p)
+        if not path.is_absolute():
+            path = Path(cwd) / path
+        out.append(path)
+
+    for match in re.finditer(r"(?:^|\s)(?:>>?|\+>)\s*([^\s]+)", command):
+        _add(match.group(1))
+
+    try:
+        tokens = shlex.split(command)
+    except Exception:
+        tokens = command.split()
+
+    if not tokens:
+        return out
+
+    head = tokens[0]
+    if head in {"touch"}:
+        for t in tokens[1:]:
+            if t.startswith("-"):
+                continue
+            _add(t)
+
+    if head in {"cp", "mv", "install"}:
+        if len(tokens) >= 3:
+            _add(tokens[-1])
+
+    if head == "tee":
+        for t in tokens[1:]:
+            if t.startswith("-"):
+                continue
+            _add(t)
+
+    if head == "sed" and "-i" in tokens:
+        for t in reversed(tokens):
+            if t.startswith("-"):
+                continue
+            _add(t)
+            break
+
+    if head == "perl" and "-pi" in tokens:
+        for t in reversed(tokens):
+            if t.startswith("-"):
+                continue
+            _add(t)
+            break
+
+    return out
 
 
 def _emit(*, hook_event_name: str, additional_context: str | None = None) -> None:
@@ -248,20 +312,16 @@ def _symbol_visibility(label: str) -> int:
 
 def _parse_symbol_id(symbol_id: str) -> tuple[str, str, int] | None:
     if symbol_id.startswith("fn_"):
-        parts = symbol_id.split("_")
-        if len(parts) < 4:
-            return None
-        name = "_".join(parts[2:-1])
-        try:
-            line = int(parts[-1])
-        except Exception:
-            line = 1_000_000_000
-        return "func", name, line
-    if symbol_id.startswith("cls_"):
-        parts = symbol_id.split("_")
+        parts = symbol_id.split("_", 2)
         if len(parts) < 3:
             return None
-        name = "_".join(parts[2:])
+        name = parts[2]
+        return "func", name, 1_000_000_000
+    if symbol_id.startswith("cls_"):
+        parts = symbol_id.split("_", 2)
+        if len(parts) < 3:
+            return None
+        name = parts[2]
         return "class", name, 1_000_000_000
     return None
 
@@ -449,9 +509,20 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
     file_path_str = extract_file_path(input_data)
     file_path = Path(file_path_str) if file_path_str else None
 
+    dirty_paths: list[Path] = []
+    if tool_name in {"Edit", "Write"} and file_path is not None:
+        dirty_paths = [file_path]
+    elif tool_name == "Bash":
+        tool_input = get_tool_input(input_data)
+        command = get_str(tool_input, "command", "cmd")
+        dirty_paths = _extract_bash_modified_paths(command, cwd)
+
     # NOTE: Complex workspace-root detection is intentionally disabled for now.
     # root = resolve_workspace_root(...)
     root = Path("/app").absolute() if _is_under_app(cwd) else Path(cwd).absolute()
+
+    if dirty_paths:
+        mark_dirty(root, dirty_paths, reason=tool_name)
 
     st.write_active_root(str(root), reason=f"pre_tool_use:{tool_name}")
 

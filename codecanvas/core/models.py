@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Dict, List, Optional, Set
 
 
@@ -148,6 +149,48 @@ class Graph:
 
         return True
 
+    def remove_edges_by_predicate(self, predicate) -> int:
+        removed = 0
+        kept: List[GraphEdge] = []
+        for edge in self.edges:
+            if predicate(edge):
+                removed += 1
+                continue
+            kept.append(edge)
+        if removed:
+            self.edges = kept
+            self.rebuild_indexes()
+        return removed
+
+    def remove_nodes_by_fs_path(self, fs_path: str) -> Set[str]:
+        try:
+            fs_abs = str(Path(fs_path).resolve())
+        except Exception:
+            fs_abs = fs_path
+
+        removed_ids: Set[str] = set()
+        kept_nodes: List[GraphNode] = []
+        for node in self.nodes:
+            try:
+                node_abs = str(Path(node.fsPath).resolve())
+            except Exception:
+                node_abs = node.fsPath
+            if node_abs == fs_abs:
+                removed_ids.add(node.id)
+                continue
+            kept_nodes.append(node)
+
+        if not removed_ids:
+            return set()
+
+        kept_edges: List[GraphEdge] = [
+            e for e in self.edges if e.from_id not in removed_ids and e.to_id not in removed_ids
+        ]
+        self.nodes = kept_nodes
+        self.edges = kept_edges
+        self.rebuild_indexes()
+        return removed_ids
+
     def get_parent_id(self, node_id: str) -> Optional[str]:
         return self._contains_parent.get(node_id)
 
@@ -198,6 +241,6 @@ def make_class_id(file_label: str, class_name: str) -> str:
     return f"cls_{_hash(file_label)}_{class_name}"
 
 
-def make_func_id(file_label: str, func_name: str, line: int) -> str:
+def make_func_id(file_label: str, func_name: str) -> str:
     """Generate function ID."""
-    return f"fn_{_hash(file_label)}_{func_name}_{line}"
+    return f"fn_{_hash(file_label)}_{func_name}"

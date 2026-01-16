@@ -215,6 +215,22 @@ class Parser:
         graph.rebuild_indexes()
         return graph
 
+    def parse_file_in_project(
+        self,
+        file_path: Path,
+        *,
+        root: Path,
+        known_module_labels: set[str],
+        label_strip_prefix: str | None,
+    ) -> Graph:
+        graph = Graph()
+        self.last_summary = ParseSummary()
+        self._known_module_labels = set(known_module_labels)
+        self._label_strip_prefix = label_strip_prefix
+        self._parse_file(file_path, root, graph)
+        graph.rebuild_indexes()
+        return graph
+
     def _parse_file(self, file_path: Path, root: Path, graph: Graph) -> None:
         """Parse a single file into the graph."""
         try:
@@ -471,10 +487,8 @@ class Parser:
             elif kind in FUNC_KINDS:
                 start = sym.range.start
                 end = sym.range.end
-                sel = getattr(sym, "selection_range", None)
-                id_line = sel.start.line if sel is not None else start.line
-                func_id = make_func_id(file_label, name, id_line)
                 label = f"{container_qualname}.{name}" if container_qualname else name
+                func_id = make_func_id(file_label, label)
                 graph.add_node(
                     GraphNode(
                         id=func_id,
@@ -565,7 +579,7 @@ class Parser:
             r = d.range
             parent_class = getattr(d, "parent_class", None)
             label = str(getattr(d, "name", bare))
-            func_id = make_func_id(file_label, bare, r.start_line)
+            func_id = make_func_id(file_label, label)
             graph.add_node(
                 GraphNode(
                     id=func_id,

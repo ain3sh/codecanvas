@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from .paths import get_canvas_dir
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 
 
 _STATE_LOCK = threading.RLock()
@@ -196,6 +196,9 @@ class CanvasState:
     # Call graph build summary (set after background completes)
     call_graph_summary: Dict[str, Any] = field(default_factory=dict)
 
+    # Incremental refresh summary (latest)
+    refresh_summary: Dict[str, Any] = field(default_factory=dict)
+
     # Multi-target analysis support
     analyses: Dict[str, AnalysisState] = field(default_factory=dict)
 
@@ -253,6 +256,7 @@ class CanvasState:
             "use_lsp": self.use_lsp,
             "parse_summary": dict(self.parse_summary or {}),
             "call_graph_summary": dict(self.call_graph_summary or {}),
+            "refresh_summary": dict(self.refresh_summary or {}),
             "analyses": {k: v.to_dict() for k, v in self.analyses.items()},
             "focus": self.focus,
             "active_task_id": self.active_task_id,
@@ -273,6 +277,7 @@ class CanvasState:
             use_lsp=bool(d.get("use_lsp", True)),
             parse_summary=dict(d.get("parse_summary") or {}),
             call_graph_summary=dict(d.get("call_graph_summary") or {}),
+            refresh_summary=dict(d.get("refresh_summary") or {}),
             symbol_files=d.get("symbol_files", {}),
         )
         for k, v in d.get("analyses", {}).items():

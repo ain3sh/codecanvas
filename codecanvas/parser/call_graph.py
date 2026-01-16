@@ -145,6 +145,7 @@ def build_call_graph_edges(
     max_callsites_total: int = 500,
     max_callsites_per_file: int = 100,
     lsp_langs: set[str] | None = None,
+    limit_to_paths: set[str] | None = None,
     should_continue: Callable[[], bool] | None = None,
 ) -> CallGraphBuildResult:
     """Build CALL edges using tree-sitter callsites + LSP definition resolution.
@@ -157,6 +158,9 @@ def build_call_graph_edges(
 
     func_index = _build_func_index(graph_nodes)
     modules = [n for n in graph_nodes if n.kind == NodeKind.MODULE]
+    limit_abs: set[str] | None = None
+    if limit_to_paths:
+        limit_abs = {_abs(p) for p in limit_to_paths}
 
     seen_edge_keys: set[str] = set()
     remaining_total = max(0, int(max_callsites_total))
@@ -174,6 +178,9 @@ def build_call_graph_edges(
             break
         if remaining_total <= 0:
             break
+
+        if limit_abs is not None and _abs(mod.fsPath) not in limit_abs:
+            continue
 
         file_path = Path(mod.fsPath)
         if not file_path.exists() or not file_path.is_file():

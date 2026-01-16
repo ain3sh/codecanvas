@@ -13,11 +13,12 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional, Set
 
 from .core.analysis import Analyzer
-from .core.models import EdgeType, Graph, GraphEdge
-from .core.paths import get_canvas_dir
+from .core.models import EdgeType, Graph, GraphEdge, NodeKind
+from .core.paths import get_canvas_dir, top_level_project_roots
+from .core.refresh import mark_dirty, take_dirty
 from .core.state import AnalysisState, CanvasState, clear_state, load_state, load_tasks_yaml, pick_task, save_state
 from .parser import Parser
 from .parser.call_graph import build_call_graph_edges
@@ -56,7 +57,7 @@ _call_graph_result_summary: dict | None = None  # Detailed result for diagnostic
 _call_graph_cache_info: dict | None = None
 
 _SERVER_INSTANCE_ID = uuid.uuid4().hex
-_CALL_EDGE_CACHE_VERSION = 1
+_CALL_EDGE_CACHE_VERSION = 2
 _CALL_EDGE_CACHE_NAME = "call_edges.json"
 
 
@@ -154,6 +155,193 @@ def _persist_call_edge_cache(graph: Graph, project_dir: Path, *, generation: int
         _write_json_atomic(_call_edge_cache_path(project_dir), payload)
     except Exception:
         return
+
+
+def _abs_path(path: str | Path) -> str:
+    try:
+        return str(Path(path).resolve())
+    except Exception:
+        return str(path)
+
+
+def _label_strip_prefix(project_dir: Path) -> str | None:
+    try:
+        roots = top_level_project_roots(project_dir.absolute())
+        if len(roots) == 1:
+            prefix = (roots[0].name or "").strip("/")
+            return prefix or None
+    except Exception:
+        return None
+    return None
+
+
+def _module_labels_from_graph(graph: Graph) -> Set[str]:
+    return {n.label for n in graph.nodes if n.kind == NodeKind.MODULE}
+
+
+def _module_ids_for_paths(graph: Graph, paths: Iterable[str]) -> Set[str]:
+    targets = {_abs_path(p) for p in paths}
+    return {n.id for n in graph.nodes if n.kind == NodeKind.MODULE and _abs_path(n.fsPath) in targets}
+
+
+def _importer_paths_for_modules(graph: Graph, module_ids: Set[str]) -> Set[str]:
+    if not module_ids:
+        return set()
+    out: Set[str] = set()
+    for edge in graph.edges:
+        if edge.type != EdgeType.IMPORT or edge.to_id not in module_ids:
+            continue
+        node = graph.get_node(edge.from_id)
+        if node is not None:
+            out.add(node.fsPath)
+    return out
+
+
+def _func_ids_for_paths(graph: Graph, paths: Iterable[str]) -> Set[str]:
+    targets = {_abs_path(p) for p in paths}
+    return {n.id for n in graph.nodes if n.kind == NodeKind.FUNC and _abs_path(n.fsPath) in targets}
+
+
+def _refresh_graph_for_dirty_files(
+    state: CanvasState,
+    *,
+    reason: str,
+    max_files: int = 6,
+    defs_budget_s: float = 0.6,
+    calls_budget_s: float = 1.2,
+) -> dict | None:
+    global _call_graph_edges_total
+    if not state.project_path:
+        return None
+
+    project_dir = Path(state.project_path)
+    dirty_items = take_dirty(project_dir, max_items=max_files)
+    if not dirty_items:
+        return None
+
+    start = time.monotonic()
+    processed_paths: list[str] = []
+    skipped_paths: list[str] = []
+    removed_node_ids: Set[str] = set()
+    defs_updated = 0
+    nodes_added = 0
+    edges_added = 0
+    removed_call_edges = 0
+    call_edges_added = 0
+    call_edges_skipped_reason = None
+
+    lsp_langs = set(state.parse_summary.get("lsp_langs") or []) if state.parse_summary else None
+    parser = Parser(use_lsp=state.use_lsp, lsp_langs=lsp_langs)
+    prefix = _label_strip_prefix(project_dir)
+
+    with _graph_lock:
+        graph_ref = _graph
+        if graph_ref is None:
+            return None
+        known_labels = _module_labels_from_graph(graph_ref)
+
+    for item in dirty_items:
+        if defs_budget_s and (time.monotonic() - start) >= defs_budget_s:
+            skipped_paths.append(str(item.get("path") or ""))
+            continue
+
+        path_str = str(item.get("path") or "").strip()
+        if not path_str:
+            continue
+        file_path = Path(path_str)
+
+        with _graph_lock:
+            removed_ids = graph_ref.remove_nodes_by_fs_path(str(file_path))
+        removed_node_ids.update(removed_ids)
+
+        if file_path.exists() and file_path.is_file():
+            new_graph = parser.parse_file_in_project(
+                file_path,
+                root=project_dir,
+                known_module_labels=known_labels,
+                label_strip_prefix=prefix,
+            )
+            with _graph_lock:
+                for node in new_graph.nodes:
+                    if graph_ref.add_node(node):
+                        nodes_added += 1
+                for edge in new_graph.edges:
+                    if graph_ref.add_edge(edge):
+                        edges_added += 1
+            for node in new_graph.nodes:
+                if node.kind == NodeKind.MODULE:
+                    known_labels.add(node.label)
+
+        defs_updated += 1
+        processed_paths.append(str(file_path))
+
+    if skipped_paths:
+        mark_dirty(project_dir, [Path(p) for p in skipped_paths if p], reason="refresh_deferred")
+
+    if not processed_paths:
+        return None
+
+    with _graph_lock:
+        if graph_ref is None:
+            return None
+        module_ids = _module_ids_for_paths(graph_ref, processed_paths)
+        caller_paths = set(processed_paths)
+        caller_paths |= _importer_paths_for_modules(graph_ref, module_ids)
+        caller_func_ids = _func_ids_for_paths(graph_ref, caller_paths)
+        removed_call_edges = graph_ref.remove_edges_by_predicate(
+            lambda e: e.type == EdgeType.CALL
+            and (e.from_id in caller_func_ids or e.to_id in removed_node_ids)
+        )
+
+        nodes_snapshot = list(graph_ref.nodes)
+
+    if _call_graph_thread is not None and _call_graph_thread.is_alive():
+        call_edges_skipped_reason = "call_graph_thread_active"
+    else:
+        try:
+            result = build_call_graph_edges(
+                nodes_snapshot,
+                time_budget_s=float(calls_budget_s),
+                max_callsites_total=200,
+                max_callsites_per_file=50,
+                lsp_langs=lsp_langs,
+                limit_to_paths={_abs_path(p) for p in caller_paths},
+            )
+            with _graph_lock:
+                if graph_ref is not None:
+                    for edge in result.edges:
+                        if graph_ref.add_edge(edge):
+                            call_edges_added += 1
+                    _call_graph_edges_total = sum(1 for e in graph_ref.edges if e.type == EdgeType.CALL)
+                    _persist_call_edge_cache(
+                        graph_ref,
+                        project_dir,
+                        generation=_call_graph_generation,
+                        source="refresh",
+                    )
+        except Exception as e:
+            call_edges_skipped_reason = f"error:{type(e).__name__}"
+
+    with _graph_lock:
+        if graph_ref is not None:
+            state.symbol_files = {n.id: n.fsPath for n in graph_ref.nodes}
+
+    summary = {
+        "updated_at": time.time(),
+        "reason": str(reason),
+        "dirty_count": len(dirty_items),
+        "defs_updated_files": defs_updated,
+        "call_edges_updated_files": len(caller_paths),
+        "nodes_added": nodes_added,
+        "edges_added": edges_added,
+        "call_edges_removed": removed_call_edges,
+        "call_edges_added": call_edges_added,
+        "skipped_paths": skipped_paths,
+    }
+    if call_edges_skipped_reason:
+        summary["call_edges_skipped"] = call_edges_skipped_reason
+
+    return summary
 
 
 def _call_graph_diag(*, phase: str | None = None) -> dict:
@@ -487,6 +675,10 @@ def canvas_action(
             return CanvasResult("task_select requires task_id")
         return _action_task_select(state, task_id)
     if action == "status":
+        refresh_summary = _refresh_graph_for_dirty_files(state, reason="status")
+        if refresh_summary:
+            state.refresh_summary = refresh_summary
+            save_state(state)
         return _render_board(state, f"Status (call_graph={_call_graph_status})")
 
     return CanvasResult(f"Unknown action: {action}")
@@ -506,6 +698,7 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
     project_dir = str(_find_repo_root(abs_p)) if abs_p.is_file() else str(abs_p)
     _set_project_dir(project_dir)
     clear_state()
+    take_dirty(Path(project_dir))
 
     allowed_lsp_langs = set(lsp_langs) if lsp_langs else None
     parser = Parser(use_lsp=use_lsp, lsp_langs=allowed_lsp_langs)
@@ -687,8 +880,12 @@ def _action_impact(
     global _graph, _analyzer, _call_graph_result_summary
     assert _graph is not None and _analyzer is not None
 
-    # Wait for background call graph to complete before analyzing
-    _wait_for_call_graph(timeout_s=float(wait_for_call_graph_s))
+    refresh_summary = _refresh_graph_for_dirty_files(state, reason="impact")
+    if refresh_summary:
+        state.refresh_summary = refresh_summary
+    else:
+        # Wait for background call graph to complete before analyzing
+        _wait_for_call_graph(timeout_s=float(wait_for_call_graph_s))
 
     # Save call graph summary to state for diagnostics
     state.call_graph_summary = _call_graph_diag(phase="impact")

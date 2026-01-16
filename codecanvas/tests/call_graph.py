@@ -17,8 +17,8 @@ def test_call_graph_builds_edges_from_definition(monkeypatch, tmp_path: Path):
 
     g = Parser(use_lsp=False).parse_directory(str(tmp_path))
 
-    caller_id = make_func_id("a.py", "caller", 3)
-    callee_id = make_func_id("a.py", "callee", 0)
+    caller_id = make_func_id("a.py", "caller")
+    callee_id = make_func_id("a.py", "callee")
 
     monkeypatch.setattr(cg, "has_lsp_support", lambda _lang: True)
 
