@@ -65,7 +65,7 @@ def test_autocontext_pre_tool_use_inits_marker_backed_root(tmp_path: Path, monke
     assert int(state.get("parse_summary", {}).get("parsed_files", 0) or 0) > 0
 
 
-def test_autocontext_edit_emits_context_when_call_edges_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_autocontext_read_emits_context_when_call_edges_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / "a.py").write_text(
         "def foo():\n    return 1\n\n\ndef bar():\n    return foo()\n",
         encoding="utf-8",
@@ -97,18 +97,5 @@ def test_autocontext_edit_emits_context_when_call_edges_exist(tmp_path: Path, mo
         }
     )
 
-    # CodeCanvas no longer injects impact on Read; it injects after mutations.
-    assert read_ctx is None
-
-    edit_ctx = handle_post_tool_use(
-        {
-            "hook_event_name": "PostToolUse",
-            "tool_name": "Edit",
-            "cwd": str(tmp_path),
-            "tool_input": {"file_path": str(tmp_path / "a.py")},
-            "tool_response": {"success": True},
-        }
-    )
-
-    assert edit_ctx is not None
-    assert "[CodeCanvas IMPACT]" in edit_ctx
+    assert read_ctx is not None
+    assert "[CodeCanvas IMPACT]" in read_ctx

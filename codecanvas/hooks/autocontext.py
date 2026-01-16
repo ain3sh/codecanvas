@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from codecanvas.core.models import NodeKind
 from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
 from codecanvas.core.state import load_state
 from codecanvas.server import canvas_action
@@ -270,6 +271,42 @@ def _select_best_symbol_in_file(*, file_path: Path) -> str | None:
 
             candidates.append((kind_rank, line_rank, symbol_id))
 
+        if candidates:
+            candidates.sort()
+            return candidates[0][2]
+
+        return _select_symbol_from_graph(file_path)
+    except Exception:
+        return None
+
+
+def _select_symbol_from_graph(file_path: Path) -> str | None:
+    try:
+        import codecanvas.server as server
+
+        graph = server._graph
+        if graph is None:
+            return None
+
+        target = str(file_path.absolute())
+        candidates: list[tuple[int, int, str]] = []
+        for node in graph.nodes:
+            try:
+                if str(Path(node.fsPath).absolute()) != target:
+                    continue
+            except Exception:
+                continue
+
+            if node.kind == NodeKind.FUNC:
+                kind_rank = 0
+            elif node.kind == NodeKind.CLASS:
+                kind_rank = 1
+            else:
+                continue
+
+            line_rank = int(node.start_line or 1_000_000_000)
+            candidates.append((kind_rank, line_rank, node.id))
+
         if not candidates:
             return None
 
@@ -335,7 +372,7 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
     """PreToolUse: auto-init (architecture) when workspace becomes clear.
 
     This is intentionally limited to init/architecture. Blast-radius messaging runs
-    on PostToolUse(Edit|Write) so it reflects the side-effects of actual changes.
+    on PostToolUse(Read|Edit|Write) so it reflects recent file activity.
     """
 
     started = time.time()
@@ -566,7 +603,7 @@ def handle_pre_tool_use(input_data: dict[str, Any]) -> str | None:
         lsp_files = ps.get("lsp_files", 0)
         ts_files = ps.get("tree_sitter_files", 0)
         cg_phase = cs.get("phase", "")
-        cg_edges = cs.get("call_edges_total", 0)
+        cg_edges = cs.get("edges_total", 0)
         root_str = state.project_path or str(root)
 
         return (
@@ -593,7 +630,7 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
     file_path = Path(file_path_str) if file_path_str else None
 
     want_impact = bool(
-        tool_name in {"Edit", "Write"}
+        tool_name in {"Read", "Edit", "Write"}
         and file_path is not None
         and file_path.exists()
         and file_path.is_file()
@@ -631,6 +668,11 @@ def handle_post_tool_use(input_data: dict[str, Any]) -> str | None:
                 }
             )
             return None
+
+        try:
+            canvas_action(action="status")
+        except Exception:
+            pass
 
         symbol_id = _select_best_symbol_in_file(file_path=file_path) if file_path is not None else None
         if symbol_id is None:
