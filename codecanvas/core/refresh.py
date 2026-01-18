@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
-from .paths import get_canvas_dir
+from .paths import get_canvas_dir, update_manifest
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
@@ -118,7 +118,9 @@ def mark_dirty(project_dir: Path, paths: Iterable[Path], *, reason: str | None =
             "updated_at": now,
             "files": files,
         }
-        _write_json_atomic(_dirty_path(root), data)
+        dirty_path = _dirty_path(root)
+        _write_json_atomic(dirty_path, data)
+        update_manifest(dirty_path.parent, [dirty_path.name])
     return updated
 
 
@@ -145,5 +147,7 @@ def take_dirty(project_dir: Path, *, max_items: int | None = None) -> list[dict]
             "updated_at": time.time(),
             "files": files,
         }
-        _write_json_atomic(_dirty_path(root), data)
+        dirty_path = _dirty_path(root)
+        _write_json_atomic(dirty_path, data)
+        update_manifest(dirty_path.parent, [dirty_path.name])
     return items

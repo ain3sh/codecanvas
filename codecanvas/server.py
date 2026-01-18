@@ -17,7 +17,7 @@ from typing import Iterable, List, Optional, Set
 
 from .core.analysis import Analyzer
 from .core.models import EdgeType, Graph, GraphEdge, NodeKind
-from .core.paths import get_canvas_dir, top_level_project_roots
+from .core.paths import get_canvas_dir, top_level_project_roots, update_manifest
 from .core.refresh import mark_dirty, take_dirty
 from .core.state import AnalysisState, CanvasState, clear_state, load_state, load_tasks_yaml, pick_task, save_state
 from .parser import Parser
@@ -152,7 +152,9 @@ def _persist_call_edge_cache(graph: Graph, project_dir: Path, *, generation: int
             "edges": edges_payload,
             "stats": {"edges_total": len(edges_payload)},
         }
-        _write_json_atomic(_call_edge_cache_path(project_dir), payload)
+        cache_path = _call_edge_cache_path(project_dir)
+        _write_json_atomic(cache_path, payload)
+        update_manifest(cache_path.parent, [cache_path.name])
     except Exception:
         return
 

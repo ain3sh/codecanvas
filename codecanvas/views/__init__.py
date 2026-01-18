@@ -7,12 +7,13 @@ impact analysis, and task visualization.
 from __future__ import annotations
 
 import html
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, List, Optional
 
 import cairosvg
+
+from codecanvas.core.paths import update_manifest
 
 # =============================================================================
 # Color Palette (High Contrast / Neon on Black)
@@ -203,29 +204,13 @@ def svg_string_to_png_bytes(svg: str) -> bytes:
     return out
 
 
-def _get_extraction_dir() -> Path:
-    """Get the extraction directory for Harbor."""
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(config_dir) / "codecanvas" if config_dir else Path.home() / ".claude" / "codecanvas"
-
-
-def _save_for_harbor_extraction(png_bytes: bytes, filename: str) -> None:
-    """Save a copy to CLAUDE_CONFIG_DIR/codecanvas/ for Harbor extraction."""
-    try:
-        extraction_dir = _get_extraction_dir()
-        extraction_dir.mkdir(parents=True, exist_ok=True)
-        (extraction_dir / filename).write_bytes(png_bytes)
-    except (OSError, PermissionError):
-        pass
-
-
 def save_png(svg: str, png_path: str | Path) -> bytes:
     """Save SVG-rendered content to PNG and return the bytes."""
     out_path = Path(png_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     png_bytes = svg_string_to_png_bytes(svg)
     out_path.write_bytes(png_bytes)
-    _save_for_harbor_extraction(png_bytes, out_path.name)
+    update_manifest(out_path.parent, [out_path.name])
     return png_bytes
 
 

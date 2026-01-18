@@ -4,7 +4,6 @@ import json
 import os
 import re
 import shlex
-import shutil
 import time
 import traceback
 from contextlib import contextmanager
@@ -226,44 +225,10 @@ def _workspace_lock(root: Path, *, timeout_s: float = 2.0):
 
 
 def _sync_canvas_artifacts_to_session(*, root: Path) -> None:
-    """Copy `.codecanvas` outputs from the repo into the persisted Claude session dir."""
-
-    session_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    if not session_dir:
-        return
-
-    src_dir = get_canvas_dir(root)
-    if not src_dir.exists() or not src_dir.is_dir():
-        return
-
-    dest_dir = Path(session_dir) / "codecanvas"
-    try:
-        src_resolved = src_dir.resolve()
-        dest_resolved = dest_dir.resolve()
-        if src_resolved == dest_resolved or dest_resolved in src_resolved.parents:
-            return
-    except Exception:
-        pass
-    try:
-        dest_dir.mkdir(parents=True, exist_ok=True)
-    except Exception:
-        return
-
-    state_path = src_dir / "state.json"
-    if state_path.exists():
-        try:
-            shutil.copy2(state_path, dest_dir / "state.json")
-        except Exception:
-            pass
-
-    try:
-        for png in src_dir.glob("*.png"):
-            try:
-                shutil.copy2(png, dest_dir / png.name)
-            except Exception:
-                continue
-    except Exception:
-        return
+    """No-op: artifacts are written directly to the configured artifact directory."""
+    if _debug_logs_enabled():
+        _debug_log({"event": "sync", "skipped": "single_sink", "root": str(root)})
+    return
 
 
 def _maybe_init(*, root: Path, allow_init: bool, lsp_langs: list[str] | None) -> tuple[bool, str]:

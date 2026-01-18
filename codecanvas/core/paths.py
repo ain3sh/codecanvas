@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import time
 from pathlib import Path
 from typing import Iterable, Sequence
 
@@ -104,3 +106,55 @@ def iter_walk_files(*, roots: Iterable[Path], ignore_dirs: set[str]) -> Iterable
             dirnames[:] = kept
             for name in filenames:
                 yield Path(dirpath) / name
+
+
+def manifest_path(artifact_dir: Path) -> Path:
+    return artifact_dir / "manifest.json"
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path.replace(path)
+
+
+def update_manifest(artifact_dir: Path, filenames: Iterable[str]) -> None:
+    try:
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return
+
+    manifest = _read_json(manifest_path(artifact_dir))
+    files = manifest.get("files")
+    if not isinstance(files, dict):
+        files = {}
+
+    now = time.time()
+    for name in filenames:
+        if not name:
+            continue
+        entry = {"path": name, "updated_at": now}
+        try:
+            stat = (artifact_dir / name).stat()
+            entry["missing"] = False
+            entry["size"] = int(stat.st_size)
+            entry["mtime_ns"] = int(stat.st_mtime_ns)
+        except Exception:
+            entry["missing"] = True
+        files[name] = entry
+
+    manifest["version"] = 1
+    manifest["updated_at"] = now
+    manifest["files"] = files
+    _write_json_atomic(manifest_path(artifact_dir), manifest)

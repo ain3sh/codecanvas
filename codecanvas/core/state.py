@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from .paths import get_canvas_dir
+from .paths import get_canvas_dir, update_manifest
 
 STATE_VERSION = 2
 
@@ -312,36 +312,10 @@ def load_state() -> CanvasState:
         return CanvasState()
 
 
-def _get_extraction_dir() -> Path:
-    """Get the extraction directory for Harbor.
-
-    Uses CLAUDE_CONFIG_DIR if set (Harbor container), otherwise ~/.claude/.
-    """
-    config_dir = os.environ.get("CLAUDE_CONFIG_DIR")
-    if config_dir:
-        return Path(config_dir) / "codecanvas"
-    return Path.home() / ".claude" / "codecanvas"
-
-
-def _save_for_harbor_extraction(json_str: str) -> None:
-    """Save a copy to CLAUDE_CONFIG_DIR/codecanvas/ for Harbor extraction.
-
-    Best-effort: silently fails if write doesn't work.
-    """
-    extraction_dir = _get_extraction_dir()
-    try:
-        extraction_dir.mkdir(parents=True, exist_ok=True)
-        (extraction_dir / "state.json").write_text(json_str, encoding="utf-8")
-    except (OSError, PermissionError):
-        pass
-
-
 def save_state(state: CanvasState):
     """Save state to disk.
 
-    Saves to two locations:
-    1. Primary: .codecanvas/state.json in project
-    2. Extraction: CLAUDE_CONFIG_DIR/codecanvas/state.json (for Harbor artifact extraction)
+    Saves to the primary artifact directory (see CANVAS_ARTIFACT_DIR).
     """
     with _STATE_LOCK:
         path = _get_state_path()
@@ -351,8 +325,7 @@ def save_state(state: CanvasState):
         with open(tmp, "w", encoding="utf-8") as f:
             f.write(json_str)
         tmp.replace(path)
-
-        _save_for_harbor_extraction(json_str)
+        update_manifest(path.parent, [path.name])
 
 
 def clear_state():
