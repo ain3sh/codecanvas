@@ -67,7 +67,6 @@ _call_graph_cache_info: dict | None = None
 
 _SERVER_INSTANCE_ID = uuid.uuid4().hex
 _CALL_EDGE_CACHE_VERSION = 3
-_CALL_EDGE_CACHE_NAME = "call_edges.json"
 
 
 def _normalize_project_path(project_dir: Path) -> str:
@@ -78,9 +77,9 @@ def _normalize_project_path(project_dir: Path) -> str:
 
 
 def _call_edge_cache_path(project_dir: Path, *, digest: str | None = None) -> Path:
-    if digest:
-        return call_edges_digest_path(project_dir, digest)
-    return get_canvas_dir(project_dir) / _CALL_EDGE_CACHE_NAME
+    if not digest:
+        raise ValueError("call edge cache path requires digest")
+    return call_edges_digest_path(project_dir, digest)
 
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
@@ -91,11 +90,9 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
 
 
 def _load_call_edge_cache(project_dir: Path, *, expected_digest: str | None) -> tuple[list[GraphEdge], dict]:
-    paths: list[Path] = []
-    if expected_digest:
-        paths.append(_call_edge_cache_path(project_dir, digest=expected_digest))
-    else:
-        paths.append(_call_edge_cache_path(project_dir))
+    if not expected_digest:
+        return [], {}
+    paths = [_call_edge_cache_path(project_dir, digest=expected_digest)]
 
     for path in paths:
         if not path.exists():
@@ -1407,7 +1404,7 @@ WORKFLOW (recommended pattern):
 5. mark/skip symbol="..." → Track verification progress
 
 ACTIONS:
-• init: Parse repo into graph, render architecture map. Returns architecture.png + board.png
+• init: Parse repo into graph, render architecture map. Returns architecture.<digest>.png + board.png
 • impact: Analyze a symbol's callers/callees (blast radius). Returns impact.png + board.png
 • claim: Record hypothesis|finding|question, auto-linked to recent evidence
 • decide: Record plan|test|edit commitment, auto-linked to recent evidence

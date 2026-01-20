@@ -7,32 +7,9 @@ import time
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
-from ..views import save_png
-from ..views.architecture import ArchitectureView
-from .lock import canvas_artifact_lock
 from .models import Graph, NodeKind
-from .paths import get_canvas_dir, update_manifest
 
 GRAPH_META_VERSION = 1
-
-
-def graph_meta_path(project_dir: Path) -> Path:
-    return get_canvas_dir(project_dir) / "graph_meta.json"
-
-
-def load_graph_meta(project_dir: Path) -> Optional[dict]:
-    path = graph_meta_path(project_dir)
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
-    if not isinstance(data, dict):
-        return None
-    if int(data.get("version", 0) or 0) != GRAPH_META_VERSION:
-        return None
-    return data
 
 
 def _sha256_hex(data: bytes) -> str:
@@ -249,108 +226,12 @@ def compute_graph_meta(
             "symbol_files": symbol_files,
         },
         "architecture": {
-            "latest_png": "architecture.png",
+            "latest_png": f"architecture.{root}.png",
             "digest_png": f"architecture.{root}.png",
-            "digest": None,
+            "digest": root,
             "rendered_at": None,
         },
     }
     return meta
 
 
-def _verify_signatures(meta: dict) -> bool:
-    merkle = meta.get("merkle") if isinstance(meta, dict) else None
-    leaves = merkle.get("leaves") if isinstance(merkle, dict) else None
-    if not isinstance(leaves, dict):
-        return True
-    for label, entry in leaves.items():
-        if not isinstance(entry, dict):
-            continue
-        fs_path = entry.get("fs_path")
-        if not fs_path:
-            continue
-        if entry.get("missing"):
-            continue
-        sig = _stat_signature(Path(fs_path))
-        if sig.get("missing"):
-            return False
-        if int(sig.get("mtime_ns") or -1) != int(entry.get("mtime_ns") or -2):
-            return False
-        if int(sig.get("size") or -1) != int(entry.get("size") or -2):
-            return False
-    return True
-
-
-def publish_graph_meta(
-    project_dir: Path,
-    new_meta: dict,
-    *,
-    timeout_s: float = 2.0,
-    action: str,
-) -> tuple[bool, dict]:
-    existing = load_graph_meta(project_dir)
-    with canvas_artifact_lock(project_dir, timeout_s=timeout_s) as locked:
-        if not locked:
-            return False, existing or new_meta
-        if not _verify_signatures(new_meta):
-            return False, existing or new_meta
-        if isinstance(existing, dict):
-            if existing.get("graph", {}).get("digest") == new_meta.get("graph", {}).get("digest"):
-                old_quality = existing.get("graph", {}).get("quality") or {}
-                new_quality = new_meta.get("graph", {}).get("quality") or {}
-                if _quality_tuple(old_quality) > _quality_tuple(new_quality):
-                    return False, existing
-
-        new_meta = dict(new_meta)
-        new_meta["updated_by"] = {"pid": os.getpid(), "action": str(action)}
-        new_meta["generated_at"] = time.time()
-        path = graph_meta_path(project_dir)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(new_meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(path)
-        update_manifest(path.parent, [path.name])
-        return True, new_meta
-
-
-def ensure_architecture_current(project_dir: Path, graph: Graph, meta: dict) -> dict:
-    digest = meta.get("graph", {}).get("digest") or ""
-    if not digest:
-        return meta
-    arch = meta.get("architecture") if isinstance(meta, dict) else None
-    if not isinstance(arch, dict):
-        arch = {}
-    digest_name = f"architecture.{digest}.png"
-    latest_name = "architecture.png"
-    digest_path = get_canvas_dir(project_dir) / digest_name
-    latest_path = get_canvas_dir(project_dir) / latest_name
-
-    if arch.get("digest") == digest and digest_path.exists():
-        return meta
-
-    with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
-        if not locked:
-            return meta
-        if digest_path.exists() and arch.get("digest") == digest:
-            return meta
-        svg = ArchitectureView(graph).render(output_path=None)
-        png_bytes = save_png(svg, digest_path)
-        latest_path.write_bytes(png_bytes)
-        update_manifest(latest_path.parent, [latest_path.name])
-        meta = dict(meta)
-        meta_arch = dict(arch)
-        meta_arch.update(
-            {
-                "latest_png": latest_name,
-                "digest_png": digest_name,
-                "digest": digest,
-                "rendered_at": time.time(),
-            }
-        )
-        meta["architecture"] = meta_arch
-        path = graph_meta_path(project_dir)
-        tmp_path = path.with_suffix(path.suffix + ".tmp")
-        tmp_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp_path.replace(path)
-        update_manifest(path.parent, [path.name])
-        return meta

@@ -9,8 +9,7 @@ from typing import Any, Iterable
 
 from ..views import svg_string_to_png_bytes
 from ..views.architecture import ArchitectureView
-from .graph_meta import _quality_tuple, compute_graph_meta, load_graph_meta
-from .lock import canvas_artifact_lock
+from .graph_meta import compute_graph_meta
 from .paths import get_canvas_dir, update_manifest
 
 
@@ -35,21 +34,22 @@ def call_edges_digest_path(project_dir: Path, digest: str) -> Path:
 
 
 def load_graph_meta_for_digest(project_dir: Path, digest: str | None) -> dict[str, Any] | None:
-    if digest:
-        path = graph_meta_digest_path(project_dir, digest)
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                return data if isinstance(data, dict) else None
-            except Exception:
-                return None
-    return load_graph_meta(project_dir)
+    if not digest:
+        return None
+    path = graph_meta_digest_path(project_dir, digest)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
 
 def architecture_png_path_for_digest(project_dir: Path, digest: str | None) -> Path:
-    if digest:
-        return architecture_digest_path(project_dir, digest)
-    return get_canvas_dir(project_dir) / "architecture.png"
+    if not digest:
+        return get_canvas_dir(project_dir) / "architecture.unknown.png"
+    return architecture_digest_path(project_dir, digest)
 
 
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
@@ -72,7 +72,6 @@ def _architecture_meta(
     digest: str,
     rendered_at: float | None,
 ) -> dict[str, Any]:
-    latest_name = "architecture.png"
     digest_name = f"architecture.{digest}.png"
     base: dict[str, Any] = {}
     if isinstance(existing_meta, dict):
@@ -82,21 +81,11 @@ def _architecture_meta(
     if rendered_at is None and base.get("rendered_at"):
         rendered_at = float(base.get("rendered_at"))
     return {
-        "latest_png": latest_name,
+        "latest_png": digest_name,
         "digest_png": digest_name,
         "digest": digest,
         "rendered_at": rendered_at,
     }
-
-
-def _prefer_existing_pointer(existing_meta: dict[str, Any] | None, candidate_meta: dict[str, Any]) -> bool:
-    if not isinstance(existing_meta, dict):
-        return False
-    if existing_meta.get("graph", {}).get("digest") == candidate_meta.get("graph", {}).get("digest"):
-        return False
-    existing_quality = existing_meta.get("graph", {}).get("quality") or {}
-    candidate_quality = candidate_meta.get("graph", {}).get("quality") or {}
-    return _quality_tuple(existing_quality) > _quality_tuple(candidate_quality)
 
 
 def build_snapshot(
@@ -148,63 +137,9 @@ def write_snapshot_files(project_dir: Path, snapshot: Snapshot) -> None:
         update_manifest(arch_path.parent, [arch_path.name])
 
 
-def _resolve_architecture_bytes(project_dir: Path, snapshot: Snapshot) -> bytes | None:
-    if snapshot.architecture_png is not None:
-        return snapshot.architecture_png
-    if not snapshot.digest:
-        return None
-    arch_path = architecture_digest_path(project_dir, snapshot.digest)
-    try:
-        return arch_path.read_bytes()
-    except Exception:
-        return None
-
-
-def flip_snapshot_pointers(project_dir: Path, snapshot: Snapshot) -> bool:
-    if not snapshot.digest:
-        return False
-    existing_meta = load_graph_meta(project_dir)
-    if _prefer_existing_pointer(existing_meta, snapshot.meta):
-        return False
-
-    arch_bytes = _resolve_architecture_bytes(project_dir, snapshot)
-    if arch_bytes is None:
-        return False
-
-    meta_path = get_canvas_dir(project_dir) / "graph_meta.json"
-    arch_path = get_canvas_dir(project_dir) / "architecture.png"
-
-    with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
-        if not locked:
-            return False
-        _write_bytes_atomic(meta_path, snapshot.meta_bytes)
-        _write_bytes_atomic(arch_path, arch_bytes)
-        update_manifest(meta_path.parent, [meta_path.name, arch_path.name])
-    return True
-
-
 def write_call_edges_digest(project_dir: Path, digest: str, payload: dict[str, Any]) -> None:
     if not digest:
         return
     path = call_edges_digest_path(project_dir, digest)
     _write_json_atomic(path, payload)
     update_manifest(path.parent, [path.name])
-
-
-def flip_call_edges_pointer(project_dir: Path, *, digest: str, payload: dict[str, Any]) -> bool:
-    if not digest:
-        return False
-    meta = load_graph_meta(project_dir)
-    if not isinstance(meta, dict):
-        return False
-    meta_digest = meta.get("graph", {}).get("digest")
-    if meta_digest != digest:
-        return False
-
-    path = get_canvas_dir(project_dir) / "call_edges.json"
-    with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
-        if not locked:
-            return False
-        _write_json_atomic(path, payload)
-        update_manifest(path.parent, [path.name])
-    return True
