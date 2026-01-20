@@ -193,6 +193,12 @@ class CanvasState:
     # Parse backend breakdown from last init
     parse_summary: Dict[str, Any] = field(default_factory=dict)
 
+    # Current graph digest (from graph_meta)
+    graph_digest: Optional[str] = None
+
+    # Current call edge cache digest (from call_edges pointer)
+    call_edges_digest: Optional[str] = None
+
     # Call graph build summary (set after background completes)
     call_graph_summary: Dict[str, Any] = field(default_factory=dict)
 
@@ -258,6 +264,8 @@ class CanvasState:
             "initialized": self.initialized,
             "use_lsp": self.use_lsp,
             "parse_summary": dict(self.parse_summary or {}),
+            "graph_digest": self.graph_digest,
+            "call_edges_digest": self.call_edges_digest,
             "call_graph_summary": dict(self.call_graph_summary or {}),
             "refresh_summary": dict(self.refresh_summary or {}),
             "refresh_metrics": dict(self.refresh_metrics or {}),
@@ -280,6 +288,8 @@ class CanvasState:
             initialized=d.get("initialized", False),
             use_lsp=bool(d.get("use_lsp", True)),
             parse_summary=dict(d.get("parse_summary") or {}),
+            graph_digest=d.get("graph_digest"),
+            call_edges_digest=d.get("call_edges_digest"),
             call_graph_summary=dict(d.get("call_graph_summary") or {}),
             refresh_summary=dict(d.get("refresh_summary") or {}),
             refresh_metrics=dict(d.get("refresh_metrics") or {}),

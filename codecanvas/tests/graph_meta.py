@@ -6,6 +6,7 @@ from pathlib import Path
 from codecanvas.core.graph_meta import compute_graph_meta, load_graph_meta
 from codecanvas.core.models import NodeKind
 from codecanvas.core.refresh import mark_dirty
+from codecanvas.core.snapshot import graph_meta_digest_path
 from codecanvas.core.state import load_state
 from codecanvas.parser import Parser
 from codecanvas.server import _CALL_EDGE_CACHE_VERSION, _call_edge_cache_path, _merge_cached_call_edges, canvas_action
@@ -58,6 +59,8 @@ def test_architecture_per_digest_on_refresh(tmp_path: Path) -> None:
     meta1 = load_graph_meta(tmp_path)
     assert meta1 is not None
     digest1 = meta1["graph"]["digest"]
+    meta1_path = graph_meta_digest_path(tmp_path, digest1)
+    assert meta1_path.exists()
     arch1 = tmp_path / ".codecanvas" / f"architecture.{digest1}.png"
     assert arch1.exists()
 
@@ -97,7 +100,7 @@ def test_call_edge_cache_digest_gating(tmp_path: Path) -> None:
     func_ids = [n.id for n in graph.nodes if n.kind == NodeKind.FUNC]
     assert len(func_ids) >= 2
 
-    cache_path = _call_edge_cache_path(tmp_path)
+    cache_path = _call_edge_cache_path(tmp_path, digest=None)
     payload = {
         "version": _CALL_EDGE_CACHE_VERSION,
         "project_path": str(tmp_path),

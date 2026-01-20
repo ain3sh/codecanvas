@@ -16,11 +16,19 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Set
 
 from .core.analysis import Analyzer
-from .core.graph_meta import compute_graph_meta, ensure_architecture_current, load_graph_meta, publish_graph_meta
+from .core.graph_meta import load_graph_meta
 from .core.lock import canvas_artifact_lock
 from .core.models import EdgeType, Graph, GraphEdge, NodeKind
-from .core.paths import get_canvas_dir, top_level_project_roots, update_manifest
+from .core.paths import get_canvas_dir, top_level_project_roots
 from .core.refresh import mark_dirty, take_dirty
+from .core.snapshot import (
+    build_snapshot,
+    call_edges_digest_path,
+    flip_call_edges_pointer,
+    flip_snapshot_pointers,
+    write_call_edges_digest,
+    write_snapshot_files,
+)
 from .core.state import AnalysisState, CanvasState, clear_state, load_state, load_tasks_yaml, pick_task, save_state
 from .parser import Parser
 from .parser.call_graph import build_call_graph_edges
@@ -70,7 +78,9 @@ def _normalize_project_path(project_dir: Path) -> str:
         return str(project_dir)
 
 
-def _call_edge_cache_path(project_dir: Path) -> Path:
+def _call_edge_cache_path(project_dir: Path, *, digest: str | None = None) -> Path:
+    if digest:
+        return call_edges_digest_path(project_dir, digest)
     return get_canvas_dir(project_dir) / _CALL_EDGE_CACHE_NAME
 
 
@@ -82,42 +92,49 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
 
 
 def _load_call_edge_cache(project_dir: Path, *, expected_digest: str | None) -> tuple[list[GraphEdge], dict]:
-    path = _call_edge_cache_path(project_dir)
-    if not path.exists():
-        return [], {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return [], {}
-    if int(data.get("version", 0) or 0) != _CALL_EDGE_CACHE_VERSION:
-        return [], {}
-    cached_project = data.get("project_path")
-    if cached_project:
-        cached_path = _normalize_project_path(Path(str(cached_project)))
-        if cached_path != _normalize_project_path(project_dir):
-            return [], {}
-    cache_digest = data.get("graph_digest")
-    if expected_digest and cache_digest and cache_digest != expected_digest:
-        return [], {}
-    edges_raw = data.get("edges") or []
-    edges: list[GraphEdge] = []
-    for item in edges_raw:
-        if not isinstance(item, dict):
+    paths: list[Path] = []
+    if expected_digest:
+        paths.append(_call_edge_cache_path(project_dir, digest=expected_digest))
+    paths.append(_call_edge_cache_path(project_dir))
+
+    for path in paths:
+        if not path.exists():
             continue
-        from_id = item.get("from_id")
-        to_id = item.get("to_id")
-        if not from_id or not to_id:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
             continue
-        edges.append(GraphEdge(from_id=str(from_id), to_id=str(to_id), type=EdgeType.CALL))
-    meta = {
-        "cache_path": str(path),
-        "cache_edges_total": len(edges),
-        "cache_generated_at": data.get("generated_at"),
-        "cache_generation": data.get("generation"),
-        "cache_source": data.get("source"),
-        "cache_graph_digest": cache_digest,
-    }
-    return edges, meta
+        if int(data.get("version", 0) or 0) != _CALL_EDGE_CACHE_VERSION:
+            continue
+        cached_project = data.get("project_path")
+        if cached_project:
+            cached_path = _normalize_project_path(Path(str(cached_project)))
+            if cached_path != _normalize_project_path(project_dir):
+                continue
+        cache_digest = data.get("graph_digest")
+        if expected_digest and cache_digest != expected_digest:
+            continue
+        edges_raw = data.get("edges") or []
+        edges: list[GraphEdge] = []
+        for item in edges_raw:
+            if not isinstance(item, dict):
+                continue
+            from_id = item.get("from_id")
+            to_id = item.get("to_id")
+            if not from_id or not to_id:
+                continue
+            edges.append(GraphEdge(from_id=str(from_id), to_id=str(to_id), type=EdgeType.CALL))
+        meta = {
+            "cache_path": str(path),
+            "cache_edges_total": len(edges),
+            "cache_generated_at": data.get("generated_at"),
+            "cache_generation": data.get("generation"),
+            "cache_source": data.get("source"),
+            "cache_graph_digest": cache_digest,
+        }
+        return edges, meta
+
+    return [], {}
 
 
 def _merge_cached_call_edges(graph: Graph, project_dir: Path, *, expected_digest: str | None) -> dict | None:
@@ -146,6 +163,8 @@ def _persist_call_edge_cache(
     graph_digest: str | None,
 ) -> None:
     try:
+        if not graph_digest:
+            return
         edges_payload: list[dict[str, str]] = []
         for edge in graph.edges:
             if edge.type != EdgeType.CALL:
@@ -164,12 +183,16 @@ def _persist_call_edge_cache(
             "edges": edges_payload,
             "stats": {"edges_total": len(edges_payload)},
         }
-        cache_path = _call_edge_cache_path(project_dir)
-        with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
-            if not locked:
-                return
-            _write_json_atomic(cache_path, payload)
-            update_manifest(cache_path.parent, [cache_path.name])
+        write_call_edges_digest(project_dir, graph_digest, payload)
+        pointer_written = flip_call_edges_pointer(project_dir, digest=graph_digest, payload=payload)
+        if pointer_written:
+            try:
+                state = load_state()
+                if state.initialized:
+                    state.call_edges_digest = graph_digest
+                    _save_state_with_lock(state)
+            except Exception:
+                pass
     except Exception:
         return
 
@@ -205,20 +228,21 @@ def _compute_graph_meta(
     existing_meta = load_graph_meta(project_dir)
     parse_summary = parser_summary or (state.parse_summary or {})
     label_prefix = _label_strip_prefix(project_dir)
-    meta = compute_graph_meta(
+    snapshot = build_snapshot(
         graph=_graph,
         project_dir=project_dir,
         parse_summary=parse_summary,
         use_lsp=bool(getattr(state, "use_lsp", True)),
         lsp_langs=parse_summary.get("lsp_langs") if isinstance(parse_summary, dict) else None,
         label_strip_prefix=label_prefix,
+        action=action,
         existing_meta=existing_meta,
     )
-    _published, stored = publish_graph_meta(project_dir, meta, timeout_s=2.0, action=action)
-    meta = stored if stored else meta
-    if isinstance(meta, dict):
-        _graph_digest = meta.get("graph", {}).get("digest")
-    return meta
+    if snapshot.digest:
+        _graph_digest = snapshot.digest
+        write_snapshot_files(project_dir, snapshot)
+        flip_snapshot_pointers(project_dir, snapshot)
+    return snapshot.meta
 
 
 def _reconcile_state_from_meta(state: CanvasState, meta: dict) -> bool:
@@ -229,6 +253,10 @@ def _reconcile_state_from_meta(state: CanvasState, meta: dict) -> bool:
     graph_info = meta.get("graph") if isinstance(meta, dict) else None
     if not isinstance(graph_info, dict):
         graph_info = {}
+    digest = graph_info.get("digest")
+    if digest and digest != state.graph_digest:
+        state.graph_digest = str(digest)
+        changed = True
     symbol_files = graph_info.get("symbol_files")
     if isinstance(symbol_files, dict) and symbol_files != state.symbol_files:
         state.symbol_files = dict(symbol_files)
@@ -283,19 +311,10 @@ def _save_state_with_lock(state: CanvasState) -> None:
         save_state(state)
         return
     project_dir = Path(state.project_path)
-    with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
+    with canvas_artifact_lock(project_dir, timeout_s=5.0) as locked:
         if locked:
             save_state(state)
             return
-    latest = load_state()
-    state.symbol_files = latest.symbol_files
-    latest_arch = next((e for e in latest.evidence if e.kind == "architecture"), None)
-    if latest_arch is not None:
-        for ev in state.evidence:
-            if ev.kind == "architecture":
-                ev.png_path = latest_arch.png_path
-                ev.metrics = latest_arch.metrics
-                break
     save_state(state)
 
 
@@ -454,7 +473,6 @@ def _refresh_graph_for_dirty_files(
 
     meta = _compute_graph_meta(state=state, parser_summary=state.parse_summary, action="refresh")
     if meta is not None and _graph is not None:
-        meta = ensure_architecture_current(project_dir, _graph, meta)
         _reconcile_state_from_meta(state, meta)
 
     summary = {
@@ -942,7 +960,6 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
     state.focus = Path(project_dir).name
 
     if meta is not None and _graph is not None:
-        meta = ensure_architecture_current(Path(project_dir), _graph, meta)
         _reconcile_state_from_meta(state, meta)
 
     _save_state_with_lock(state)
@@ -1028,7 +1045,6 @@ def _ensure_loaded(state: CanvasState) -> None:
             _call_graph_status = "completed"
 
     if meta is not None and _graph is not None:
-        meta = ensure_architecture_current(root, _graph, meta)
         if _reconcile_state_from_meta(state, meta):
             _save_state_with_lock(state)
 

@@ -126,7 +126,12 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp_path.replace(path)
+    try:
+        tmp_path.replace(path)
+    except FileNotFoundError:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp_path.replace(path)
 
 
 def update_manifest(artifact_dir: Path, filenames: Iterable[str]) -> None:

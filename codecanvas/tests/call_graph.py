@@ -78,7 +78,7 @@ def test_call_edge_cache_round_trip(tmp_path: Path, monkeypatch):
 
     server._persist_call_edge_cache(graph, tmp_path, generation=1, source="test", graph_digest="test")
 
-    cache_path = tmp_path / ".codecanvas" / "call_edges.json"
+    cache_path = server._call_edge_cache_path(tmp_path, digest="test")
     assert cache_path.exists()
 
     new_graph, node_a2, _node_b2 = _make_graph(tmp_path)

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterable
 
+from .lock import canvas_artifact_lock
 from .paths import get_canvas_dir, update_manifest
 
 
@@ -21,33 +22,13 @@ def _dirty_path(project_dir: Path) -> Path:
     return get_canvas_dir(project_dir) / "dirty.json"
 
 
-def _lock_path(project_dir: Path) -> Path:
-    return get_canvas_dir(project_dir) / "lock"
-
-
 @contextmanager
 def _canvas_lock(project_dir: Path):
-    lock_path = _lock_path(project_dir)
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+") as f:
-        try:
-            import fcntl
-
-            try:
-                fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                yield
-                return
-        except Exception:
-            yield
-        else:
-            try:
-                yield
-            finally:
-                try:
-                    fcntl.flock(f, fcntl.LOCK_UN)
-                except Exception:
-                    pass
+    with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
+        if not locked:
+            yield False
+            return
+        yield True
 
 
 def _read_json(path: Path) -> dict:
@@ -89,7 +70,9 @@ def mark_dirty(project_dir: Path, paths: Iterable[Path], *, reason: str | None =
     root = project_dir
     now = time.time()
     updated = 0
-    with _canvas_lock(root):
+    with _canvas_lock(root) as locked:
+        if not locked:
+            return 0
         data = _read_json(_dirty_path(root))
         files = data.get("files")
         if not isinstance(files, dict):
@@ -126,7 +109,9 @@ def mark_dirty(project_dir: Path, paths: Iterable[Path], *, reason: str | None =
 
 def take_dirty(project_dir: Path, *, max_items: int | None = None) -> list[dict]:
     root = project_dir
-    with _canvas_lock(root):
+    with _canvas_lock(root) as locked:
+        if not locked:
+            return []
         data = _read_json(_dirty_path(root))
         files = data.get("files")
         if not isinstance(files, dict) or not files:
