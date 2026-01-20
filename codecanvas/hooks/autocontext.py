@@ -10,6 +10,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from codecanvas.core.graph_meta import load_graph_meta
 from codecanvas.core.models import EdgeType, NodeKind
 from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
 from codecanvas.core.refresh import mark_dirty
@@ -338,9 +339,19 @@ def _select_symbol_from_state(file_path: Path) -> str | None:
         if not state.initialized:
             return None
 
+        symbol_files = None
+        if state.project_path:
+            meta = load_graph_meta(Path(state.project_path))
+            if isinstance(meta, dict):
+                graph_info = meta.get("graph") if isinstance(meta.get("graph"), dict) else None
+                if isinstance(graph_info, dict):
+                    symbol_files = graph_info.get("symbol_files")
+        if not isinstance(symbol_files, dict):
+            symbol_files = state.symbol_files or {}
+
         target = str(file_path.absolute())
         candidates: list[tuple[int, int, int, str]] = []
-        for symbol_id, fs_path in (state.symbol_files or {}).items():
+        for symbol_id, fs_path in symbol_files.items():
             try:
                 if str(Path(fs_path).absolute()) != target:
                     continue

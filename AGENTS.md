@@ -6,4 +6,4 @@ Project instructions for AI agents.
 
 ## Skills
 
-@.agent/SKILLS.md
+@.agents/SKILLS.md

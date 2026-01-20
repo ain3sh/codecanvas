@@ -7,8 +7,7 @@ __pycache__/
 .canvas_*.png
 .canvas_state.json
 *.env
+*.rar
 node_modules/
 **/runs/**
-.agent/
 .rewind/
-*.rar

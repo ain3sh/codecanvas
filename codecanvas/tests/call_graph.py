@@ -76,20 +76,20 @@ def test_call_edge_cache_round_trip(tmp_path: Path, monkeypatch):
     graph, node_a, node_b = _make_graph(tmp_path)
     graph.add_edge(GraphEdge(from_id=node_a.id, to_id=node_b.id, type=EdgeType.CALL))
 
-    server._persist_call_edge_cache(graph, tmp_path, generation=1, source="test")
+    server._persist_call_edge_cache(graph, tmp_path, generation=1, source="test", graph_digest="test")
 
     cache_path = tmp_path / ".codecanvas" / "call_edges.json"
     assert cache_path.exists()
 
     new_graph, node_a2, _node_b2 = _make_graph(tmp_path)
-    meta = server._merge_cached_call_edges(new_graph, tmp_path)
+    meta = server._merge_cached_call_edges(new_graph, tmp_path, expected_digest="test")
     assert meta is not None
     assert meta["cache_edges_added"] == 1
     assert new_graph.stats()["call_edges"] == 1
 
     missing_graph = Graph()
     missing_graph.add_node(node_a2)
-    meta_missing = server._merge_cached_call_edges(missing_graph, tmp_path)
+    meta_missing = server._merge_cached_call_edges(missing_graph, tmp_path, expected_digest="test")
     assert meta_missing is not None
     assert meta_missing["cache_edges_added"] == 0
     assert meta_missing["cache_edges_missing_nodes"] == 1

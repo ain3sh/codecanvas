@@ -16,6 +16,8 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Set
 
 from .core.analysis import Analyzer
+from .core.graph_meta import compute_graph_meta, ensure_architecture_current, load_graph_meta, publish_graph_meta
+from .core.lock import canvas_artifact_lock
 from .core.models import EdgeType, Graph, GraphEdge, NodeKind
 from .core.paths import get_canvas_dir, top_level_project_roots, update_manifest
 from .core.refresh import mark_dirty, take_dirty
@@ -24,7 +26,6 @@ from .parser import Parser
 from .parser.call_graph import build_call_graph_edges
 from .parser.utils import find_workspace_root
 from .views import save_png
-from .views.architecture import ArchitectureView
 from .views.impact import ImpactView
 from .views.task import TaskView
 
@@ -44,6 +45,7 @@ class CanvasResult:
 
 _graph: Optional[Graph] = None
 _analyzer: Optional[Analyzer] = None
+_graph_digest: str | None = None
 
 _graph_lock = threading.RLock()
 
@@ -57,7 +59,7 @@ _call_graph_result_summary: dict | None = None  # Detailed result for diagnostic
 _call_graph_cache_info: dict | None = None
 
 _SERVER_INSTANCE_ID = uuid.uuid4().hex
-_CALL_EDGE_CACHE_VERSION = 2
+_CALL_EDGE_CACHE_VERSION = 3
 _CALL_EDGE_CACHE_NAME = "call_edges.json"
 
 
@@ -79,7 +81,7 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     tmp_path.replace(path)
 
 
-def _load_call_edge_cache(project_dir: Path) -> tuple[list[GraphEdge], dict]:
+def _load_call_edge_cache(project_dir: Path, *, expected_digest: str | None) -> tuple[list[GraphEdge], dict]:
     path = _call_edge_cache_path(project_dir)
     if not path.exists():
         return [], {}
@@ -94,6 +96,9 @@ def _load_call_edge_cache(project_dir: Path) -> tuple[list[GraphEdge], dict]:
         cached_path = _normalize_project_path(Path(str(cached_project)))
         if cached_path != _normalize_project_path(project_dir):
             return [], {}
+    cache_digest = data.get("graph_digest")
+    if expected_digest and cache_digest and cache_digest != expected_digest:
+        return [], {}
     edges_raw = data.get("edges") or []
     edges: list[GraphEdge] = []
     for item in edges_raw:
@@ -110,12 +115,13 @@ def _load_call_edge_cache(project_dir: Path) -> tuple[list[GraphEdge], dict]:
         "cache_generated_at": data.get("generated_at"),
         "cache_generation": data.get("generation"),
         "cache_source": data.get("source"),
+        "cache_graph_digest": cache_digest,
     }
     return edges, meta
 
 
-def _merge_cached_call_edges(graph: Graph, project_dir: Path) -> dict | None:
-    edges, meta = _load_call_edge_cache(project_dir)
+def _merge_cached_call_edges(graph: Graph, project_dir: Path, *, expected_digest: str | None) -> dict | None:
+    edges, meta = _load_call_edge_cache(project_dir, expected_digest=expected_digest)
     if not edges:
         return None
     added = 0
@@ -131,7 +137,14 @@ def _merge_cached_call_edges(graph: Graph, project_dir: Path) -> dict | None:
     return meta
 
 
-def _persist_call_edge_cache(graph: Graph, project_dir: Path, *, generation: int | None, source: str) -> None:
+def _persist_call_edge_cache(
+    graph: Graph,
+    project_dir: Path,
+    *,
+    generation: int | None,
+    source: str,
+    graph_digest: str | None,
+) -> None:
     try:
         edges_payload: list[dict[str, str]] = []
         for edge in graph.edges:
@@ -140,8 +153,6 @@ def _persist_call_edge_cache(graph: Graph, project_dir: Path, *, generation: int
             if graph.get_node(edge.from_id) is None or graph.get_node(edge.to_id) is None:
                 continue
             edges_payload.append({"from_id": edge.from_id, "to_id": edge.to_id})
-        if not edges_payload:
-            return
         payload = {
             "version": _CALL_EDGE_CACHE_VERSION,
             "project_path": _normalize_project_path(project_dir),
@@ -149,12 +160,16 @@ def _persist_call_edge_cache(graph: Graph, project_dir: Path, *, generation: int
             "generation": int(generation) if generation is not None else None,
             "source": str(source),
             "instance_id": _SERVER_INSTANCE_ID,
+            "graph_digest": graph_digest,
             "edges": edges_payload,
             "stats": {"edges_total": len(edges_payload)},
         }
         cache_path = _call_edge_cache_path(project_dir)
-        _write_json_atomic(cache_path, payload)
-        update_manifest(cache_path.parent, [cache_path.name])
+        with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
+            if not locked:
+                return
+            _write_json_atomic(cache_path, payload)
+            update_manifest(cache_path.parent, [cache_path.name])
     except Exception:
         return
 
@@ -175,6 +190,113 @@ def _label_strip_prefix(project_dir: Path) -> str | None:
     except Exception:
         return None
     return None
+
+
+def _compute_graph_meta(
+    *,
+    state: CanvasState,
+    parser_summary: dict | None,
+    action: str,
+) -> dict | None:
+    global _graph_digest
+    if _graph is None or not state.project_path:
+        return None
+    project_dir = Path(state.project_path)
+    existing_meta = load_graph_meta(project_dir)
+    parse_summary = parser_summary or (state.parse_summary or {})
+    label_prefix = _label_strip_prefix(project_dir)
+    meta = compute_graph_meta(
+        graph=_graph,
+        project_dir=project_dir,
+        parse_summary=parse_summary,
+        use_lsp=bool(getattr(state, "use_lsp", True)),
+        lsp_langs=parse_summary.get("lsp_langs") if isinstance(parse_summary, dict) else None,
+        label_strip_prefix=label_prefix,
+        existing_meta=existing_meta,
+    )
+    _published, stored = publish_graph_meta(project_dir, meta, timeout_s=2.0, action=action)
+    meta = stored if stored else meta
+    if isinstance(meta, dict):
+        _graph_digest = meta.get("graph", {}).get("digest")
+    return meta
+
+
+def _reconcile_state_from_meta(state: CanvasState, meta: dict) -> bool:
+    changed = False
+    if not isinstance(meta, dict):
+        return False
+
+    graph_info = meta.get("graph") if isinstance(meta, dict) else None
+    if not isinstance(graph_info, dict):
+        graph_info = {}
+    symbol_files = graph_info.get("symbol_files")
+    if isinstance(symbol_files, dict) and symbol_files != state.symbol_files:
+        state.symbol_files = dict(symbol_files)
+        changed = True
+
+    stats = graph_info.get("stats") if isinstance(graph_info, dict) else {}
+    modules = stats.get("modules") if isinstance(stats, dict) else None
+    classes = stats.get("classes") if isinstance(stats, dict) else None
+    funcs = stats.get("funcs") if isinstance(stats, dict) else None
+
+    arch_path = ""
+    if state.project_path:
+        arch_path = str(get_canvas_dir(Path(state.project_path)) / "architecture.png")
+
+    arch_ev = None
+    for ev in state.evidence:
+        if ev.kind == "architecture":
+            arch_ev = ev
+            break
+    if arch_ev is None:
+        metrics = {}
+        if modules is not None:
+            metrics["modules"] = modules
+        if classes is not None:
+            metrics["classes"] = classes
+        if funcs is not None:
+            metrics["funcs"] = funcs
+        state.add_evidence(kind="architecture", png_path=arch_path, symbol=None, metrics=metrics)
+        changed = True
+    else:
+        if arch_path and arch_ev.png_path != arch_path:
+            arch_ev.png_path = arch_path
+            changed = True
+        if isinstance(arch_ev.metrics, dict):
+            new_metrics = dict(arch_ev.metrics)
+        else:
+            new_metrics = {}
+        if modules is not None:
+            new_metrics["modules"] = modules
+        if classes is not None:
+            new_metrics["classes"] = classes
+        if funcs is not None:
+            new_metrics["funcs"] = funcs
+        if new_metrics != (arch_ev.metrics or {}):
+            arch_ev.metrics = new_metrics
+            changed = True
+    return changed
+
+
+def _save_state_with_lock(state: CanvasState) -> None:
+    if not state.project_path:
+        save_state(state)
+        return
+    project_dir = Path(state.project_path)
+    with canvas_artifact_lock(project_dir, timeout_s=2.0) as locked:
+        if locked:
+            save_state(state)
+            return
+    latest = load_state()
+    state.symbol_files = latest.symbol_files
+    latest_arch = next((e for e in latest.evidence if e.kind == "architecture"), None)
+    if latest_arch is not None:
+        for ev in state.evidence:
+            if ev.kind == "architecture":
+                ev.png_path = latest_arch.png_path
+                ev.metrics = latest_arch.metrics
+                break
+    save_state(state)
 
 
 def _module_labels_from_graph(graph: Graph) -> Set[str]:
@@ -323,15 +445,17 @@ def _refresh_graph_for_dirty_files(
                         project_dir,
                         generation=_call_graph_generation,
                         source="refresh",
+                        graph_digest=_graph_digest,
                     )
                     call_edges_refresh_ok = True
         except Exception as e:
             call_edges_skipped_reason = f"error:{type(e).__name__}"
             call_edges_skipped_at = time.time()
 
-    with _graph_lock:
-        if graph_ref is not None:
-            state.symbol_files = {n.id: n.fsPath for n in graph_ref.nodes}
+    meta = _compute_graph_meta(state=state, parser_summary=state.parse_summary, action="refresh")
+    if meta is not None and _graph is not None:
+        meta = ensure_architecture_current(project_dir, _graph, meta)
+        _reconcile_state_from_meta(state, meta)
 
     summary = {
         "updated_at": time.time(),
@@ -490,7 +614,13 @@ def _build_call_graph_foreground(
                 _call_graph_result_summary["cache"] = cache_info
             _persist_call_graph_diag(_call_graph_diag(phase="foreground"))
             if project_dir is not None:
-                _persist_call_edge_cache(_graph, project_dir, generation=generation, source="foreground")
+                _persist_call_edge_cache(
+                    _graph,
+                    project_dir,
+                    generation=generation,
+                    source="foreground",
+                    graph_digest=_graph_digest,
+                )
 
     return added
 
@@ -585,7 +715,13 @@ def _start_call_graph_background(
                     _call_graph_result_summary["cache"] = cache_info
                 _persist_call_graph_diag(_call_graph_diag(phase="background"))
                 if project_dir is not None:
-                    _persist_call_edge_cache(_graph, project_dir, generation=generation, source="background")
+                    _persist_call_edge_cache(
+                        _graph,
+                        project_dir,
+                        generation=generation,
+                        source="background",
+                        graph_digest=_graph_digest,
+                    )
 
     _call_graph_thread = threading.Thread(target=_worker, name="codecanvas-call-graph", daemon=True)
     _call_graph_thread.start()
@@ -701,7 +837,7 @@ def canvas_action(
         refresh_summary = _refresh_graph_for_dirty_files(state, reason="status")
         if refresh_summary:
             state.refresh_summary = refresh_summary
-            save_state(state)
+            _save_state_with_lock(state)
         return _render_board(state, f"Status (call_graph={_call_graph_status})")
 
     return CanvasResult(f"Unknown action: {action}")
@@ -742,34 +878,6 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
     _call_graph_result_summary = None
     _call_graph_cache_info = None
 
-    cache_info = None
-    with _graph_lock:
-        cache_info = _merge_cached_call_edges(_graph, Path(project_dir))
-        if cache_info:
-            _call_graph_edges_total = int(_graph.stats().get("call_edges", 0))
-    if cache_info:
-        _call_graph_cache_info = {**cache_info, "edges_total": int(_call_graph_edges_total)}
-        _call_graph_result_summary = {"phase": "cache_load", **_call_graph_cache_info}
-        if _call_graph_edges_total:
-            _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": 0.0, "source": "cache"}
-        if not use_lsp and _call_graph_edges_total:
-            _call_graph_status = "completed"
-
-    call_edges_added = 0
-    if use_lsp:
-        call_edges_added = _build_call_graph_foreground(
-            time_budget_s=0.35,
-            generation=generation,
-            lsp_langs=allowed_lsp_langs,
-            project_dir=Path(project_dir),
-        )
-        _start_call_graph_background(
-            time_budget_s=30.0,
-            generation=generation,
-            lsp_langs=allowed_lsp_langs,
-            project_dir=Path(project_dir),
-        )
-
     warn = ""
     backend_note = ""
     summary = getattr(parser, "last_summary", None)
@@ -796,9 +904,36 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
         }
         if allowed_lsp_langs is not None:
             state.parse_summary["lsp_langs"] = sorted(allowed_lsp_langs)
+
+    meta = _compute_graph_meta(state=state, parser_summary=state.parse_summary, action="init")
+
+    cache_info = None
     with _graph_lock:
-        for node in _graph.nodes:
-            state.symbol_files[node.id] = node.fsPath
+        cache_info = _merge_cached_call_edges(_graph, Path(project_dir), expected_digest=_graph_digest)
+        if cache_info:
+            _call_graph_edges_total = int(_graph.stats().get("call_edges", 0))
+    if cache_info:
+        _call_graph_cache_info = {**cache_info, "edges_total": int(_call_graph_edges_total)}
+        _call_graph_result_summary = {"phase": "cache_load", **_call_graph_cache_info}
+        if _call_graph_edges_total:
+            _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": 0.0, "source": "cache"}
+        if not use_lsp and _call_graph_edges_total:
+            _call_graph_status = "completed"
+
+    call_edges_added = 0
+    if use_lsp:
+        call_edges_added = _build_call_graph_foreground(
+            time_budget_s=0.35,
+            generation=generation,
+            lsp_langs=allowed_lsp_langs,
+            project_dir=Path(project_dir),
+        )
+        _start_call_graph_background(
+            time_budget_s=30.0,
+            generation=generation,
+            lsp_langs=allowed_lsp_langs,
+            project_dir=Path(project_dir),
+        )
 
     # Persist call graph diagnostics immediately so SessionStart logs/state are useful
     # even if the run is terminated early.
@@ -806,28 +941,33 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
 
     state.focus = Path(project_dir).name
 
-    out_dir = _canvas_output_dir(project_dir)
-    png_path = os.path.join(out_dir, "architecture.png")
-    with _graph_lock:
-        svg = ArchitectureView(_graph).render(output_path=None)
-    png_bytes = save_png(svg, png_path)
+    if meta is not None and _graph is not None:
+        meta = ensure_architecture_current(Path(project_dir), _graph, meta)
+        _reconcile_state_from_meta(state, meta)
 
-    with _graph_lock:
-        stats = _graph.stats()
-    ev = state.add_evidence(
-        kind="architecture",
-        png_path=png_path,
-        symbol=None,
-        metrics={"modules": stats.get("modules"), "classes": stats.get("classes"), "funcs": stats.get("funcs")},
-    )
-    save_state(state)
+    _save_state_with_lock(state)
 
     board = _render_board(state, "Board").images[0]
 
+    if meta and isinstance(meta.get("graph", {}).get("stats"), dict):
+        stats = meta.get("graph", {}).get("stats")
+    else:
+        with _graph_lock:
+            stats = _graph.stats() if _graph is not None else {}
+
+    arch_ev = next((e for e in state.evidence if e.kind == "architecture"), None)
+    ev_id = arch_ev.id if arch_ev else "E1"
+    png_path = str(get_canvas_dir(Path(project_dir)) / "architecture.png")
+    png_bytes = b""
+    try:
+        png_bytes = Path(png_path).read_bytes()
+    except Exception:
+        png_bytes = b""
+
     call_note = "" if not use_lsp else f" Call graph: +{call_edges_added} edges ({_call_graph_status})."
     msg = (
-        f"Initialized: {stats['modules']} modules, {stats['classes']} classes, {stats['funcs']} funcs. "
-        f"Created evidence {ev.id}.{backend_note}{call_note}{warn}\n\n"
+        f"Initialized: {stats.get('modules', 0)} modules, {stats.get('classes', 0)} classes, "
+        f"{stats.get('funcs', 0)} funcs. Created evidence {ev_id}.{backend_note}{call_note}{warn}\n\n"
         f"{_board_summary(state)}\n"
         f"{_next_hint('init')}"
     )
@@ -871,10 +1011,12 @@ def _ensure_loaded(state: CanvasState) -> None:
         _graph = parser.parse_file(str(root)) if root.is_file() else parser.parse_directory(str(root))
         _analyzer = Analyzer(_graph)
 
+    meta = _compute_graph_meta(state=state, parser_summary=state.parse_summary, action="load")
+
     _call_graph_cache_info = None
     cache_info = None
     with _graph_lock:
-        cache_info = _merge_cached_call_edges(_graph, root)
+        cache_info = _merge_cached_call_edges(_graph, root, expected_digest=_graph_digest)
         if cache_info:
             _call_graph_edges_total = int(_graph.stats().get("call_edges", 0))
     if cache_info:
@@ -884,6 +1026,11 @@ def _ensure_loaded(state: CanvasState) -> None:
             _call_graph_last = {"edges": int(_call_graph_edges_total), "duration_s": 0.0, "source": "cache"}
         if not getattr(state, "use_lsp", True) and _call_graph_edges_total:
             _call_graph_status = "completed"
+
+    if meta is not None and _graph is not None:
+        meta = ensure_architecture_current(root, _graph, meta)
+        if _reconcile_state_from_meta(state, meta):
+            _save_state_with_lock(state)
 
     if getattr(state, "use_lsp", True):
         _call_graph_generation += 1
@@ -909,6 +1056,11 @@ def _action_impact(
     else:
         # Wait for background call graph to complete before analyzing
         _wait_for_call_graph(timeout_s=float(wait_for_call_graph_s))
+
+    if state.project_path:
+        meta = load_graph_meta(Path(state.project_path))
+        if meta is not None:
+            _reconcile_state_from_meta(state, meta)
 
     # Save call graph summary to state for diagnostics
     state.call_graph_summary = _call_graph_diag(phase="impact")
@@ -975,7 +1127,7 @@ def _action_impact(
             "call_graph_instance_id": (state.call_graph_summary or {}).get("instance_id"),
         },
     )
-    save_state(state)
+    _save_state_with_lock(state)
 
     board = _render_board(state, "Board").images[0]
 
@@ -999,7 +1151,7 @@ def _action_claim(state: CanvasState, *, text: str, kind: str | None) -> CanvasR
     k = (kind or "hypothesis").strip().lower() or "hypothesis"
     ev_ids = _default_evidence_ids(state)
     cl = state.add_claim(kind=k, text=text or "", evidence_ids=ev_ids)
-    save_state(state)
+    _save_state_with_lock(state)
 
     linked = f" linked to {ev_ids[0]}" if ev_ids else ""
     board_result = _render_board(state, "Board")
@@ -1011,7 +1163,7 @@ def _action_decide(state: CanvasState, *, text: str, kind: str | None) -> Canvas
     k = (kind or "plan").strip().lower() or "plan"
     ev_ids = _default_evidence_ids(state)
     dc = state.add_decision(kind=k, text=text or "", target=None, evidence_ids=ev_ids)
-    save_state(state)
+    _save_state_with_lock(state)
 
     linked = f" linked to {ev_ids[0]}" if ev_ids else ""
     board_result = _render_board(state, "Board")
@@ -1088,7 +1240,7 @@ def _action_mark_skip(state: CanvasState, *, symbol: str, mode: str, text: str |
         decision_text = (text or f"Skipped: {label}").strip() or f"Skipped: {label}"
         state.add_decision(kind="skip", text=decision_text, target=label, evidence_ids=ev_ids)
 
-    save_state(state)
+    _save_state_with_lock(state)
 
     action_word = "Marked" if mode == "mark" else "Skipped"
     board_result = _render_board(state, "Board")
@@ -1106,7 +1258,7 @@ def _action_task_select(state: CanvasState, task_id: str) -> CanvasResult:
     if not task:
         return CanvasResult(f"Unknown task_id: {task_id}")
     state.active_task_id = task_id
-    save_state(state)
+    _save_state_with_lock(state)
 
     board_result = _render_board(state, "Board")
     msg = f'Selected task: "{task_id}".\n\n{_board_summary(state)}\n{_next_hint("task_select")}'
