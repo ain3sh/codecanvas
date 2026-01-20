@@ -34,6 +34,24 @@ def call_edges_digest_path(project_dir: Path, digest: str) -> Path:
     return get_canvas_dir(project_dir) / f"call_edges.{digest}.json"
 
 
+def load_graph_meta_for_digest(project_dir: Path, digest: str | None) -> dict[str, Any] | None:
+    if digest:
+        path = graph_meta_digest_path(project_dir, digest)
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                return data if isinstance(data, dict) else None
+            except Exception:
+                return None
+    return load_graph_meta(project_dir)
+
+
+def architecture_png_path_for_digest(project_dir: Path, digest: str | None) -> Path:
+    if digest:
+        return architecture_digest_path(project_dir, digest)
+    return get_canvas_dir(project_dir) / "architecture.png"
+
+
 def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + ".tmp")

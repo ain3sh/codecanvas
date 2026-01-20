@@ -16,16 +16,15 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Set
 
 from .core.analysis import Analyzer
-from .core.graph_meta import load_graph_meta
 from .core.lock import canvas_artifact_lock
 from .core.models import EdgeType, Graph, GraphEdge, NodeKind
 from .core.paths import get_canvas_dir, top_level_project_roots
 from .core.refresh import mark_dirty, take_dirty
 from .core.snapshot import (
+    architecture_png_path_for_digest,
     build_snapshot,
     call_edges_digest_path,
-    flip_call_edges_pointer,
-    flip_snapshot_pointers,
+    load_graph_meta_for_digest,
     write_call_edges_digest,
     write_snapshot_files,
 )
@@ -95,7 +94,8 @@ def _load_call_edge_cache(project_dir: Path, *, expected_digest: str | None) -> 
     paths: list[Path] = []
     if expected_digest:
         paths.append(_call_edge_cache_path(project_dir, digest=expected_digest))
-    paths.append(_call_edge_cache_path(project_dir))
+    else:
+        paths.append(_call_edge_cache_path(project_dir))
 
     for path in paths:
         if not path.exists():
@@ -184,15 +184,13 @@ def _persist_call_edge_cache(
             "stats": {"edges_total": len(edges_payload)},
         }
         write_call_edges_digest(project_dir, graph_digest, payload)
-        pointer_written = flip_call_edges_pointer(project_dir, digest=graph_digest, payload=payload)
-        if pointer_written:
-            try:
-                state = load_state()
-                if state.initialized:
-                    state.call_edges_digest = graph_digest
-                    _save_state_with_lock(state)
-            except Exception:
-                pass
+        try:
+            state = load_state()
+            if state.initialized:
+                state.call_edges_digest = graph_digest
+                _save_state_with_lock(state)
+        except Exception:
+            pass
     except Exception:
         return
 
@@ -225,7 +223,7 @@ def _compute_graph_meta(
     if _graph is None or not state.project_path:
         return None
     project_dir = Path(state.project_path)
-    existing_meta = load_graph_meta(project_dir)
+    existing_meta = load_graph_meta_for_digest(project_dir, state.graph_digest)
     parse_summary = parser_summary or (state.parse_summary or {})
     label_prefix = _label_strip_prefix(project_dir)
     snapshot = build_snapshot(
@@ -241,7 +239,6 @@ def _compute_graph_meta(
     if snapshot.digest:
         _graph_digest = snapshot.digest
         write_snapshot_files(project_dir, snapshot)
-        flip_snapshot_pointers(project_dir, snapshot)
     return snapshot.meta
 
 
@@ -269,7 +266,7 @@ def _reconcile_state_from_meta(state: CanvasState, meta: dict) -> bool:
 
     arch_path = ""
     if state.project_path:
-        arch_path = str(get_canvas_dir(Path(state.project_path)) / "architecture.png")
+        arch_path = str(architecture_png_path_for_digest(Path(state.project_path), state.graph_digest))
 
     arch_ev = None
     for ev in state.evidence:
@@ -974,7 +971,7 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
 
     arch_ev = next((e for e in state.evidence if e.kind == "architecture"), None)
     ev_id = arch_ev.id if arch_ev else "E1"
-    png_path = str(get_canvas_dir(Path(project_dir)) / "architecture.png")
+    png_path = str(architecture_png_path_for_digest(Path(project_dir), state.graph_digest))
     png_bytes = b""
     try:
         png_bytes = Path(png_path).read_bytes()
@@ -1074,7 +1071,7 @@ def _action_impact(
         _wait_for_call_graph(timeout_s=float(wait_for_call_graph_s))
 
     if state.project_path:
-        meta = load_graph_meta(Path(state.project_path))
+        meta = load_graph_meta_for_digest(Path(state.project_path), state.graph_digest)
         if meta is not None:
             _reconcile_state_from_meta(state, meta)
 

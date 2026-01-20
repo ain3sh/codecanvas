@@ -66,7 +66,8 @@ def test_canvas_result_init_generates_png(tmp_path: Path):
     assert result.images[0].name == "architecture"
     assert Path(result.images[0].png_path).exists()
     assert result.images[0].png_bytes[:8] == b"\x89PNG\r\n\x1a\n"
-    assert Path(result.images[0].png_path) == tmp_path / ".codecanvas" / "architecture.png"
+    state = load_state()
+    assert Path(result.images[0].png_path) == tmp_path / ".codecanvas" / f"architecture.{state.graph_digest}.png"
 
     assert result.images[1].name == "board"
     assert Path(result.images[1].png_path).exists()

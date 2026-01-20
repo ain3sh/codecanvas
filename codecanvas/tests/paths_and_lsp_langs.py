@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from codecanvas.core.models import NodeKind
+from codecanvas.core.state import load_state
 from codecanvas.parser import Parser
 from codecanvas.server import canvas_action
 
@@ -51,7 +52,8 @@ def test_canvas_artifact_dir_override(tmp_path: Path, monkeypatch: pytest.Monkey
     assert res.images
 
     assert (artifact_dir / "state.json").exists()
-    assert (artifact_dir / "architecture.png").exists()
+    state = load_state()
+    assert (artifact_dir / f"architecture.{state.graph_digest}.png").exists()
 
 
 def test_parser_lsp_langs_allows_only_subset(tmp_path: Path) -> None:

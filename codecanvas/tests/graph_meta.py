@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from codecanvas.core.graph_meta import compute_graph_meta, load_graph_meta
+from codecanvas.core.graph_meta import compute_graph_meta
 from codecanvas.core.models import NodeKind
 from codecanvas.core.refresh import mark_dirty
-from codecanvas.core.snapshot import graph_meta_digest_path
+from codecanvas.core.snapshot import graph_meta_digest_path, load_graph_meta_for_digest
 from codecanvas.core.state import load_state
 from codecanvas.parser import Parser
 from codecanvas.server import _CALL_EDGE_CACHE_VERSION, _call_edge_cache_path, _merge_cached_call_edges, canvas_action
@@ -56,7 +56,8 @@ def test_architecture_per_digest_on_refresh(tmp_path: Path) -> None:
     (tmp_path / "a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
 
     canvas_action(action="init", repo_path=str(tmp_path), use_lsp=False)
-    meta1 = load_graph_meta(tmp_path)
+    state = load_state()
+    meta1 = load_graph_meta_for_digest(tmp_path, state.graph_digest)
     assert meta1 is not None
     digest1 = meta1["graph"]["digest"]
     meta1_path = graph_meta_digest_path(tmp_path, digest1)
@@ -68,7 +69,8 @@ def test_architecture_per_digest_on_refresh(tmp_path: Path) -> None:
     mark_dirty(tmp_path, [tmp_path / "b.py"], reason="test")
     canvas_action(action="status")
 
-    meta2 = load_graph_meta(tmp_path)
+    state = load_state()
+    meta2 = load_graph_meta_for_digest(tmp_path, state.graph_digest)
     assert meta2 is not None
     digest2 = meta2["graph"]["digest"]
     assert digest1 != digest2
@@ -100,7 +102,7 @@ def test_call_edge_cache_digest_gating(tmp_path: Path) -> None:
     func_ids = [n.id for n in graph.nodes if n.kind == NodeKind.FUNC]
     assert len(func_ids) >= 2
 
-    cache_path = _call_edge_cache_path(tmp_path, digest=None)
+    cache_path = _call_edge_cache_path(tmp_path, digest=digest)
     payload = {
         "version": _CALL_EDGE_CACHE_VERSION,
         "project_path": str(tmp_path),

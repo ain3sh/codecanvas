@@ -10,10 +10,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from codecanvas.core.graph_meta import load_graph_meta
 from codecanvas.core.models import EdgeType, NodeKind
 from codecanvas.core.paths import get_canvas_dir, has_project_markers, top_level_project_roots
 from codecanvas.core.refresh import mark_dirty
+from codecanvas.core.snapshot import load_graph_meta_for_digest
 from codecanvas.core.state import load_state
 from codecanvas.server import canvas_action
 
@@ -341,7 +341,7 @@ def _select_symbol_from_state(file_path: Path) -> str | None:
 
         symbol_files = None
         if state.project_path:
-            meta = load_graph_meta(Path(state.project_path))
+            meta = load_graph_meta_for_digest(Path(state.project_path), state.graph_digest)
             if isinstance(meta, dict):
                 graph_info = meta.get("graph") if isinstance(meta.get("graph"), dict) else None
                 if isinstance(graph_info, dict):
