@@ -114,15 +114,6 @@ def _graph_quality(parse_summary: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def _quality_tuple(q: dict[str, int]) -> tuple[int, int, int, int]:
-    return (
-        int(q.get("parsed_files", 0)),
-        -int(q.get("skipped_files", 0)),
-        int(q.get("lsp_files", 0)),
-        int(q.get("tree_sitter_files", 0)),
-    )
-
-
 def compute_graph_meta(
     *,
     graph: Graph,
