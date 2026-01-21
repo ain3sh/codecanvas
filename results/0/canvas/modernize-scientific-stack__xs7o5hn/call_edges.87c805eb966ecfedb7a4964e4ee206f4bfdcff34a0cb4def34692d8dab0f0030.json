@@ -1,0 +1,34 @@
+{
+  "version": 3,
+  "project_path": "/app",
+  "generated_at": 1768950405.5267937,
+  "generation": 1,
+  "source": "background",
+  "instance_id": "0a60c55752e04df39629f482466192b5",
+  "graph_digest": "87c805eb966ecfedb7a4964e4ee206f4bfdcff34a0cb4def34692d8dab0f0030",
+  "edges": [
+    {
+      "from_id": "fn_3e34fb7c_run_analysis",
+      "to_id": "fn_3e34fb7c_load_temperature_data"
+    },
+    {
+      "from_id": "fn_3e34fb7c_run_analysis",
+      "to_id": "fn_3e34fb7c_calculate_mean_temperature"
+    },
+    {
+      "from_id": "fn_dbbd5165_run_analysis",
+      "to_id": "fn_dbbd5165_load_temperature_data"
+    },
+    {
+      "from_id": "fn_dbbd5165_run_analysis",
+      "to_id": "fn_dbbd5165_calculate_anomalies"
+    },
+    {
+      "from_id": "fn_dbbd5165_run_analysis",
+      "to_id": "fn_dbbd5165_create_visualization"
+    }
+  ],
+  "stats": {
+    "edges_total": 5
+  }
+}

@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "project_path": "/app",
+  "generated_at": 1768950349.0809917,
+  "parser": {
+    "use_lsp": true,
+    "lsp_langs": [
+      "py"
+    ],
+    "label_strip_prefix": null
+  },
+  "merkle": {
+    "algo": "sha256",
+    "strategy": "content_sha256_with_stat_reuse",
+    "root": "04cb9b7a0f6b7ae4ad6a30358012a9564d71ca7d8b806f255413b3a0a6c428a0",
+    "leaf_count": 1,
+    "leaves": {
+      "climate_analyzer/analyze_climate.py": {
+        "missing": false,
+        "mtime_ns": 1765305305000000000,
+        "size": 3537,
+        "fs_path": "/app/climate_analyzer/analyze_climate.py",
+        "content_sha256": "112e26265c2b7a579403c9690f5d58cbc1bf59468bfcb7496e4fdbec9a565dd0",
+        "leaf": "78a2defa2c5b5ba159ae553d3ef842d48e4f5ab0eb749639df14b45daac13c31"
+      }
+    },
+    "config_leaf": "2fe0fc2a79e20edf581e88bd52fa013c015c1d26377aff32578d2744538953f5"
+  },
+  "graph": {
+    "digest": "04cb9b7a0f6b7ae4ad6a30358012a9564d71ca7d8b806f255413b3a0a6c428a0",
+    "stats": {
+      "modules": 1,
+      "classes": 1,
+      "funcs": 5,
+      "import_edges": 0,
+      "call_edges": 0,
+      "contains_edges": 6
+    },
+    "parse_summary": {
+      "parsed_files": 1,
+      "skipped_files": 0,
+      "lsp_files": 1,
+      "tree_sitter_files": 0,
+      "lsp_failures": {},
+      "fallback_samples": [],
+      "skipped_samples": [],
+      "lsp_langs": [
+        "py"
+      ]
+    },
+    "quality": {
+      "parsed_files": 1,
+      "skipped_files": 0,
+      "lsp_files": 1,
+      "tree_sitter_files": 0
+    },
+    "symbol_files": {
+      "mod_dbbd5165": "/app/climate_analyzer/analyze_climate.py",
+      "cls_dbbd5165_ClimateAnalyzer": "/app/climate_analyzer/analyze_climate.py",
+      "fn_dbbd5165___init__": "/app/climate_analyzer/analyze_climate.py",
+      "fn_dbbd5165_load_temperature_data": "/app/climate_analyzer/analyze_climate.py",
+      "fn_dbbd5165_calculate_anomalies": "/app/climate_analyzer/analyze_climate.py",
+      "fn_dbbd5165_create_visualization": "/app/climate_analyzer/analyze_climate.py",
+      "fn_dbbd5165_run_analysis": "/app/climate_analyzer/analyze_climate.py"
+    }
+  },
+  "architecture": {
+    "latest_png": "architecture.04cb9b7a0f6b7ae4ad6a30358012a9564d71ca7d8b806f255413b3a0a6c428a0.png",
+    "digest_png": "architecture.04cb9b7a0f6b7ae4ad6a30358012a9564d71ca7d8b806f255413b3a0a6c428a0.png",
+    "digest": "04cb9b7a0f6b7ae4ad6a30358012a9564d71ca7d8b806f255413b3a0a6c428a0",
+    "rendered_at": null
+  },
+  "updated_by": {
+    "pid": 2956,
+    "action": "load"
+  }
+}

@@ -1,0 +1,294 @@
+{
+  "state_version": 2,
+  "project_path": "/app",
+  "initialized": true,
+  "use_lsp": true,
+  "parse_summary": {
+    "parsed_files": 1,
+    "skipped_files": 0,
+    "lsp_files": 1,
+    "tree_sitter_files": 0,
+    "lsp_failures": {},
+    "fallback_samples": [],
+    "skipped_samples": [],
+    "lsp_langs": [
+      "py"
+    ]
+  },
+  "graph_digest": "87c805eb966ecfedb7a4964e4ee206f4bfdcff34a0cb4def34692d8dab0f0030",
+  "call_edges_digest": "87c805eb966ecfedb7a4964e4ee206f4bfdcff34a0cb4def34692d8dab0f0030",
+  "call_graph_summary": {
+    "pid": 3202,
+    "instance_id": "0a60c55752e04df39629f482466192b5",
+    "updated_at": 1768950412.6872244,
+    "generation": 1,
+    "status": "completed",
+    "error": null,
+    "edges_total": 5,
+    "thread_alive": false,
+    "phase": "impact",
+    "last": {
+      "edges": 5,
+      "duration_s": 0.1350992869993206
+    },
+    "result": {
+      "phase": "background",
+      "time_budget_s": 30.0,
+      "max_callsites_total": 2000,
+      "max_callsites_per_file": 200,
+      "considered_files": 2,
+      "processed_callsites": 42,
+      "resolved_callsites": 17,
+      "skipped_no_caller": 4,
+      "skipped_no_definition": 25,
+      "skipped_no_callee": 12,
+      "skipped_no_callee_reasons": {
+        "target_not_indexed": 12
+      },
+      "skipped_no_callee_samples": [
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c_run_analysis",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 36,
+            "char": 8
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c___init__",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 17,
+            "char": 20
+          },
+          "definition_uris": [
+            "file:///root/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/configparser.py"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c_run_analysis",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 40,
+            "char": 24
+          },
+          "definition_uris": [
+            "file:///root/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/pathlib/_local.py"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c_run_analysis",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 41,
+            "char": 46
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c_run_analysis",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 46,
+            "char": 16
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c_run_analysis",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 49,
+            "char": 12
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c_run_analysis",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 52,
+            "char": 8
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_3e34fb7c___init__",
+          "caller_path": "/app/analyze_climate_modern.py",
+          "callsite": {
+            "line": 16,
+            "char": 35
+          },
+          "definition_uris": [
+            "file:///root/.local/share/uv/python/cpython-3.13.11-linux-x86_64-gnu/lib/python3.13/configparser.py"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_dbbd5165_calculate_anomalies",
+          "caller_path": "/app/climate_analyzer/analyze_climate.py",
+          "callsite": {
+            "line": 42,
+            "char": 24
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_dbbd5165_run_analysis",
+          "caller_path": "/app/climate_analyzer/analyze_climate.py",
+          "callsite": {
+            "line": 83,
+            "char": 41
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_dbbd5165_calculate_anomalies",
+          "caller_path": "/app/climate_analyzer/analyze_climate.py",
+          "callsite": {
+            "line": 41,
+            "char": 29
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        },
+        {
+          "reason": "target_not_indexed",
+          "caller_id": "fn_dbbd5165_load_temperature_data",
+          "caller_path": "/app/climate_analyzer/analyze_climate.py",
+          "callsite": {
+            "line": 32,
+            "char": 87
+          },
+          "definition_uris": [
+            "file:///opt/venv/lib/python3.13/site-packages/jedi/third_party/typeshed/stdlib/3/builtins.pyi"
+          ]
+        }
+      ],
+      "edges_in_result": 5,
+      "edges_added": 5,
+      "edges_total": 5,
+      "lsp_failures": {},
+      "duration_s": 0.1350992869993206
+    }
+  },
+  "refresh_summary": {},
+  "refresh_metrics": {},
+  "analyses": {
+    "fn_3e34fb7c_run_analysis": {
+      "target_id": "fn_3e34fb7c_run_analysis",
+      "target_label": "run_analysis",
+      "affected_ids": [
+        "mod_3e34fb7c",
+        "fn_3e34fb7c_run_analysis"
+      ],
+      "addressed_ids": [],
+      "skipped_ids": [],
+      "test_ids": []
+    }
+  },
+  "focus": "run_analysis",
+  "active_task_id": null,
+  "evidence": [
+    {
+      "id": "E1",
+      "kind": "architecture",
+      "png_path": "/logs/agent/sessions/codecanvas/architecture.87c805eb966ecfedb7a4964e4ee206f4bfdcff34a0cb4def34692d8dab0f0030.png",
+      "symbol": null,
+      "created_at": 1768950342.0189352,
+      "metrics": {
+        "modules": 2,
+        "classes": 3,
+        "funcs": 9
+      }
+    },
+    {
+      "id": "E2",
+      "kind": "impact",
+      "png_path": "/logs/agent/sessions/codecanvas/impact_fn_dbbd5165_run_analysis.png",
+      "symbol": "run_analysis",
+      "created_at": 1768950361.676127,
+      "metrics": {
+        "depth": 2,
+        "node_count": 4,
+        "edge_count": 3,
+        "callers": 0,
+        "callees": 3,
+        "caller_edges": 0,
+        "callee_edges": 3,
+        "call_graph_status": "completed",
+        "call_graph_edges_total": 3,
+        "call_graph_generation": 1,
+        "call_graph_instance_id": "a0598ab9394a4e258f603a17d8d1774b"
+      }
+    },
+    {
+      "id": "E3",
+      "kind": "impact",
+      "png_path": "/logs/agent/sessions/codecanvas/impact_fn_3e34fb7c_run_analysis.png",
+      "symbol": "run_analysis",
+      "created_at": 1768950412.724842,
+      "metrics": {
+        "depth": 2,
+        "node_count": 3,
+        "edge_count": 2,
+        "callers": 0,
+        "callees": 2,
+        "caller_edges": 0,
+        "callee_edges": 2,
+        "call_graph_status": "completed",
+        "call_graph_edges_total": 5,
+        "call_graph_generation": 1,
+        "call_graph_instance_id": "0a60c55752e04df39629f482466192b5"
+      }
+    }
+  ],
+  "claims": [],
+  "decisions": [],
+  "last_evidence_id_by_focus": {
+    "app": "E1",
+    "run_analysis": "E3"
+  },
+  "symbol_files": {
+    "mod_3e34fb7c": "/app/analyze_climate_modern.py",
+    "cls_3e34fb7c_Path": "/app/analyze_climate_modern.py",
+    "cls_3e34fb7c_ClimateAnalyzer": "/app/analyze_climate_modern.py",
+    "fn_3e34fb7c___init__": "/app/analyze_climate_modern.py",
+    "fn_3e34fb7c_load_temperature_data": "/app/analyze_climate_modern.py",
+    "fn_3e34fb7c_calculate_mean_temperature": "/app/analyze_climate_modern.py",
+    "fn_3e34fb7c_run_analysis": "/app/analyze_climate_modern.py",
+    "mod_dbbd5165": "/app/climate_analyzer/analyze_climate.py",
+    "cls_dbbd5165_ClimateAnalyzer": "/app/climate_analyzer/analyze_climate.py",
+    "fn_dbbd5165___init__": "/app/climate_analyzer/analyze_climate.py",
+    "fn_dbbd5165_load_temperature_data": "/app/climate_analyzer/analyze_climate.py",
+    "fn_dbbd5165_calculate_anomalies": "/app/climate_analyzer/analyze_climate.py",
+    "fn_dbbd5165_create_visualization": "/app/climate_analyzer/analyze_climate.py",
+    "fn_dbbd5165_run_analysis": "/app/climate_analyzer/analyze_climate.py"
+  }
+}

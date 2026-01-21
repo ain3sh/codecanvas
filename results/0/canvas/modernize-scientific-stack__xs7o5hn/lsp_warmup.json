@@ -1,0 +1,24 @@
+{
+  "attempt": 1,
+  "content_roots": [
+    "/app"
+  ],
+  "langs": {
+    "py": {
+      "elapsed_s": 1.447568655014038,
+      "status": "ready"
+    }
+  },
+  "overall": "ready",
+  "pid": 2800,
+  "present_langs": [
+    "py"
+  ],
+  "ready_langs": [
+    "py"
+  ],
+  "reason": null,
+  "root": "/app",
+  "started_at": 1768950330.876488,
+  "updated_at": 1768950330.876488
+}
