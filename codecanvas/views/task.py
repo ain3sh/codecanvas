@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import math
 from pathlib import Path
 from typing import Any, List, Optional, cast
 
@@ -47,17 +48,45 @@ class TaskView:
             style=Style(fill=COLORS["muted"], font_size=13, font_weight="bold"),
         )
 
-        claims_x = margin
-        evidence_x = margin + col_w + gap
-        decisions_x = margin + 2 * (col_w + gap)
+        claims_active = [c for c in (self.state.claims or []) if (c.status or "active") == "active"]
+        decisions = list(self.state.decisions or [])
+        evidence = list(self.state.evidence or [])
 
-        self._panel(canvas, claims_x, top, col_w, col_h, title="CLAIMS")
-        self._panel(canvas, evidence_x, top, col_w, col_h, title="EVIDENCE")
-        self._panel(canvas, decisions_x, top, col_w, col_h, title="DECISIONS")
+        if not claims_active and not decisions:
+            evidence_x = margin
+            evidence_w = width - 2 * margin
+            self._panel(canvas, evidence_x, top, evidence_w, col_h, title="EVIDENCE")
+            self._draw_evidence(canvas, evidence_x, top, evidence_w, col_h, evidence)
+        elif not claims_active or not decisions:
+            total_w = width - 2 * margin - gap
+            evidence_w = total_w * 0.68
+            other_w = total_w - evidence_w
+            if not claims_active:
+                evidence_x = margin
+                decisions_x = margin + evidence_w + gap
+                self._panel(canvas, evidence_x, top, evidence_w, col_h, title="EVIDENCE")
+                self._panel(canvas, decisions_x, top, other_w, col_h, title="DECISIONS")
+                self._draw_evidence(canvas, evidence_x, top, evidence_w, col_h, evidence)
+                self._draw_decisions(canvas, decisions_x, top, other_w, col_h)
+            else:
+                claims_x = margin
+                evidence_x = margin + other_w + gap
+                self._panel(canvas, claims_x, top, other_w, col_h, title="CLAIMS")
+                self._panel(canvas, evidence_x, top, evidence_w, col_h, title="EVIDENCE")
+                self._draw_claims(canvas, claims_x, top, other_w, col_h, claims_active)
+                self._draw_evidence(canvas, evidence_x, top, evidence_w, col_h, evidence)
+        else:
+            claims_x = margin
+            evidence_x = margin + col_w + gap
+            decisions_x = margin + 2 * (col_w + gap)
 
-        self._draw_claims(canvas, claims_x, top, col_w, col_h)
-        self._draw_evidence(canvas, evidence_x, top, col_w, col_h)
-        self._draw_decisions(canvas, decisions_x, top, col_w, col_h)
+            self._panel(canvas, claims_x, top, col_w, col_h, title="CLAIMS")
+            self._panel(canvas, evidence_x, top, col_w, col_h, title="EVIDENCE")
+            self._panel(canvas, decisions_x, top, col_w, col_h, title="DECISIONS")
+
+            self._draw_claims(canvas, claims_x, top, col_w, col_h, claims_active)
+            self._draw_evidence(canvas, evidence_x, top, col_w, col_h, evidence)
+            self._draw_decisions(canvas, decisions_x, top, col_w, col_h)
 
         t = pick_task(self.tasks, self.state.active_task_id)
         footer_y = height - 36
@@ -91,8 +120,8 @@ class TaskView:
             style=Style(fill=COLORS["text"], font_size=14, font_weight="bold"),
         )
 
-    def _draw_claims(self, canvas: SVGCanvas, x: float, y: float, w: float, h: float) -> None:
-        claims = [c for c in (self.state.claims or []) if (c.status or "active") == "active"]
+    def _draw_claims(self, canvas: SVGCanvas, x: float, y: float, w: float, h: float, claims: List[Claim]) -> None:
+        claims = list(claims or [])
         claims.sort(key=lambda c: c.created_at)
         claims = list(reversed(claims[-6:]))
 
@@ -182,8 +211,8 @@ class TaskView:
                 style=Style(fill=COLORS["muted"], font_size=11),
             )
 
-    def _draw_evidence(self, canvas: SVGCanvas, x: float, y: float, w: float, h: float) -> None:
-        evs = list(self.state.evidence or [])
+    def _draw_evidence(self, canvas: SVGCanvas, x: float, y: float, w: float, h: float, evs: List[Evidence]) -> None:
+        evs = list(evs or [])
         evs.sort(key=lambda e: e.created_at)
         evs = list(reversed(evs[-6:]))
         if not evs:
@@ -196,21 +225,35 @@ class TaskView:
         grid_y = y + 52
         grid_w = w - 2 * pad
 
-        tile_w = (grid_w - inner_gap) / 2
-        tile_h = 222
-        thumb_h = 170
+        count = len(evs)
+        cols = count if count <= 3 else 2
+        rows = math.ceil(count / cols)
+        grid_h = h - 52 - 12
+        tile_w = (grid_w - (cols - 1) * inner_gap) / max(1, cols)
+        tile_h = (grid_h - (rows - 1) * inner_gap) / max(1, rows)
+        tile_h = max(200, min(320, tile_h))
+        thumb_h = tile_h * 0.76
+        caption_size = 12 if tile_h >= 240 else 11
 
         for i, ev in enumerate(evs):
-            r = i // 2
-            c = i % 2
+            r = i // cols
+            c = i % cols
             xx = grid_x + c * (tile_w + inner_gap)
             yy = grid_y + r * (tile_h + inner_gap)
             if yy + tile_h > y + h - 12:
                 break
-            self._evidence_tile(canvas, xx, yy, tile_w, tile_h, thumb_h, ev)
+            self._evidence_tile(canvas, xx, yy, tile_w, tile_h, thumb_h, ev, caption_size)
 
     def _evidence_tile(
-        self, canvas: SVGCanvas, x: float, y: float, w: float, h: float, thumb_h: float, ev: Evidence
+        self,
+        canvas: SVGCanvas,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        thumb_h: float,
+        ev: Evidence,
+        caption_size: int,
     ) -> None:
         canvas.add_rect(
             x,
@@ -248,7 +291,7 @@ class TaskView:
             x + 12,
             caption_y,
             line1.strip(),
-            style=Style(fill=COLORS["text"], font_size=11, font_weight="bold"),
+            style=Style(fill=COLORS["text"], font_size=caption_size, font_weight="bold"),
         )
         line2 = _metrics_line(ev.metrics)
         if line2:
@@ -256,7 +299,7 @@ class TaskView:
                 x + 12,
                 caption_y + 16,
                 _short_line(line2, 40),
-                style=Style(fill=COLORS["muted"], font_size=11),
+                style=Style(fill=COLORS["muted"], font_size=caption_size),
             )
 
 

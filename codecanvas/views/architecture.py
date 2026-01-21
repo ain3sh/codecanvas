@@ -210,11 +210,17 @@ class ArchitectureView:
         dist_in, dist_out = _district_in_out(import_edges, district_remap)
 
         # Layout
-        width, height = 1400, 900
-        canvas = SVGCanvas(width=width, height=height)
-
+        width = 1400
         margin = 40
-        band_h = (height - 2 * margin) / 3
+        legend_space = 30
+        header_h = 44
+        row_gap = 16
+        band_bottom_pad = 16
+        target_cell_h = 160
+        min_cell_h = 110
+        max_cell_h = 200
+        min_height = 520
+        max_height = 900
         band_names = {0: "ENTRY", 1: "CORE", 2: "FOUNDATION"}
         default_bg = COLORS["module_bg"]
         band_bg = {
@@ -223,16 +229,56 @@ class ArchitectureView:
             2: COLORS.get("layer_2", default_bg),
         }
 
+        band_districts_map: Dict[int, List[_District]] = {
+            band: [d for d in districts if d.district_id in visible_ids and d.band == band]
+            for band in (0, 1, 2)
+        }
+        bands_to_render = [band for band in (0, 1, 2) if band_districts_map[band]]
+        if not bands_to_render:
+            bands_to_render = [1]
+
+        band_order = _order_districts(districts, visible_ids, highways)
+        base_band_heights: Dict[int, float] = {}
+        band_grid: Dict[int, Tuple[int, int]] = {}
+        for band in bands_to_render:
+            band_districts = band_order.get(band, band_districts_map[band])
+            cols, rows = _pick_grid(len(band_districts))
+            band_grid[band] = (cols, rows)
+            cell_h = max(min_cell_h, min(max_cell_h, target_cell_h)) if rows else 0
+            band_h = header_h + rows * cell_h + max(0, rows - 1) * row_gap + band_bottom_pad
+            base_band_heights[band] = band_h
+
+        desired_height = margin * 2 + legend_space + sum(base_band_heights.values())
+        height = min(max(desired_height, min_height), max_height)
+        available_height = height - margin * 2 - legend_space
+        base_total = sum(base_band_heights.values()) or 1.0
+        if desired_height > max_height:
+            scale = max(0.6, min(1.0, available_height / base_total))
+        else:
+            scale = 1.0
+
+        canvas = SVGCanvas(width=width, height=int(height))
+        extra_top = max(0.0, (height - desired_height) / 2)
+
         # Assign boxes (dynamic grid per band)
         boxes: Dict[str, _Box] = {}
-        band_order = _order_districts(districts, visible_ids, highways)
-        for band in (0, 1, 2):
-            band_y = margin + band * band_h
+        band_y = margin + extra_top
+        for band in bands_to_render:
+            band_districts = band_order.get(band, band_districts_map[band])
+            cols, rows = band_grid[band]
+            cell_h = max(min_cell_h, min(max_cell_h, target_cell_h * scale)) if rows else 0
+            if desired_height > max_height:
+                band_h = max(0.0, available_height * (base_band_heights[band] / base_total))
+                if rows:
+                    cell_h = (band_h - header_h - band_bottom_pad - max(0, rows - 1) * row_gap) / rows
+            else:
+                band_h = header_h + rows * cell_h + max(0, rows - 1) * row_gap + band_bottom_pad
+
             canvas.add_rect(
                 margin,
                 band_y,
                 width - 2 * margin,
-                band_h - 12,
+                max(0, band_h - 12),
                 rx=10,
                 style=Style(fill=band_bg[band], opacity=0.25),
             )
@@ -243,19 +289,22 @@ class ArchitectureView:
                 style=Style(fill=COLORS["muted"], font_size=18, font_weight="bold", opacity=0.7),
             )
 
-            band_districts = [d for d in districts if d.district_id in visible_ids and d.band == band]
-            band_districts = band_order.get(band, band_districts)
-
-            cols, rows = _pick_grid(len(band_districts))
             cell_w = (width - 2 * margin - (cols - 1) * 16) / max(1, cols)
-            cell_h = (band_h - 60 - (rows - 1) * 16) / max(1, rows)
+            start_x = margin
+            max_card_w = 560
+            if cols <= 2 and cell_w > max_card_w:
+                total_w = cols * max_card_w + (cols - 1) * 16
+                start_x = margin + max(0.0, (width - 2 * margin - total_w) / 2)
+                cell_w = max_card_w
 
             for idx, d in enumerate(band_districts[: cols * rows]):
                 r = idx // cols
                 c = idx % cols
-                x = margin + c * (cell_w + 16)
-                y = band_y + 44 + r * (cell_h + 16)
+                x = start_x + c * (cell_w + 16)
+                y = band_y + header_h + r * (cell_h + 16)
                 boxes[d.district_id] = _Box(x, y, cell_w, cell_h)
+
+            band_y += band_h
 
         # Draw highways (behind cards) routed via outer lanes so they never disappear under cards.
         highways = _filter_highways(highways)
@@ -315,11 +364,12 @@ class ArchitectureView:
                 n_funcs = sum(1 for c in children if c.kind == NodeKind.FUNC)
                 # Prefer showing classes first, then funcs.
                 shown: List[str] = []
+                max_symbols = 6 if len(modules) <= 6 else 2
                 for c in sorted(children, key=lambda n: (0 if n.kind == NodeKind.CLASS else 1, n.label)):
                     if c.kind not in (NodeKind.CLASS, NodeKind.FUNC):
                         continue
                     shown.append(f"{c.kind.value}: {c.label}")
-                    if len(shown) >= 2:
+                    if len(shown) >= max_symbols:
                         break
                 top_symbols = shown
 
@@ -412,6 +462,8 @@ class ArchitectureView:
 
 def _short_title(s: str, max_len: int = 34) -> str:
     s = (s or "").strip()
+    if "/" in s or "\\" in s:
+        return _short_path(s, max_len=max_len)
     if len(s) <= max_len:
         return s
     # Prefer keeping the left side for district titles.

@@ -52,8 +52,14 @@ class ImpactView:
         callees_more = max(0, len(callees_all) - len(callees))
 
         # 2. Layout
-        width, height = 1000, 800
-        cx, cy = width / 2, height / 2
+        base_width, base_height = 1000, 800
+        if callers and not callees:
+            cx = base_width * 0.62
+        elif callees and not callers:
+            cx = base_width * 0.38
+        else:
+            cx = base_width / 2
+        cy = base_height / 2
 
         positions: Dict[str, Tuple[float, float]] = {}
         positions[target_id] = (cx, cy)
@@ -75,16 +81,48 @@ class ImpactView:
         layout_nodes(callers, 150, 210)  # Left
         layout_nodes(callees, -30, 30)  # Right
 
+        card_w, card_h = 300, 150
+        node_w, node_h = 180, 40
+        min_w, min_h = 560, 360
+        max_w, max_h = base_width, base_height
+        pad_x, pad_y = 80, 80
+
+        def _node_bounds(px: float, py: float, w: float, h: float) -> Tuple[float, float, float, float]:
+            return (px - w / 2, py - h / 2, px + w / 2, py + h / 2)
+
+        bounds = [_node_bounds(cx, cy, card_w, card_h)]
+        for node in callers + callees:
+            px, py = positions.get(node.id, (cx, cy))
+            bounds.append(_node_bounds(px, py, node_w, node_h))
+
+        min_x = min(b[0] for b in bounds)
+        min_y = min(b[1] for b in bounds)
+        max_x = max(b[2] for b in bounds)
+        max_y = max(b[3] for b in bounds)
+        bbox_w = max_x - min_x
+        bbox_h = max_y - min_y
+
+        width = min(max(bbox_w + 2 * pad_x, min_w), max_w)
+        height = min(max(bbox_h + 2 * pad_y, min_h), max_h)
+
+        extra_x = max(0.0, (width - (bbox_w + 2 * pad_x)) / 2)
+        extra_y = max(0.0, (height - (bbox_h + 2 * pad_y)) / 2)
+        shift_x = pad_x - min_x + extra_x
+        shift_y = pad_y - min_y + extra_y
+
+        def _shift(p: Tuple[float, float]) -> Tuple[float, float]:
+            return (p[0] + shift_x, p[1] + shift_y)
+
         # 3. Render
-        canvas = SVGCanvas(width=width, height=height)
+        canvas = SVGCanvas(width=int(width), height=int(height))
 
         # Draw Aggregated Edges
         for neighbor in callers:
             if neighbor.id not in positions:
                 continue
             count = caller_counts[neighbor.id]
-            p1 = positions[neighbor.id]
-            p2 = positions[target_id]
+            p1 = _shift(positions[neighbor.id])
+            p2 = _shift(positions[target_id])
 
             # Thick red line
             canvas.add_line(
@@ -108,8 +146,8 @@ class ImpactView:
             if neighbor.id not in positions:
                 continue
             count = callee_counts[neighbor.id]
-            p1 = positions[target_id]
-            p2 = positions[neighbor.id]
+            p1 = _shift(positions[target_id])
+            p2 = _shift(positions[neighbor.id])
 
             # Thick blue line
             canvas.add_line(
@@ -118,7 +156,7 @@ class ImpactView:
 
         # Draw Target Card (Center)
         # Box
-        card_w, card_h = 300, 150
+        cx, cy = _shift(positions[target_id])
         canvas.add_rect(
             cx - card_w / 2,
             cy - card_h / 2,
@@ -177,11 +215,10 @@ class ImpactView:
             y_text += 14
 
         # Draw Neighbors (Simple Boxes)
-        node_w, node_h = 180, 40
         for node in callers + callees:
             if node.id not in positions:
                 continue
-            px, py = positions[node.id]
+            px, py = _shift(positions[node.id])
 
             color = COLORS["danger"] if node in callers else COLORS["tool"]
 
@@ -194,9 +231,7 @@ class ImpactView:
                 style=Style(fill=COLORS["module_bg"], stroke=color, stroke_width=1),
             )
 
-            label = node.label
-            if len(label) > 25:
-                label = "..." + label[-22:]
+            label = _mid_ellipsis(node.label, max_len=25)
             canvas.add_text(px, py + 5, label, style=Style(fill=COLORS["text"], text_anchor="middle", font_size=12))
 
         if callers_more:
@@ -218,3 +253,12 @@ class ImpactView:
             canvas.save(output_path)
 
         return canvas.render()
+
+
+def _mid_ellipsis(s: str, *, max_len: int, head: int = 12, tail: int = 10) -> str:
+    txt = (s or "").strip()
+    if len(txt) <= max_len:
+        return txt
+    head = min(head, max_len - 2)
+    tail = min(tail, max_len - head - 1)
+    return txt[:head] + "…" + txt[-tail:]
