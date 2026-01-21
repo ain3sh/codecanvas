@@ -195,15 +195,38 @@ class ImpactView:
             sig = first_nonempty_line(target_node.snippet or "")
             if sig:
                 lines.append(sig)
+            summary = _docstring_summary(target_node.snippet or "")
+            if summary:
+                lines.append(summary)
+
+            parent = self.graph.get_parent(target_node.id)
+            class_label = None
+            module_label = None
+            if parent and parent.kind == NodeKind.CLASS:
+                class_label = parent.label
+                module_parent = self.graph.get_parent(parent.id)
+                if module_parent and module_parent.kind == NodeKind.MODULE:
+                    module_label = module_parent.label
+            elif parent and parent.kind == NodeKind.MODULE:
+                module_label = parent.label
+
+            if class_label and module_label:
+                lines.append(f"class: {class_label}  module: {short_path(module_label)}")
+            elif class_label:
+                lines.append(f"class: {class_label}")
+            elif module_label:
+                lines.append(f"module: {short_path(module_label)}")
+
             loc = short_path(target_node.fsPath)
             if target_node.start_line is not None:
                 loc = f"{loc}:{int(target_node.start_line) + 1}"
             lines.append(loc)
+            lines.append(f"callers: {len(callers_all)}  callees: {len(callees_all)}")
 
         if not lines:
             lines = ["No source available"]
 
-        lines = lines[:4]
+        lines = lines[:5]
         y_text = cy - card_h / 2 + 50
         for line in lines:
             canvas.add_text(
@@ -262,3 +285,17 @@ def _mid_ellipsis(s: str, *, max_len: int, head: int = 12, tail: int = 10) -> st
     head = min(head, max_len - 2)
     tail = min(tail, max_len - head - 1)
     return txt[:head] + "…" + txt[-tail:]
+
+
+def _docstring_summary(snippet: str) -> str:
+    for line in (snippet or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("def ", "class ", "@")):
+            continue
+        if stripped.startswith(('"""', "'''")):
+            stripped = stripped.strip('"\'')
+            return stripped if stripped else ""
+        return stripped
+    return ""
