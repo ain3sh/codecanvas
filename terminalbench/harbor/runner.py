@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -292,6 +293,27 @@ class HarborRunner:
         """Run a single task with retry logic."""
         if self.output_root:
             self.output_root.mkdir(parents=True, exist_ok=True)
+
+        if self.output_root and job_name:
+            try:
+                subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "terminalbench.harbor.mirror_codecanvas",
+                        "--runs-dir",
+                        str(self.output_root),
+                        "--job-name",
+                        job_name,
+                        "--task-id",
+                        task.id,
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except Exception:
+                pass
 
         cmd = self._build_command(
             task,
