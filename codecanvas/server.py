@@ -19,7 +19,7 @@ from .core.analysis import Analyzer
 from .core.lock import canvas_artifact_lock
 from .core.models import EdgeType, Graph, GraphEdge, NodeKind
 from .core.paths import get_canvas_dir, top_level_project_roots
-from .core.refresh import mark_dirty, take_dirty
+from .core.refresh import ack_dirty, claim_dirty, clear_dirty, reap_dirty
 from .core.snapshot import (
     architecture_png_path_for_digest,
     build_snapshot,
@@ -352,13 +352,14 @@ def _refresh_graph_for_dirty_files(
         return None
 
     project_dir = Path(state.project_path)
-    dirty_items = take_dirty(project_dir, max_items=max_files)
+    reaped = reap_dirty(project_dir, ttl_s=60.0)
+    dirty_items = claim_dirty(project_dir, max_items=max_files)
     if not dirty_items:
         return None
 
     start = time.monotonic()
     processed_paths: list[str] = []
-    skipped_paths: list[str] = []
+    deferred_items: list[dict] = []
     removed_node_ids: Set[str] = set()
     defs_updated = 0
     nodes_added = 0
@@ -368,6 +369,10 @@ def _refresh_graph_for_dirty_files(
     call_edges_skipped_reason = None
     call_edges_skipped_at = None
     call_edges_refresh_ok = False
+    ack_errors = 0
+    ack_deleted = 0
+    ack_ok = 0
+    ack_deferred = 0
 
     lsp_langs = set(state.parse_summary.get("lsp_langs") or []) if state.parse_summary else None
     parser = Parser(use_lsp=state.use_lsp, lsp_langs=lsp_langs)
@@ -381,11 +386,19 @@ def _refresh_graph_for_dirty_files(
 
     for item in dirty_items:
         if defs_budget_s and (time.monotonic() - start) >= defs_budget_s:
-            skipped_paths.append(str(item.get("path") or ""))
+            deferred_items.append(item)
             continue
 
         path_str = str(item.get("path") or "").strip()
         if not path_str:
+            ack_dirty(
+                project_dir,
+                claim_id=item.get("claim_id"),
+                path=str(item.get("path") or ""),
+                outcome="error",
+                error="missing_path",
+            )
+            ack_errors += 1
             continue
         file_path = Path(path_str)
 
@@ -393,13 +406,27 @@ def _refresh_graph_for_dirty_files(
             removed_ids = graph_ref.remove_nodes_by_fs_path(str(file_path))
         removed_node_ids.update(removed_ids)
 
-        if file_path.exists() and file_path.is_file():
-            new_graph = parser.parse_file_in_project(
-                file_path,
-                root=project_dir,
-                known_module_labels=known_labels,
-                label_strip_prefix=prefix,
-            )
+        exists = file_path.exists() and file_path.is_file()
+        if exists:
+            try:
+                new_graph = parser.parse_file_in_project(
+                    file_path,
+                    root=project_dir,
+                    known_module_labels=known_labels,
+                    label_strip_prefix=prefix,
+                )
+            except Exception as e:
+                ack_dirty(
+                    project_dir,
+                    claim_id=item.get("claim_id"),
+                    path=str(file_path),
+                    outcome="error",
+                    error=f"parse_error:{type(e).__name__}",
+                )
+                ack_errors += 1
+                defs_updated += 1
+                processed_paths.append(str(file_path))
+                continue
             with _graph_lock:
                 for node in new_graph.nodes:
                     if graph_ref.add_node(node):
@@ -411,11 +438,33 @@ def _refresh_graph_for_dirty_files(
                 if node.kind == NodeKind.MODULE:
                     known_labels.add(node.label)
 
+        outcome = "ok" if exists else "deleted"
+        ack_dirty(
+            project_dir,
+            claim_id=item.get("claim_id"),
+            path=str(file_path),
+            outcome=outcome,
+        )
+        if exists:
+            ack_ok += 1
+        else:
+            ack_deleted += 1
+
         defs_updated += 1
         processed_paths.append(str(file_path))
 
-    if skipped_paths:
-        mark_dirty(project_dir, [Path(p) for p in skipped_paths if p], reason="refresh_deferred")
+    if deferred_items:
+        for item in deferred_items:
+            path_str = str(item.get("path") or "").strip()
+            if not path_str:
+                continue
+            ack_dirty(
+                project_dir,
+                claim_id=item.get("claim_id"),
+                path=path_str,
+                outcome="deferred",
+            )
+            ack_deferred += 1
 
     if not processed_paths:
         return None
@@ -479,7 +528,12 @@ def _refresh_graph_for_dirty_files(
         "edges_added": edges_added,
         "call_edges_removed": removed_call_edges,
         "call_edges_added": call_edges_added,
-        "skipped_paths": skipped_paths,
+        "deferred_paths": [str(item.get("path") or "") for item in deferred_items],
+        "dirty_reaped": reaped,
+        "dirty_ack_ok": ack_ok,
+        "dirty_ack_deleted": ack_deleted,
+        "dirty_ack_deferred": ack_deferred,
+        "dirty_ack_errors": ack_errors,
     }
     metrics = dict(state.refresh_metrics or {})
     metrics.setdefault("refresh_total", 0)
@@ -869,7 +923,7 @@ def _action_init(repo_path: str, *, use_lsp: bool, lsp_langs: list[str] | None) 
     project_dir = str(_find_repo_root(abs_p)) if abs_p.is_file() else str(abs_p)
     _set_project_dir(project_dir)
     clear_state()
-    take_dirty(Path(project_dir))
+    clear_dirty(Path(project_dir))
 
     allowed_lsp_langs = set(lsp_langs) if lsp_langs else None
     parser = Parser(use_lsp=use_lsp, lsp_langs=allowed_lsp_langs)
