@@ -1497,7 +1497,7 @@ TIPS:
                             "type": "string",
                             "description": "(claim/decide) Kind: hypothesis|finding|question|plan|test|edit",
                         },
-                        "task_id": {"type": "string", "description": "(task_select) Task id from tasks.yaml"},
+                        "task_id": {"type": "string", "description": "(task_select) Task id from experiments"},
                         "depth": {
                             "type": "integer",
                             "default": 2,

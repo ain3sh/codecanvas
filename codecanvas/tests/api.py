@@ -46,8 +46,21 @@ def test_claim_auto_links_recent_evidence(tmp_path: Path):
 
 def test_task_select_persists_active_task(tmp_path: Path):
     (tmp_path / "a.py").write_text("def foo():\n    return 1\n", encoding="utf-8")
-    (tmp_path / "tasks.yaml").write_text(
-        "tasks:\n  - id: t1\n    order: 1\n    dataset: demo\n    tb_url: https://example.com/t1\n",
+    experiments_dir = tmp_path / "experiments"
+    experiments_dir.mkdir()
+    (experiments_dir / "demo.toml").write_text(
+        """schema_version = 2
+name = "demo"
+slug = "demo"
+
+[tasks]
+default_dataset = "demo"
+
+[tasks.t1]
+
+[profiles.text]
+no_mcp = true
+""",
         encoding="utf-8",
     )
 

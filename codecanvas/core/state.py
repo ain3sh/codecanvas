@@ -214,7 +214,7 @@ class CanvasState:
     # Current focus symbol (used for auto-linking)
     focus: Optional[str] = None
 
-    # Optional active task id (from tasks.yaml)
+    # Optional active task id (from tasks.yaml or experiments)
     active_task_id: Optional[str] = None
 
     # Evidence Board
@@ -345,7 +345,7 @@ def clear_state():
         path.unlink()
 
 
-# --- Task management (from tasks.yaml) ---
+# --- Task management (experiments v2) ---
 
 
 @dataclass(frozen=True)
@@ -359,38 +359,42 @@ class TaskSpec:
 
 
 def load_tasks_yaml(project_dir: str) -> List["TaskSpec"]:
-    """Load tasks from tasks.yaml file."""
-    import yaml
+    """Load tasks from experiments/*.toml (schema_version=2)."""
+    import tomllib
 
-    path = Path(project_dir) / "tasks.yaml"
-    if not path.exists():
+    experiments_dir = Path(project_dir) / "experiments"
+    if not experiments_dir.exists():
         return []
 
-    try:
-        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return []
-
-    tasks = data.get("tasks") or []
     out: List[TaskSpec] = []
-    for t in tasks:
-        if not isinstance(t, dict):
-            continue
-        tid = str(t.get("id") or "").strip()
-        if not tid:
-            continue
-        out.append(
-            TaskSpec(
-                id=tid,
-                order=(int(t["order"]) if isinstance(t.get("order"), int) else None),
-                dataset=t.get("dataset"),
-                tb_url=t.get("tb_url"),
-                gh_url=t.get("gh_url"),
-                raw=dict(t),
+    seen = set()
+    order = 1
+    for exp_path in sorted(experiments_dir.glob("*.toml")):
+        data = tomllib.loads(exp_path.read_text(encoding="utf-8"))
+        if data.get("schema_version") != 2:
+            raise ValueError(f"experiment must declare schema_version=2: {exp_path}")
+        tasks_data = data.get("tasks") or {}
+        default_dataset = tasks_data.get("default_dataset") or "terminal-bench@2.0"
+        for tid, task_cfg in tasks_data.items():
+            if tid == "default_dataset":
+                continue
+            if not isinstance(task_cfg, dict):
+                raise ValueError(f"task entry must be a table: {exp_path} [{tid}]")
+            task_id = str(tid).strip()
+            if not task_id or task_id in seen:
+                continue
+            seen.add(task_id)
+            dataset = str(task_cfg.get("dataset") or default_dataset)
+            out.append(
+                TaskSpec(
+                    id=task_id,
+                    order=order,
+                    dataset=dataset,
+                    raw={"source": exp_path.name},
+                )
             )
-        )
+            order += 1
 
-    out.sort(key=lambda x: (x.order if x.order is not None else 10_000, x.id))
     return out
 
 

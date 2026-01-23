@@ -9,7 +9,7 @@ description = "Impact analysis for LLM agents - track code dependencies and side
 readme = "README.md"
 license = {text = "MIT"}
 authors = [{name = "ain3sh"}]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -19,7 +19,7 @@ classifiers = [
 ]
 keywords = ["llm", "code-analysis", "impact-analysis", "static-analysis"]
 
-dependencies = ["pyyaml>=6.0"]
+dependencies = ["pyyaml>=6.0", "watchdog>=3.0.0"]
 
 [project.optional-dependencies]
 codecanvas = [
@@ -62,7 +62,7 @@ locagent = [
     "tqdm>=4.60.0",
 ]
 
-terminalbench = ["rich>=13.0", "litellm>=1.0.0"]
+terminalbench = ["rich>=13.0", "litellm>=1.0.0", "watchdog>=3.0.0"]
 
 dev = ["pytest>=8.0", "ruff>=0.6.0", "pyright>=1.1.407"]
 

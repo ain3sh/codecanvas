@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "codecanvas": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "codecanvas.server"],
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      }
+    }
+  }
+}

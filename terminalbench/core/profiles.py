@@ -41,6 +41,14 @@ def load_mcp_config(config_path: Path) -> Dict[str, Any]:
     return json.loads(config_path.read_text())
 
 
+def merge_mcp_configs(configs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    merged: Dict[str, Any] = {"mcpServers": {}}
+    for cfg in configs:
+        for name, server_cfg in cfg.get("mcpServers", {}).items():
+            merged["mcpServers"][name] = server_cfg
+    return merged
+
+
 def filter_mcp_servers(config: Dict[str, Any], enabled_servers: List[str] | None) -> Dict[str, Any]:
     """Filter MCP config to only include enabled servers."""
     if enabled_servers is None:
@@ -164,6 +172,7 @@ def build_profile(
     reasoning: str = DEFAULT_REASONING,
     claude_version: Optional[str] = None,
     mcp_config_path: Optional[Path] = None,
+    mcp_config: Optional[Dict[str, Any]] = None,
     enabled_mcp_servers: Optional[List[str]] = None,
     hooks_path: Optional[Path] = None,
     mcp_git_source: Optional[str] = None,
@@ -176,9 +185,11 @@ def build_profile(
     # Load and filter MCP config, adapting for Harbor environment
     mcp_config_json = None
     mcp_extras = None
-    if mcp_config_path and mcp_config_path.exists():
-        config = load_mcp_config(mcp_config_path)
-        filtered = filter_mcp_servers(config, enabled_mcp_servers)
+    if mcp_config is None and mcp_config_path and mcp_config_path.exists():
+        mcp_config = load_mcp_config(mcp_config_path)
+
+    if mcp_config is not None:
+        filtered = filter_mcp_servers(mcp_config, enabled_mcp_servers)
         adapted = adapt_mcp_config_for_harbor(filtered)
         if adapted.get("mcpServers"):
             mcp_config_json = json.dumps(adapted)

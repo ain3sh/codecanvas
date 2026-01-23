@@ -75,6 +75,7 @@ class HarborRunner:
         env_file: Path | str | None = None,
         build_cache_path: Path | None = None,
         registry_path: Path | None = None,
+        artifact_targets: Optional[Sequence[str]] = None,
     ) -> None:
         self.harbor_bin = harbor_bin  # None = use uvx (default)
         self.output_root = Path(output_root).resolve() if output_root else None
@@ -87,6 +88,7 @@ class HarborRunner:
         self.env_from_file = load_env_file(env_file)
         self.build_cache_path = build_cache_path or CONFIG_DIR / "build-hash.json"
         self.registry_path = Path(registry_path) if registry_path else None
+        self.artifact_targets = list(artifact_targets) if artifact_targets else []
 
     # ------------------------------------------------------------------
     # Build fingerprint helpers
@@ -239,23 +241,14 @@ class HarborRunner:
         runs.append(result.to_dict())
         index_file.write_text(json.dumps({"runs": runs}, indent=2))
 
-    def _mirror_codecanvas_artifacts(self, *, job_dir: Optional[Path], task_id: str) -> None:
-        """Copy CodeCanvas session outputs into results/<batch>/canvas/<trial>/.
-
-        Source:
-          results/<batch>/runs/<job>/<task_id>__*/agent/sessions/codecanvas/
-        Dest:
-          results/<batch>/canvas/<task_id>__*/
-
-        Best-effort: failures should not block the main run.
-        """
-        if not self.output_root or not job_dir or not job_dir.exists():
+    def _mirror_artifacts(self, *, job_dir: Optional[Path], task_id: str, targets: Sequence[str]) -> None:
+        if not self.output_root or not job_dir or not job_dir.exists() or not targets:
             return
 
         batch_dir = self.output_root.parent
-        canvas_root = batch_dir / "canvas"
+        artifacts_root = batch_dir / "artifacts"
         try:
-            canvas_root.mkdir(parents=True, exist_ok=True)
+            artifacts_root.mkdir(parents=True, exist_ok=True)
         except Exception:
             return
 
@@ -269,18 +262,19 @@ class HarborRunner:
             return
 
         for trial_dir in trial_dirs:
-            src = trial_dir / "agent" / "sessions" / "codecanvas"
-            if not src.exists():
-                continue
+            for target in targets:
+                src = trial_dir / "agent" / "sessions" / target
+                if not src.exists():
+                    continue
 
-            dst = canvas_root / trial_dir.name
-            try:
-                if dst.exists():
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-            except Exception:
-                # Copy failures should not block execution.
-                continue
+                dst = artifacts_root / target / trial_dir.name
+                try:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+                except Exception:
+                    continue
 
     def _run_single(
         self,
@@ -294,19 +288,21 @@ class HarborRunner:
         if self.output_root:
             self.output_root.mkdir(parents=True, exist_ok=True)
 
-        if self.output_root and job_name:
+        if self.output_root and job_name and self.artifact_targets:
             try:
                 subprocess.Popen(
                     [
                         sys.executable,
                         "-m",
-                        "terminalbench.harbor.mirror_codecanvas",
+                        "terminalbench.harbor.mirror_artifacts",
                         "--runs-dir",
                         str(self.output_root),
                         "--job-name",
                         job_name,
                         "--task-id",
                         task.id,
+                        "--targets",
+                        *self.artifact_targets,
                     ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
@@ -375,8 +371,7 @@ class HarborRunner:
                 resolved=mean_reward == 1.0 if mean_reward is not None else None,
             )
 
-            # Populate results/<batch>/canvas/<trial>/ when CodeCanvas artifacts exist.
-            self._mirror_codecanvas_artifacts(job_dir=job_dir, task_id=task.id)
+            self._mirror_artifacts(job_dir=job_dir, task_id=task.id, targets=self.artifact_targets)
 
             if last_result.success:
                 self._update_index(last_result)

@@ -2,7 +2,7 @@
 CLI Entry Point for TerminalBench Analytics.
 
 Usage:
-    python -m terminalbench.analytics results/runs/ --output results/analytics/
+    python -m terminalbench.analytics results/<slug>/<batch>/runs --output results/<slug>/<batch>/analytics/
 """
 
 from __future__ import annotations
