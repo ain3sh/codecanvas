@@ -360,11 +360,14 @@ def kill_experiments(argv: Iterable[str] | None = None) -> int:
 
     procs = _collect_processes()
     current_pid = os.getpid()
-    to_kill = [
-        pid
-        for pid, cmd in procs
-        if pid != current_pid and any(key in cmd for key in ("terminalbench", "harbor", "run-experiment"))
-    ]
+    to_kill = []
+    for pid, cmd in procs:
+        if pid == current_pid:
+            continue
+        if "terminalbench.experiments kill" in cmd:
+            continue
+        if any(key in cmd for key in ("terminalbench", "harbor", "run-experiment")):
+            to_kill.append(pid)
     _kill_processes(to_kill)
 
     containers = _list_containers()

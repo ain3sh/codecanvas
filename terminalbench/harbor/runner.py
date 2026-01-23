@@ -3,11 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
@@ -138,39 +138,13 @@ class HarborRunner:
             # Cache failures should not block execution
             pass
 
-    def _build_command(
-        self,
-        task: Task,
-        profile: AgentProfile,
-        output_dir: Optional[Path],
-        force_build: bool,
-        keep_environment: bool,
-        job_name: Optional[str] = None,
-    ) -> List[str]:
+    def _build_job_command(self, config_path: Path) -> List[str]:
         if self.harbor_bin:
             cmd = [self.harbor_bin, "run"]
         else:
             # --python 3.13: modal has hardcoded runtime check blocking 3.14+
             cmd = ["uvx", "--python", "3.13", "harbor", "run"]
-        cmd.extend(["-d", task.dataset, "-t", task.id])
-        cmd.extend(profile.harbor_args())
-        if self.attempts > 1:
-            cmd.extend(["--n-attempts", str(self.attempts)])
-        if output_dir:
-            cmd.extend(["--jobs-dir", str(output_dir)])
-        if job_name:
-            cmd.extend(["--job-name", job_name])
-        if self.parallel > 0:
-            cmd.extend(["-n", str(self.parallel)])
-        if self.container_env:
-            cmd.extend(["--env", self.container_env])
-        # Keep environments by default to avoid rebuild churn (unless user explicitly overrides)
-        if keep_environment and not any(flag in {"--delete", "--no-delete"} for flag in self.extra_flags):
-            cmd.append("--no-delete")
-        if force_build:
-            cmd.append("--force-build")
-        if self.registry_path:
-            cmd.extend(["--registry-path", str(self.registry_path)])
+        cmd.extend(["-c", str(config_path)])
         if self.extra_flags:
             cmd.extend(self.extra_flags)
         return cmd
@@ -181,51 +155,65 @@ class HarborRunner:
         env.update(profile.env())
         return env
 
-    def _find_latest_job_dir(self, output_dir: Optional[Path]) -> Optional[Path]:
-        """Find the most recent job directory created by Harbor."""
-        if not output_dir or not output_dir.exists():
+    def _parse_elapsed(self, start: Optional[str], finish: Optional[str]) -> Optional[float]:
+        if not start or not finish:
             return None
-        for job_dir in sorted(output_dir.iterdir(), reverse=True):
-            if job_dir.is_dir():
-                return job_dir
-        return None
-
-    def _find_result_json(self, job_dir: Optional[Path]) -> Optional[Path]:
-        """Find result.json in Harbor's output structure."""
-        if job_dir:
-            result_file = job_dir / "result.json"
-            if result_file.exists():
-                return result_file
-        return None
-
-    def _find_trajectory(self, job_dir: Optional[Path], task_id: str) -> Optional[Path]:
-        """Find trajectory.json in Harbor's output structure."""
-        if not job_dir:
-            return None
-        # Harbor structure: {job_dir}/{task_id}__*/agent/trajectory.json
-        for trial_dir in job_dir.iterdir():
-            if trial_dir.is_dir() and trial_dir.name.startswith(f"{task_id}__"):
-                trajectory = trial_dir / "agent" / "trajectory.json"
-                if trajectory.exists():
-                    return trajectory
-        return None
-
-    def _parse_results(self, job_dir: Optional[Path], task_id: str) -> dict:
-        """Parse result.json and extract metrics for task."""
-        result_file = self._find_result_json(job_dir)
-        if not result_file:
-            return {}
         try:
-            data = json.loads(result_file.read_text())
-            stats = data.get("stats", {}).get("evals", {})
-            # Find mean reward from any eval that has this task
-            for eval_name, eval_data in stats.items():
-                metrics = eval_data.get("metrics", [])
-                if metrics:
-                    return {"mean_reward": metrics[0].get("mean")}
-            return {}
-        except (json.JSONDecodeError, OSError):
-            return {}
+            start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            finish_dt = datetime.fromisoformat(finish.replace("Z", "+00:00"))
+            return (finish_dt - start_dt).total_seconds()
+        except ValueError:
+            return None
+
+    def _collect_job_results(
+        self,
+        *,
+        job_dir: Path,
+        agent_key: str,
+        command: List[str],
+    ) -> List[RunResult]:
+        results: List[RunResult] = []
+        if not job_dir.exists():
+            return results
+
+        for trial_dir in sorted(job_dir.iterdir()):
+            if not trial_dir.is_dir():
+                continue
+            result_path = trial_dir / "result.json"
+            if not result_path.exists():
+                continue
+            try:
+                data = json.loads(result_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            task_id = str(data.get("task_name") or "").strip() or trial_dir.name.split("__")[0]
+            trajectory = trial_dir / "agent" / "trajectory.json"
+            trajectory_json = trajectory if trajectory.exists() else None
+            reward = None
+            verifier = data.get("verifier_result") or {}
+            rewards = verifier.get("rewards") if isinstance(verifier, dict) else None
+            if isinstance(rewards, dict):
+                reward = rewards.get("reward")
+            elapsed = self._parse_elapsed(data.get("started_at"), data.get("finished_at"))
+
+            results.append(
+                RunResult(
+                    task_id=task_id,
+                    agent_key=agent_key,
+                    exit_code=0 if result_path.exists() else 1,
+                    success=reward == 1.0 if reward is not None else False,
+                    command=command,
+                    elapsed_sec=elapsed or 0.0,
+                    job_dir=job_dir,
+                    results_json=job_dir / "result.json" if (job_dir / "result.json").exists() else None,
+                    trajectory_json=trajectory_json,
+                    accuracy=reward,
+                    resolved=reward == 1.0 if reward is not None else None,
+                )
+            )
+
+        return results
 
     def _update_index(self, result: RunResult) -> None:
         """Update index.json with the run result."""
@@ -241,54 +229,118 @@ class HarborRunner:
         runs.append(result.to_dict())
         index_file.write_text(json.dumps({"runs": runs}, indent=2))
 
-    def _mirror_artifacts(self, *, job_dir: Optional[Path], task_id: str, targets: Sequence[str]) -> None:
-        if not self.output_root or not job_dir or not job_dir.exists() or not targets:
-            return
+    def _group_tasks_by_dataset(self, tasks: Iterable[Task]) -> Dict[str, List[str]]:
+        grouped: Dict[str, List[str]] = {}
+        for task in tasks:
+            grouped.setdefault(task.dataset, []).append(task.id)
+        return grouped
 
-        batch_dir = self.output_root.parent
-        artifacts_root = batch_dir / "artifacts"
-        try:
-            artifacts_root.mkdir(parents=True, exist_ok=True)
-        except Exception:
-            return
+    def _split_dataset(self, dataset: str) -> tuple[str, Optional[str]]:
+        if "@" in dataset:
+            name, version = dataset.rsplit("@", 1)
+            return name, version
+        return dataset, None
 
-        try:
-            trial_dirs = [
-                d
-                for d in job_dir.iterdir()
-                if d.is_dir() and d.name.startswith(f"{task_id}__") and (d / "agent").exists()
-            ]
-        except Exception:
-            return
-
-        for trial_dir in trial_dirs:
-            for target in targets:
-                src = trial_dir / "agent" / "sessions" / target
-                if not src.exists():
-                    continue
-
-                dst = artifacts_root / target / trial_dir.name
-                try:
-                    dst.parent.mkdir(parents=True, exist_ok=True)
-                    if dst.exists():
-                        shutil.rmtree(dst)
-                    shutil.copytree(src, dst)
-                except Exception:
-                    continue
-
-    def _run_single(
+    def _build_job_config(
         self,
-        task: Task,
+        *,
+        job_name: str,
+        tasks: Iterable[Task],
         profile: AgentProfile,
         force_build: bool,
-        keep_environment: bool,
-        job_name: Optional[str] = None,
-    ) -> RunResult:
-        """Run a single task with retry logic."""
+    ) -> dict:
+        datasets = []
+        grouped = self._group_tasks_by_dataset(tasks)
+        for dataset_spec, task_ids in grouped.items():
+            name, version = self._split_dataset(dataset_spec)
+            registry: dict
+            if self.registry_path:
+                registry = {"path": str(self.registry_path)}
+            else:
+                registry = {"url": "https://raw.githubusercontent.com/laude-institute/harbor/main/registry.json"}
+            datasets.append(
+                {
+                    "registry": registry,
+                    "name": name,
+                    "version": version,
+                    "task_names": task_ids,
+                }
+            )
+
+        agent_kwargs: dict[str, object] = {}
+        if profile.mcp_config_json:
+            try:
+                agent_kwargs["mcp_config"] = json.loads(profile.mcp_config_json)
+            except json.JSONDecodeError:
+                agent_kwargs["mcp_config"] = profile.mcp_config_json
+        if profile.hooks_config_json:
+            try:
+                agent_kwargs["hooks_config"] = json.loads(profile.hooks_config_json)
+            except json.JSONDecodeError:
+                agent_kwargs["hooks_config"] = profile.hooks_config_json
+        if profile.reasoning:
+            agent_kwargs["reasoning"] = profile.reasoning
+        if profile.claude_version:
+            agent_kwargs["claude_version"] = profile.claude_version
+        if profile.mcp_git_source:
+            agent_kwargs["mcp_git_source"] = profile.mcp_git_source
+        if profile.mcp_extras:
+            agent_kwargs["mcp_extras"] = profile.mcp_extras
+        if profile.system_prompt:
+            agent_kwargs["system_prompt"] = profile.system_prompt
+
+        config: dict[str, object] = {
+            "job_name": job_name,
+            "jobs_dir": str(self.output_root) if self.output_root else "jobs",
+            "n_attempts": self.attempts,
+            "timeout_multiplier": 1.0,
+            "debug": False,
+            "orchestrator": {
+                "type": "local",
+                "n_concurrent_trials": self.parallel if self.parallel > 0 else 4,
+                "quiet": False,
+                "retry": {"max_retries": self.retries},
+            },
+            "environment": {
+                "type": self.container_env,
+                "force_build": force_build,
+                "delete": False,
+            },
+            "verifier": {"disable": False},
+            "metrics": [],
+            "agents": [
+                {
+                    "name": None,
+                    "import_path": "terminalbench.harbor.agent:ClaudeCodeMCP",
+                    "model_name": profile.model,
+                    "kwargs": agent_kwargs,
+                }
+            ],
+            "datasets": datasets,
+            "tasks": [],
+        }
+        return config
+
+    def _run_profile_job(
+        self,
+        *,
+        tasks: Iterable[Task],
+        profile: AgentProfile,
+        force_build: bool,
+        job_name: str,
+    ) -> List[RunResult]:
         if self.output_root:
             self.output_root.mkdir(parents=True, exist_ok=True)
 
-        if self.output_root and job_name and self.artifact_targets:
+        env = self._env(profile)
+        if "ANTHROPIC_API_KEY" not in env:
+            raise RuntimeError("ANTHROPIC_API_KEY is required for Harbor runs.")
+
+        config = self._build_job_config(job_name=job_name, tasks=tasks, profile=profile, force_build=force_build)
+        config_path = (self.output_root or Path.cwd()) / f"{job_name}.job.json"
+        config_path.write_text(json.dumps(config, indent=2))
+
+        if self.output_root and self.artifact_targets:
             try:
                 subprocess.Popen(
                     [
@@ -299,8 +351,6 @@ class HarborRunner:
                         str(self.output_root),
                         "--job-name",
                         job_name,
-                        "--task-id",
-                        task.id,
                         "--targets",
                         *self.artifact_targets,
                     ],
@@ -311,94 +361,46 @@ class HarborRunner:
             except Exception:
                 pass
 
-        cmd = self._build_command(
-            task,
-            profile,
-            self.output_root,
-            force_build=force_build,
-            keep_environment=keep_environment,
-            job_name=job_name,
-        )
-        env = self._env(profile)
-
+        cmd = self._build_job_command(config_path)
         if self.dry_run:
             print(f"[DRY-RUN] {' '.join(cmd)}")
             env_vars = profile.env()
             if env_vars:
                 print(f"          env: {env_vars}")
-            return RunResult(
-                task_id=task.id,
-                agent_key=profile.key,
-                exit_code=0,
-                success=True,
-                command=cmd,
-                elapsed_sec=0.0,
-            )
+            return [
+                RunResult(
+                    task_id="",
+                    agent_key=profile.key,
+                    exit_code=0,
+                    success=True,
+                    command=cmd,
+                    elapsed_sec=0.0,
+                )
+            ]
 
-        if "ANTHROPIC_API_KEY" not in env:
-            raise RuntimeError("ANTHROPIC_API_KEY is required for Harbor runs.")
+        start = time.time()
+        proc = subprocess.run(cmd, env=env)
+        elapsed = time.time() - start
 
-        last_result = None
-        for attempt in range(1, self.retries + 2):
-            start = time.time()
-            proc = subprocess.run(cmd, env=env)
-            elapsed = time.time() - start
+        job_dir = (self.output_root / job_name) if self.output_root else Path(job_name)
+        results = self._collect_job_results(job_dir=job_dir, agent_key=profile.key, command=cmd)
+        if not results:
+            results = [
+                RunResult(
+                    task_id="",
+                    agent_key=profile.key,
+                    exit_code=proc.returncode,
+                    success=False,
+                    command=cmd,
+                    elapsed_sec=elapsed,
+                    job_dir=job_dir if job_dir.exists() else None,
+                )
+            ]
 
-            # Use explicit job_name path if provided, otherwise fall back to latest
-            if job_name and self.output_root:
-                job_dir = self.output_root / job_name
-                if not job_dir.exists():
-                    job_dir = self._find_latest_job_dir(self.output_root)
-            else:
-                job_dir = self._find_latest_job_dir(self.output_root)
-            result_json = self._find_result_json(job_dir)
-            trajectory_json = self._find_trajectory(job_dir, task.id)
-
-            parsed = self._parse_results(job_dir, task.id)
-            mean_reward = parsed.get("mean_reward")
-
-            last_result = RunResult(
-                task_id=task.id,
-                agent_key=profile.key,
-                exit_code=proc.returncode,
-                success=proc.returncode == 0,
-                command=cmd,
-                elapsed_sec=elapsed,
-                job_dir=job_dir,
-                results_json=result_json,
-                trajectory_json=trajectory_json,
-                accuracy=mean_reward,
-                resolved=mean_reward == 1.0 if mean_reward is not None else None,
-            )
-
-            self._mirror_artifacts(job_dir=job_dir, task_id=task.id, targets=self.artifact_targets)
-
-            if last_result.success:
-                self._update_index(last_result)
-                return last_result
-
-            if attempt <= self.retries:
-                print(f"[RETRY] {task.id} attempt {attempt + 1}/{self.retries + 1}")
-
-        assert last_result is not None
-        self._update_index(last_result)
-        return last_result
-
-    def run_tasks(
-        self,
-        tasks: Iterable[Task],
-        profile: AgentProfile,
-        force_build: bool = False,
-        keep_environment: bool = True,
-        job_name: Optional[str] = None,
-    ) -> List[RunResult]:
-        """Run tasks sequentially (Harbor handles parallelization internally via -n flag)."""
-        results: List[RunResult] = []
-        for task in tasks:
-            result = self._run_single(task, profile, force_build, keep_environment, job_name)
-            # Only force build on first run in a batch
-            force_build = False
-            results.append(result)
+        for result in results:
+            if result.elapsed_sec == 0.0:
+                result.elapsed_sec = elapsed
+            self._update_index(result)
         return results
 
     def run_profiles(
@@ -444,18 +446,15 @@ class HarborRunner:
 
         all_results: List[RunResult] = []
 
-        # Generate unique job names per profile to avoid collisions when running in parallel
-        from datetime import datetime
-
+        # Generate unique job names per profile to avoid collisions
         run_timestamp = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
         job_names = {p.key: f"{run_timestamp}__{p.key}" for p in profiles}
 
         def run_profile(profile: AgentProfile, force_build_flag: bool) -> List[RunResult]:
-            return self.run_tasks(
-                tasks,
-                profile,
+            return self._run_profile_job(
+                tasks=tasks,
+                profile=profile,
                 force_build=force_build_flag,
-                keep_environment=True,
                 job_name=job_names[profile.key],
             )
 

@@ -13,7 +13,6 @@ def _mirror_artifacts(
     *,
     runs_dir: Path,
     job_name: str,
-    task_id: str,
     targets: list[str],
     dest_dirname: str,
 ) -> None:
@@ -28,9 +27,7 @@ def _mirror_artifacts(
         return
 
     try:
-        trial_dirs = [
-            d for d in job_dir.iterdir() if d.is_dir() and d.name.startswith(f"{task_id}__") and (d / "agent").exists()
-        ]
+        trial_dirs = [d for d in job_dir.iterdir() if d.is_dir() and (d / "agent").exists()]
     except Exception:
         return
 
@@ -53,7 +50,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Mirror agent session artifacts after a Harbor run finishes.")
     parser.add_argument("--runs-dir", type=Path, required=True)
     parser.add_argument("--job-name", required=True)
-    parser.add_argument("--task-id", required=True)
     parser.add_argument("--targets", nargs="+", required=True)
     parser.add_argument("--dest-dirname", default="artifacts")
     parser.add_argument("--timeout-seconds", type=float, default=900.0)
@@ -67,7 +63,6 @@ def main() -> int:
         _mirror_artifacts(
             runs_dir=runs_dir,
             job_name=args.job_name,
-            task_id=args.task_id,
             targets=list(args.targets),
             dest_dirname=args.dest_dirname,
         )
@@ -106,7 +101,6 @@ def main() -> int:
     _mirror_artifacts(
         runs_dir=runs_dir,
         job_name=args.job_name,
-        task_id=args.task_id,
         targets=list(args.targets),
         dest_dirname=args.dest_dirname,
     )
