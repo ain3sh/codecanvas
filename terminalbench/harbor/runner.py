@@ -149,10 +149,11 @@ class HarborRunner:
             cmd.extend(self.extra_flags)
         return cmd
 
-    def _env(self, profile: AgentProfile) -> Dict[str, str]:
+    def _env(self, profiles: Iterable[AgentProfile]) -> Dict[str, str]:
         env = os.environ.copy()
         env.update(self.env_from_file)
-        env.update(profile.env())
+        for profile in profiles:
+            env.update(profile.env())
         return env
 
     def _parse_elapsed(self, start: Optional[str], finish: Optional[str]) -> Optional[float]:
@@ -165,13 +166,7 @@ class HarborRunner:
         except ValueError:
             return None
 
-    def _collect_job_results(
-        self,
-        *,
-        job_dir: Path,
-        agent_key: str,
-        command: List[str],
-    ) -> List[RunResult]:
+    def _collect_job_results(self, *, job_dir: Path, command: List[str]) -> List[RunResult]:
         results: List[RunResult] = []
         if not job_dir.exists():
             return results
@@ -188,6 +183,12 @@ class HarborRunner:
                 continue
 
             task_id = str(data.get("task_name") or "").strip() or trial_dir.name.split("__")[0]
+            agent_key = "unknown"
+            config = data.get("config") if isinstance(data, dict) else None
+            if isinstance(config, dict):
+                agent_cfg = config.get("agent")
+                if isinstance(agent_cfg, dict) and agent_cfg.get("name"):
+                    agent_key = str(agent_cfg.get("name"))
             trajectory = trial_dir / "agent" / "trajectory.json"
             trajectory_json = trajectory if trajectory.exists() else None
             reward = None
@@ -246,7 +247,7 @@ class HarborRunner:
         *,
         job_name: str,
         tasks: Iterable[Task],
-        profile: AgentProfile,
+        profiles: Iterable[AgentProfile],
         force_build: bool,
     ) -> dict:
         datasets = []
@@ -267,27 +268,38 @@ class HarborRunner:
                 }
             )
 
-        agent_kwargs: dict[str, object] = {}
-        if profile.mcp_config_json:
-            try:
-                agent_kwargs["mcp_config"] = json.loads(profile.mcp_config_json)
-            except json.JSONDecodeError:
-                agent_kwargs["mcp_config"] = profile.mcp_config_json
-        if profile.hooks_config_json:
-            try:
-                agent_kwargs["hooks_config"] = json.loads(profile.hooks_config_json)
-            except json.JSONDecodeError:
-                agent_kwargs["hooks_config"] = profile.hooks_config_json
-        if profile.reasoning:
-            agent_kwargs["reasoning"] = profile.reasoning
-        if profile.claude_version:
-            agent_kwargs["claude_version"] = profile.claude_version
-        if profile.mcp_git_source:
-            agent_kwargs["mcp_git_source"] = profile.mcp_git_source
-        if profile.mcp_extras:
-            agent_kwargs["mcp_extras"] = profile.mcp_extras
-        if profile.system_prompt:
-            agent_kwargs["system_prompt"] = profile.system_prompt
+        agents = []
+        for profile in profiles:
+            agent_kwargs: dict[str, object] = {}
+            if profile.mcp_config_json:
+                try:
+                    agent_kwargs["mcp_config"] = json.loads(profile.mcp_config_json)
+                except json.JSONDecodeError:
+                    agent_kwargs["mcp_config"] = profile.mcp_config_json
+            if profile.hooks_config_json:
+                try:
+                    agent_kwargs["hooks_config"] = json.loads(profile.hooks_config_json)
+                except json.JSONDecodeError:
+                    agent_kwargs["hooks_config"] = profile.hooks_config_json
+            if profile.reasoning:
+                agent_kwargs["reasoning"] = profile.reasoning
+            if profile.claude_version:
+                agent_kwargs["claude_version"] = profile.claude_version
+            if profile.mcp_git_source:
+                agent_kwargs["mcp_git_source"] = profile.mcp_git_source
+            if profile.mcp_extras:
+                agent_kwargs["mcp_extras"] = profile.mcp_extras
+            if profile.system_prompt:
+                agent_kwargs["system_prompt"] = profile.system_prompt
+
+            agents.append(
+                {
+                    "name": profile.key,
+                    "import_path": "terminalbench.harbor.agent:ClaudeCodeMCP",
+                    "model_name": profile.model,
+                    "kwargs": agent_kwargs,
+                }
+            )
 
         config: dict[str, object] = {
             "job_name": job_name,
@@ -308,35 +320,29 @@ class HarborRunner:
             },
             "verifier": {"disable": False},
             "metrics": [],
-            "agents": [
-                {
-                    "name": None,
-                    "import_path": "terminalbench.harbor.agent:ClaudeCodeMCP",
-                    "model_name": profile.model,
-                    "kwargs": agent_kwargs,
-                }
-            ],
+            "agents": agents,
             "datasets": datasets,
             "tasks": [],
         }
         return config
 
-    def _run_profile_job(
+    def _run_job(
         self,
         *,
         tasks: Iterable[Task],
-        profile: AgentProfile,
+        profiles: Iterable[AgentProfile],
         force_build: bool,
         job_name: str,
     ) -> List[RunResult]:
         if self.output_root:
             self.output_root.mkdir(parents=True, exist_ok=True)
 
-        env = self._env(profile)
+        profiles_list = list(profiles)
+        env = self._env(profiles_list)
         if "ANTHROPIC_API_KEY" not in env:
             raise RuntimeError("ANTHROPIC_API_KEY is required for Harbor runs.")
 
-        config = self._build_job_config(job_name=job_name, tasks=tasks, profile=profile, force_build=force_build)
+        config = self._build_job_config(job_name=job_name, tasks=tasks, profiles=profiles_list, force_build=force_build)
         config_path = (self.output_root or Path.cwd()) / f"{job_name}.job.json"
         config_path.write_text(json.dumps(config, indent=2))
 
@@ -364,13 +370,10 @@ class HarborRunner:
         cmd = self._build_job_command(config_path)
         if self.dry_run:
             print(f"[DRY-RUN] {' '.join(cmd)}")
-            env_vars = profile.env()
-            if env_vars:
-                print(f"          env: {env_vars}")
             return [
                 RunResult(
                     task_id="",
-                    agent_key=profile.key,
+                    agent_key="",
                     exit_code=0,
                     success=True,
                     command=cmd,
@@ -383,12 +386,12 @@ class HarborRunner:
         elapsed = time.time() - start
 
         job_dir = (self.output_root / job_name) if self.output_root else Path(job_name)
-        results = self._collect_job_results(job_dir=job_dir, agent_key=profile.key, command=cmd)
+        results = self._collect_job_results(job_dir=job_dir, command=cmd)
         if not results:
             results = [
                 RunResult(
                     task_id="",
-                    agent_key=profile.key,
+                    agent_key="",
                     exit_code=proc.returncode,
                     success=False,
                     command=cmd,
@@ -409,11 +412,7 @@ class HarborRunner:
         profiles: List[AgentProfile],
         profiles_parallel: int = 0,
     ) -> List[RunResult]:
-        """Run a list of profiles over the tasks, reusing environment builds when possible.
-
-        If profiles_parallel > 0, runs profiles concurrently when cached builds match; otherwise
-        runs sequentially, forcing rebuilds only for profiles whose fingerprints changed.
-        """
+        """Run a single Harbor job containing all requested profiles."""
         if not profiles:
             return []
 
@@ -428,87 +427,22 @@ class HarborRunner:
             cached = cached_map.get(profile.key)
             return cached != profile_fingerprints[profile.key]
 
-        # Prefer a "superset" profile (with MCP install/version) to seed the environment.
-        def is_superset_candidate(p: AgentProfile) -> bool:
-            return bool(p.mcp_git_source or p.claude_version)
+        force_build = any(profile_needs_rebuild(p) for p in profiles)
+        if env_force_rebuild:
+            force_build = True
 
-        canonical = next((p for p in profiles if is_superset_candidate(p)), profiles[0])
-
-        def is_compatible_with_canonical(p: AgentProfile) -> bool:
-            # A baseline profile without extra install requirements can run atop the canonical env.
-            if p is canonical:
-                return True
-            if p.mcp_git_source:
-                return False
-            if p.claude_version and p.claude_version != canonical.claude_version:
-                return False
-            return True
-
-        all_results: List[RunResult] = []
-
-        # Generate unique job names per profile to avoid collisions
         run_timestamp = datetime.now().strftime("%Y-%m-%d__%H-%M-%S")
-        job_names = {p.key: f"{run_timestamp}__{p.key}" for p in profiles}
+        job_name = f"{run_timestamp}__profiles"
 
-        def run_profile(profile: AgentProfile, force_build_flag: bool) -> List[RunResult]:
-            return self._run_profile_job(
-                tasks=tasks,
-                profile=profile,
-                force_build=force_build_flag,
-                job_name=job_names[profile.key],
-            )
+        results = self._run_job(
+            tasks=tasks,
+            profiles=profiles,
+            force_build=force_build,
+            job_name=job_name,
+        )
 
-        # Determine if any rebuild is needed at all.
-        any_rebuild = any(profile_needs_rebuild(p) for p in profiles)
+        for profile in profiles:
+            cached_map[profile.key] = profile_fingerprints[profile.key]
+        self._store_fingerprints(cached_map)
 
-        if any_rebuild:
-            # First, ensure the canonical superset env is built.
-            all_results.extend(run_profile(canonical, True))
-            cached_map[canonical.key] = profile_fingerprints[canonical.key]
-            self._store_fingerprints(cached_map)
-
-            remaining = [p for p in profiles if p is not canonical]
-
-            # Profiles compatible with canonical can run without rebuild even if fingerprint differs.
-            compatible = [p for p in remaining if is_compatible_with_canonical(p)]
-            incompatible = [p for p in remaining if p not in compatible]
-
-            # Run incompatible (truly different installs) sequentially with rebuild.
-            for profile in incompatible:
-                needs = profile_needs_rebuild(profile)
-                all_results.extend(run_profile(profile, needs))
-                cached_map[profile.key] = profile_fingerprints[profile.key]
-                self._store_fingerprints(cached_map)
-
-            # Run compatible profiles; allow parallel if requested.
-            if compatible:
-                if profiles_parallel and profiles_parallel > 0:
-                    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                    with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
-                        futures = [pool.submit(run_profile, p, False) for p in compatible]
-                        for fut in as_completed(futures):
-                            all_results.extend(fut.result())
-                else:
-                    for profile in compatible:
-                        all_results.extend(run_profile(profile, False))
-
-            # Cache updated fingerprints for all profiles that ran.
-            for p in compatible:
-                cached_map[p.key] = profile_fingerprints[p.key]
-            self._store_fingerprints(cached_map)
-        else:
-            # Cached builds match: run all profiles in parallel if requested.
-            if profiles_parallel and profiles_parallel > 0:
-                from concurrent.futures import ThreadPoolExecutor, as_completed
-
-                with ThreadPoolExecutor(max_workers=profiles_parallel) as pool:
-                    futures = [pool.submit(run_profile, p, False) for p in profiles]
-                    for fut in as_completed(futures):
-                        all_results.extend(fut.result())
-            else:
-                for profile in profiles:
-                    all_results.extend(run_profile(profile, False))
-            self._store_fingerprints(profile_fingerprints)
-
-        return all_results
+        return results
