@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -14,6 +16,8 @@ from typing import Dict, Iterable, List, Optional, Sequence
 from terminalbench.core.config import CONFIG_DIR
 from terminalbench.core.profiles import AgentProfile
 from terminalbench.core.tasks import Task
+
+logger = logging.getLogger(__name__)
 
 
 def load_env_file(env_file: Path | str | None) -> Dict[str, str]:
@@ -76,6 +80,7 @@ class HarborRunner:
         build_cache_path: Path | None = None,
         registry_path: Path | None = None,
         artifact_targets: Optional[Sequence[str]] = None,
+        run_timeout_sec: int | None = None,
     ) -> None:
         self.harbor_bin = harbor_bin  # None = use uvx (default)
         self.output_root = Path(output_root).resolve() if output_root else None
@@ -89,6 +94,14 @@ class HarborRunner:
         self.build_cache_path = build_cache_path or CONFIG_DIR / "build-hash.json"
         self.registry_path = Path(registry_path) if registry_path else None
         self.artifact_targets = list(artifact_targets) if artifact_targets else []
+        self._index_lock = threading.Lock()
+        env_timeout = os.environ.get("TERMINALBENCH_RUN_TIMEOUT_SEC")
+        if run_timeout_sec is None and env_timeout:
+            try:
+                run_timeout_sec = int(env_timeout)
+            except ValueError:
+                run_timeout_sec = None
+        self.run_timeout_sec = run_timeout_sec if run_timeout_sec is not None else 585
 
     # ------------------------------------------------------------------
     # Build fingerprint helpers
@@ -207,7 +220,7 @@ class HarborRunner:
                     command=command,
                     elapsed_sec=elapsed or 0.0,
                     job_dir=job_dir,
-                    results_json=job_dir / "result.json" if (job_dir / "result.json").exists() else None,
+                    results_json=result_path,
                     trajectory_json=trajectory_json,
                     accuracy=reward,
                     resolved=reward == 1.0 if reward is not None else None,
@@ -216,19 +229,54 @@ class HarborRunner:
 
         return results
 
+    def _index_key(self, entry: Dict) -> str:
+        for key in ("results_json", "trajectory_json"):
+            value = entry.get(key)
+            if value:
+                return f"{key}:{value}"
+        command = " ".join(entry.get("command") or [])
+        return f"fallback:{entry.get('task_id')}:{entry.get('agent_key')}:{command}"
+
     def _update_index(self, result: RunResult) -> None:
         """Update index.json with the run result."""
         if not self.output_root:
             return
         index_file = self.output_root / "index.json"
-        runs = []
-        if index_file.exists():
-            try:
-                runs = json.loads(index_file.read_text()).get("runs", [])
-            except (json.JSONDecodeError, OSError):
-                runs = []
-        runs.append(result.to_dict())
-        index_file.write_text(json.dumps({"runs": runs}, indent=2))
+        with self._index_lock:
+            runs = []
+            if index_file.exists():
+                try:
+                    runs = json.loads(index_file.read_text()).get("runs", [])
+                except (json.JSONDecodeError, OSError):
+                    runs = []
+            existing_keys = {self._index_key(entry) for entry in runs}
+            entry = result.to_dict()
+            key = self._index_key(entry)
+            if key in existing_keys:
+                return
+            runs.append(entry)
+            index_file.write_text(json.dumps({"runs": runs}, indent=2))
+
+    def _start_index_watcher(self, job_dir: Path, command: List[str]) -> tuple[threading.Event, threading.Thread]:
+        stop_event = threading.Event()
+
+        def _poll() -> None:
+            while not stop_event.is_set():
+                try:
+                    results = self._collect_job_results(job_dir=job_dir, command=command)
+                    for result in results:
+                        self._update_index(result)
+                except Exception:
+                    logger.exception(
+                        "Index watcher failed (job_dir=%s, command=%s)",
+                        job_dir,
+                        " ".join(command),
+                    )
+                stop_event.wait(5)
+
+        thread = threading.Thread(target=_poll, name="harbor-index-watcher", daemon=True)
+        thread.start()
+        return stop_event, thread
 
     def _group_tasks_by_dataset(self, tasks: Iterable[Task]) -> Dict[str, List[str]]:
         grouped: Dict[str, List[str]] = {}
@@ -382,17 +430,35 @@ class HarborRunner:
             ]
 
         start = time.time()
-        proc = subprocess.run(cmd, env=env)
+        job_dir = (self.output_root / job_name) if self.output_root else Path(job_name)
+        job_dir.mkdir(parents=True, exist_ok=True)
+        stop_event, watcher = self._start_index_watcher(job_dir, cmd)
+
+        returncode = 0
+        try:
+            proc = subprocess.run(cmd, env=env, timeout=self.run_timeout_sec)
+            returncode = proc.returncode
+        except subprocess.TimeoutExpired:
+            returncode = 124
+        except (FileNotFoundError, PermissionError, OSError) as exc:
+            returncode = 127
+            print(f"[harbor] Failed to run command: {exc}", file=sys.stderr)
+        except Exception as exc:
+            returncode = 1
+            print(f"[harbor] Unexpected error during run: {exc}", file=sys.stderr)
+        finally:
+            stop_event.set()
+            watcher.join(timeout=5)
+
         elapsed = time.time() - start
 
-        job_dir = (self.output_root / job_name) if self.output_root else Path(job_name)
         results = self._collect_job_results(job_dir=job_dir, command=cmd)
         if not results:
             results = [
                 RunResult(
                     task_id="",
                     agent_key="",
-                    exit_code=proc.returncode,
+                    exit_code=returncode,
                     success=False,
                     command=cmd,
                     elapsed_sec=elapsed,
