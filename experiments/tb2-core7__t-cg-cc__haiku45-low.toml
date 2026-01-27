@@ -46,3 +46,4 @@ mcp_servers = ["codegraph"]
 [profiles.codecanvas]
 mcp_servers = ["codecanvas"]
 hooks = "codecanvas/hooks.json"
+install_r_languageserver = false

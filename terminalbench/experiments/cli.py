@@ -80,6 +80,12 @@ def _build_profiles(
         reasoning = profile.reasoning or cfg.defaults.reasoning
         claude_version = profile.claude_version or cfg.defaults.claude_version
 
+        install_r_languageserver = (
+            profile.install_r_languageserver
+            if profile.install_r_languageserver is not None
+            else cfg.defaults.install_r_languageserver
+        )
+
         no_mcp = bool(profile.no_mcp)
         default_servers = cfg.defaults.mcp_servers or []
         mcp_servers = profile.mcp_servers if profile.mcp_servers is not None else default_servers
@@ -113,6 +119,7 @@ def _build_profiles(
                 mcp_git_source=profile.mcp_git_source or cfg.defaults.mcp_git_source,
                 github_token=github_token,
                 system_prompt=system_prompt,
+                install_r_languageserver=install_r_languageserver,
             )
         )
     return profiles

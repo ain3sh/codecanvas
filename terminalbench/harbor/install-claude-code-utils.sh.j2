@@ -95,6 +95,7 @@ log "Skipping build-time multilspy warmup; CodeCanvas warms at SessionStart"
 {% if 'codecanvas' in _extras %}
 # CodeCanvas custom (non-multilspy) language servers.
 # sh: bash-language-server already installed via npm above.
+{% if install_r_languageserver %}
 # r: requires R base + languageserver package.
 if [ -d /app ] && find /app -type f \( -name '*.R' -o -name '*.r' -o -name '*.Rmd' -o -name '*.Rmarkdown' \) -print -quit | grep -q .; then
     log_start "R languageserver (custom LSP)"
@@ -106,6 +107,9 @@ if [ -d /app ] && find /app -type f \( -name '*.R' -o -name '*.r' -o -name '*.Rm
 else
     log "Skipping R languageserver; no R files detected in /app"
 fi
+{% else %}
+log "Skipping R languageserver; disabled by profile config"
+{% endif %}
 {% else %}
 log "CodeCanvas not enabled; skipping R languageserver"
 {% endif %}

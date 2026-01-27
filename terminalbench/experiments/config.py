@@ -45,6 +45,7 @@ class DefaultsConfig:
     hooks: Optional[Path] = None
     mcp_servers: Optional[List[str]] = None
     claude_version: Optional[str] = None
+    install_r_languageserver: bool = False
 
 
 @dataclass
@@ -62,6 +63,7 @@ class ProfileConfig:
     mcp_servers: Optional[List[str]] = None
     hooks: Optional[Path] = None
     mcp_git_source: Optional[str] = None
+    install_r_languageserver: Optional[bool] = None
 
 
 @dataclass
@@ -141,6 +143,7 @@ def load_experiment(path: Path, project_root: Path) -> ExperimentConfig:
         hooks=_resolve_path(project_root, defaults_data.get("hooks") or None),
         mcp_servers=list(defaults_data.get("mcp_servers") or []) or None,
         claude_version=defaults_data.get("claude_version") or None,
+        install_r_languageserver=bool(defaults_data.get("install_r_languageserver", False)),
     )
 
     artifacts_data = raw.get("artifacts") or {}
@@ -157,6 +160,7 @@ def load_experiment(path: Path, project_root: Path) -> ExperimentConfig:
         key = str(key).strip()
         if not key:
             raise ValueError("profile key is required")
+        install_r_languageserver = entry["install_r_languageserver"] if "install_r_languageserver" in entry else None
         profiles.append(
             ProfileConfig(
                 key=key,
@@ -167,6 +171,7 @@ def load_experiment(path: Path, project_root: Path) -> ExperimentConfig:
                 mcp_servers=list(entry.get("mcp_servers") or []) or None,
                 hooks=_resolve_path(project_root, entry.get("hooks") or None),
                 mcp_git_source=entry.get("mcp_git_source") or None,
+                install_r_languageserver=install_r_languageserver,
             )
         )
 

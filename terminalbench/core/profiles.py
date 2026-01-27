@@ -95,6 +95,7 @@ class AgentProfile:
     hooks_config_json: Optional[str] = None  # JSON string of hooks config
     mcp_git_source: Optional[str] = None  # Git URL for MCP server installation
     mcp_extras: Optional[str] = None  # Comma-separated extras (e.g. "codecanvas,locagent")
+    install_r_languageserver: bool = False
     system_prompt: Optional[str] = None  # System prompt (e.g., from USAGE.md)
     extra_env: Dict[str, str] = field(default_factory=dict)
 
@@ -128,6 +129,10 @@ class AgentProfile:
         # Pass MCP extras to the install template (selective pip install)
         if self.mcp_extras:
             args.extend(["--ak", f"mcp_extras={self.mcp_extras}"])
+
+        # Optional: install R languageserver (CodeCanvas-only)
+        if self.install_r_languageserver:
+            args.extend(["--ak", "install_r_languageserver=true"])
 
         # Pass system prompt
         if self.system_prompt:
@@ -179,6 +184,7 @@ def build_profile(
     github_token: Optional[str] = None,
     system_prompt: Optional[str] = None,
     extra_env: Optional[Dict[str, str]] = None,
+    install_r_languageserver: bool = False,
 ) -> AgentProfile:
     """Build an agent profile with MCP and hooks configuration."""
 
@@ -223,6 +229,7 @@ def build_profile(
         hooks_config_json=hooks_config_json,
         mcp_git_source=mcp_git_source,
         mcp_extras=mcp_extras,
+        install_r_languageserver=install_r_languageserver,
         system_prompt=system_prompt,
         extra_env=env,
     )

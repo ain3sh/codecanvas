@@ -47,6 +47,7 @@ class ClaudeCodeMCP(ClaudeCode):
         claude_version: str | None = None,
         mcp_git_source: str | None = None,
         mcp_extras: str | None = None,
+        install_r_languageserver: bool = False,
         system_prompt: str | None = None,
         **kwargs: Any,
     ):
@@ -58,6 +59,7 @@ class ClaudeCodeMCP(ClaudeCode):
         self.claude_version = claude_version
         self.mcp_git_source = mcp_git_source
         self.mcp_extras = mcp_extras
+        self.install_r_languageserver = install_r_languageserver
         self.system_prompt = system_prompt
 
     @staticmethod
@@ -76,6 +78,7 @@ class ClaudeCodeMCP(ClaudeCode):
             "claude_version": self.claude_version or self._version,
             "mcp_git_source": self.mcp_git_source,
             "mcp_extras": self.mcp_extras,
+            "install_r_languageserver": self.install_r_languageserver,
         }
 
     async def setup(self, environment: BaseEnvironment) -> None:

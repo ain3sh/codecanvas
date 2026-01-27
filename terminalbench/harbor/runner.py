@@ -123,6 +123,8 @@ class HarborRunner:
         h.update(template_bytes)
         h.update((profile.mcp_git_source or "").encode())
         h.update((profile.claude_version or "").encode())
+        h.update((profile.mcp_extras or "").encode())
+        h.update(b"r1" if profile.install_r_languageserver else b"r0")
         h.update(b"gh" if github_token_present else b"nogh")
         return h.hexdigest()
 
@@ -337,6 +339,7 @@ class HarborRunner:
                 agent_kwargs["mcp_git_source"] = profile.mcp_git_source
             if profile.mcp_extras:
                 agent_kwargs["mcp_extras"] = profile.mcp_extras
+            agent_kwargs["install_r_languageserver"] = profile.install_r_languageserver
             if profile.system_prompt:
                 agent_kwargs["system_prompt"] = profile.system_prompt
 
