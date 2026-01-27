@@ -96,12 +96,23 @@ class HarborRunner:
         self.artifact_targets = list(artifact_targets) if artifact_targets else []
         self._index_lock = threading.Lock()
         env_timeout = os.environ.get("TERMINALBENCH_RUN_TIMEOUT_SEC")
-        if run_timeout_sec is None and env_timeout:
-            try:
-                run_timeout_sec = int(env_timeout)
-            except ValueError:
-                run_timeout_sec = None
-        self.run_timeout_sec = run_timeout_sec if run_timeout_sec is not None else 585
+
+        resolved_timeout: int | None
+        if run_timeout_sec is None:
+            if env_timeout:
+                try:
+                    resolved_timeout = int(env_timeout)
+                except ValueError:
+                    resolved_timeout = 585
+            else:
+                resolved_timeout = 585
+        else:
+            resolved_timeout = run_timeout_sec
+
+        if resolved_timeout <= 0:
+            resolved_timeout = None
+
+        self.run_timeout_sec = resolved_timeout
 
     # ------------------------------------------------------------------
     # Build fingerprint helpers

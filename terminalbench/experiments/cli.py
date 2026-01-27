@@ -189,6 +189,7 @@ def run_experiment(argv: Iterable[str] | None = None) -> int:
         env_file=env_file,
         registry_path=cfg.run.registry_path,
         artifact_targets=cfg.artifacts.targets,
+        run_timeout_sec=cfg.run.run_timeout_sec,
     )
 
     metadata = {
@@ -209,6 +210,7 @@ def run_experiment(argv: Iterable[str] | None = None) -> int:
             "registry_path": str(cfg.run.registry_path) if cfg.run.registry_path else None,
             "extra_flags": cfg.run.extra_flags,
             "force_rebuild": cfg.run.force_rebuild,
+            "run_timeout_sec": cfg.run.run_timeout_sec,
             "dry_run": args.dry_run,
         },
         "tasks": [t.id for t in tasks],

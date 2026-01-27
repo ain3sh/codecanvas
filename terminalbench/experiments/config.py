@@ -22,6 +22,7 @@ class RunConfig:
     registry_path: Optional[Path] = None
     extra_flags: List[str] = field(default_factory=list)
     force_rebuild: bool = False
+    run_timeout_sec: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,7 @@ def load_experiment(path: Path, project_root: Path) -> ExperimentConfig:
         ),
         extra_flags=list(run_data.get("extra_flags") or []),
         force_rebuild=bool(run_data.get("force_rebuild") or False),
+        run_timeout_sec=(int(run_data["run_timeout_sec"]) if "run_timeout_sec" in run_data else None),
     )
 
     tasks_data = raw.get("tasks") or {}
